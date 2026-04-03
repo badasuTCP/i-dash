@@ -1,0 +1,175 @@
+import axios from 'axios';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 15000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Request interceptor - add auth token
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Response interceptor - handle 401 and refresh token
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      try {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (refreshToken) {
+          const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+            refresh_token: refreshToken,
+          });
+
+          const { access_token } = response.data;
+          localStorage.setItem('token', access_token);
+          apiClient.defaults.headers.common.Authorization = `Bearer ${access_token}`;
+
+          return apiClient(originalRequest);
+        }
+      } catch (refreshError) {
+        // Redirect to login
+        localStorage.removeItem('token');
+        localStorage.removeItem('refresh_token');
+        window.location.href = '/login';
+        return Promise.reject(refreshError);
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+// Auth endpoints
+export const authAPI = {
+  login: (email, password) =>
+    apiClient.post('/auth/login', { email, password }),
+  register: (email, password, firstName, lastName) =>
+    apiClient.post('/auth/register', {
+      email,
+      password,
+      first_name: firstName,
+      last_name: lastName,
+    }),
+  logout: () => apiClient.post('/auth/logout'),
+  refreshToken: (refreshToken) =>
+    apiClient.post('/auth/refresh', { refresh_token: refreshToken }),
+  me: () => apiClient.get('/users/me'),
+};
+
+// Dashboard endpoints
+export const dashboardAPI = {
+  getOverview: (startDate, endDate) =>
+    apiClient.get('/dashboard/overview', {
+      params: { start_date: startDate, end_date: endDate },
+    }),
+  getScorecards: (startDate, endDate) =>
+    apiClient.get('/dashboard/scorecards', {
+      params: { start_date: startDate, end_date: endDate },
+    }),
+  getRevenue: (startDate, endDate, granularity = 'daily') =>
+    apiClient.get('/dashboard/revenue', {
+      params: { start_date: startDate, end_date: endDate, granularity },
+    }),
+  getAds: (startDate, endDate, platform = null) =>
+    apiClient.get('/dashboard/ads', {
+      params: { start_date: startDate, end_date: endDate, platform },
+    }),
+  getHubspot: (startDate, endDate) =>
+    apiClient.get('/dashboard/hubspot', {
+      params: { start_date: startDate, end_date: endDate },
+    }),
+  getMarketing: (startDate, endDate) =>
+    apiClient.get('/dashboard/marketing', {
+      params: { start_date: startDate, end_date: endDate },
+    }),
+  getSales: (startDate, endDate) =>
+    apiClient.get('/dashboard/sales', {
+      params: { start_date: startDate, end_date: endDate },
+    }),
+  getExecutive: (startDate, endDate) =>
+    apiClient.get('/dashboard/executive', {
+      params: { start_date: startDate, end_date: endDate },
+    }),
+};
+
+// Pipeline endpoints
+export const pipelinesAPI = {
+  getAll: () => apiClient.get('/pipelines'),
+  getById: (id) => apiClient.get(`/pipelines/${id}`),
+  create: (data) => apiClient.post('/pipelines', data),
+  update: (id, data) => apiClient.put(`/pipelines/${id}`, data),
+  delete: (id) => apiClient.delete(`/pipelines/${id}`),
+  getStages: (pipelineId) => apiClient.get(`/pipelines/${pipelineId}/stages`),
+  getDealsByStage: (pipelineId) =>
+    apiClient.get(`/pipelines/${pipelineId}/deals-by-stage`),
+};
+
+// AI endpoints
+export const aiAPI = {
+  generateInsight: (data) => apiClient.post('/ai/insights', data),
+  analyzeData: (data) => apiClient.post('/ai/analyze', data),
+  predictTrends: (data) => apiClient.post('/ai/predict', data),
+  chat: (message, context = null) =>
+    apiClient.post('/ai/chat', { message, context }),
+};
+
+// Users endpoints
+export const usersAPI = {
+  getProfile: () => apiClient.get('/users/me'),
+  updateProfile: (data) => apiClient.put('/users/me', data),
+  changePassword: (oldPassword, newPassword) =>
+    apiClient.post('/users/change-password', { old_password: oldPassword, new_password: newPassword }),
+  getAll: () => apiClient.get('/users'),
+  getById: (id) => apiClient.get(`/users/${id}`),
+};
+
+// Integrations endpoints
+export const integrationsAPI = {
+  getAll: () => apiClient.get('/integrations'),
+  getStatus: (provider) => apiClient.get(`/integrations/${provider}/status`),
+  connect: (provider, credentials) =>
+    apiClient.post(`/integrations/${provider}/connect`, credentials),
+  disconnect: (provider) => apiClient.post(`/integrations/${provider}/disconnect`),
+  sync: (provider) => apiClient.post(`/integrations/${provider}/sync`),
+};
+
+// Data sources endpoints
+export const dataSourcesAPI = {
+  getAll: () => apiClient.get('/data-sources'),
+  getById: (id) => apiClient.get(`/data-sources/${id}`),
+  create: (data) => apiClient.post('/data-sources', data),
+  update: (id, data) => apiClient.put(`/data-sources/${id}`, data),
+  delete: (id) => apiClient.delete(`/data-sources/${id}`),
+  test: (id) => apiClient.post(`/data-sources/${id}/test`),
+};
+
+// Reports endpoints
+export const reportsAPI = {
+  getAll: () => apiClient.get('/reports'),
+  getById: (id) => apiClient.get(`/reports/${id}`),
+  create: (data) => apiClient.post('/reports', data),
+  update: (id, data) => apiClient.put(`/reports/${id}`, data),
+  delete: (id) => apiClient.delete(`/reports/${id}`),
+  export: (id, format = 'pdf') => apiClient.get(`/reports/${id}/export`, { params: { format } }),
+  schedule: (id, schedule) => apiClient.post(`/reports/${id}/schedule`, schedule),
+};
+
+export default apiClient;
