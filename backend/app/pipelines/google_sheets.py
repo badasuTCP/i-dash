@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import gspread
-from gspread.exceptions import GspreadException
+from gspread.exceptions import GSpreadException
 from gspread.worksheet import Worksheet
 
 from app.core.config import settings
@@ -119,7 +119,7 @@ class GoogleSheetsPipeline(BasePipeline):
 
             return {"worksheets": worksheets_data}
 
-        except GspreadException as e:
+        except GSpreadException as e:
             self.logger.error(f"Google Sheets API error: {str(e)}")
             raise
         except Exception as e:
