@@ -20,16 +20,24 @@ import SaniTredDashboard from './pages/sanitred/SaniTredDashboard';
 import SaniTredWebAnalytics from './pages/sanitred/SaniTredWebAnalytics';
 import SaniTredMarketing from './pages/sanitred/SaniTredMarketing';
 
+// Pages - Sani-Tred (Retail Breakdown)
+import SaniTredRetail from './pages/sanitred/SaniTredRetail';
+
 // Pages - I-BOS (Contractor)
 import IBOSSDashboard from './pages/iboss/IBOSSDashboard';
 import IBOSSWebAnalytics from './pages/iboss/IBOSSWebAnalytics';
 import IBOSSMarketing from './pages/iboss/IBOSSMarketing';
+import IBOSContractors from './pages/iboss/IBOSContractors';
 
 // Utility Pages
 import PipelinesPage from './pages/PipelinesPage';
 import AccountManagement from './pages/AccountManagement';
 import SettingsPage from './pages/SettingsPage';
+import AdminControls from './pages/AdminControls';
 import LoginPage from './components/auth/LoginPage';
+
+// Context
+import { DashboardConfigProvider } from './context/DashboardConfigContext';
 
 // Protected route wrapper
 const ProtectedPageRoute = ({ children, requiredRole }) => {
@@ -62,11 +70,13 @@ const AppContent = () => {
       <Route path="/dashboard/sanitred" element={<ProtectedPageRoute><SaniTredDashboard /></ProtectedPageRoute>} />
       <Route path="/dashboard/sanitred/web-analytics" element={<ProtectedPageRoute><SaniTredWebAnalytics /></ProtectedPageRoute>} />
       <Route path="/dashboard/sanitred/marketing" element={<ProtectedPageRoute><SaniTredMarketing /></ProtectedPageRoute>} />
+      <Route path="/dashboard/sanitred/retail" element={<ProtectedPageRoute><SaniTredRetail /></ProtectedPageRoute>} />
 
       {/* I-BOS (Contractor) - routes use /ibos path */}
       <Route path="/dashboard/ibos" element={<ProtectedPageRoute><IBOSSDashboard /></ProtectedPageRoute>} />
       <Route path="/dashboard/ibos/web-analytics" element={<ProtectedPageRoute><IBOSSWebAnalytics /></ProtectedPageRoute>} />
       <Route path="/dashboard/ibos/marketing" element={<ProtectedPageRoute><IBOSSMarketing /></ProtectedPageRoute>} />
+      <Route path="/dashboard/ibos/contractors" element={<ProtectedPageRoute><IBOSContractors /></ProtectedPageRoute>} />
 
       {/* Legacy /iboss routes redirect to /ibos */}
       <Route path="/dashboard/iboss/*" element={<Navigate to="/dashboard/ibos" replace />} />
@@ -75,6 +85,7 @@ const AppContent = () => {
       <Route path="/dashboard/pipelines" element={<ProtectedPageRoute requiredRole="data-analyst"><PipelinesPage /></ProtectedPageRoute>} />
       <Route path="/dashboard/accounts" element={<ProtectedPageRoute requiredRole="data-analyst"><AccountManagement /></ProtectedPageRoute>} />
       <Route path="/settings" element={<ProtectedPageRoute requiredRole="data-analyst"><SettingsPage /></ProtectedPageRoute>} />
+      <Route path="/dashboard/admin-controls" element={<ProtectedPageRoute requiredRole="data-analyst"><AdminControls /></ProtectedPageRoute>} />
 
       {/* AI Insights - Both roles */}
       <Route path="/dashboard/ai" element={<ProtectedPageRoute><ExecutiveDashboard /></ProtectedPageRoute>} />
@@ -92,6 +103,7 @@ const App = () => {
     <Router>
       <ThemeProvider>
         <AuthProvider>
+          <DashboardConfigProvider>
           <AppContent />
           <Toaster
             position="top-right"
@@ -116,6 +128,7 @@ const App = () => {
               },
             }}
           />
+        </DashboardConfigProvider>
         </AuthProvider>
       </ThemeProvider>
     </Router>

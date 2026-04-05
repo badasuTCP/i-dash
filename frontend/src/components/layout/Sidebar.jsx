@@ -31,6 +31,7 @@ const divisions = [
       { to: '/dashboard/sanitred', label: 'Dashboard' },
       { to: '/dashboard/sanitred/web-analytics', label: 'Web Analytics' },
       { to: '/dashboard/sanitred/marketing', label: 'Marketing Campaign' },
+      { to: '/dashboard/sanitred/retail', label: 'Retail Breakdown' },
     ],
     roles: ['executive', 'data-analyst'],
   },
@@ -41,6 +42,7 @@ const divisions = [
       { to: '/dashboard/ibos', label: 'Dashboard' },
       { to: '/dashboard/ibos/web-analytics', label: 'Web Analytics' },
       { to: '/dashboard/ibos/marketing', label: 'Marketing Campaign' },
+      { to: '/dashboard/ibos/contractors', label: 'Contractor Breakdown' },
     ],
     roles: ['executive', 'data-analyst'],
   },
@@ -48,6 +50,7 @@ const divisions = [
 
 const adminLinks = [
   { to: '/dashboard/pipelines', label: 'Data Pipelines', roles: ['data-analyst'] },
+  { to: '/dashboard/admin-controls', label: 'Admin Controls', roles: ['data-analyst'] },
   { to: '/dashboard/ai', label: 'AI Insights', roles: ['executive', 'data-analyst'] },
   { to: '/dashboard/accounts', label: 'Account Management', roles: ['data-analyst'] },
   { to: '/settings', label: 'Settings', roles: ['data-analyst'] },

@@ -7,6 +7,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import ScoreCard from '../components/scorecards/ScoreCard';
 import ChartCard from '../components/charts/ChartCard';
+import DateRangePicker from '../components/common/DateRangePicker';
 import { TrendingUp, DollarSign, Users, Target, BarChart3, Activity } from 'lucide-react';
 
 const ExecutiveDashboard = () => {
@@ -86,9 +87,12 @@ const ExecutiveDashboard = () => {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-          <h1 className={`text-3xl font-bold mb-1 ${textPrimary}`}>Executive Dashboard</h1>
-          <p className={textSecondary}>Combined performance across all divisions</p>
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div>
+            <h1 className={`text-3xl font-bold mb-1 ${textPrimary}`}>Executive Dashboard</h1>
+            <p className={textSecondary}>Combined performance across all divisions</p>
+          </div>
+          <DateRangePicker onApply={() => {}} />
         </motion.div>
 
         {/* Scorecards */}
@@ -96,6 +100,44 @@ const ExecutiveDashboard = () => {
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {scorecards.map((kpi, idx) => (
             <ScoreCard key={idx} {...kpi} />
+          ))}
+        </motion.div>
+
+        {/* AI Insight & Division Health Strip */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
+          className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-8">
+          {/* AI Insight Card */}
+          <div className={`lg:col-span-2 rounded-xl p-5 ${cardBg}`} style={{ borderLeft: '4px solid #8B5CF6' }}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+                <Activity className="text-white" size={14} />
+              </div>
+              <span className="text-xs font-bold uppercase tracking-wide text-violet-400">AI Insight</span>
+            </div>
+            <p className={`text-sm leading-relaxed ${textPrimary}`}>
+              Revenue is up <span className="text-emerald-400 font-semibold">14.2% YoY</span> driven by strong I-BOS contractor growth (+16.5%).
+              Cost per lead dropped to <span className="text-emerald-400 font-semibold">$106.88</span>, a 12.1% improvement.
+              Consider scaling the top-performing retargeting campaigns which are delivering 5.1x ROAS.
+              Sani-Tred's Amazon channel is growing fastest at <span className="text-emerald-400 font-semibold">+22.4%</span>.
+            </p>
+          </div>
+
+          {/* Division Health Cards */}
+          {[
+            { name: 'CP', color: '#3B82F6', revenue: '$3.41M', growth: '+14.8%', status: 'Strong' },
+            { name: 'Sani-Tred', color: '#10B981', revenue: '$2.07M', growth: '+11.2%', status: 'Steady' },
+          ].map((div, idx) => (
+            <motion.div key={idx} whileHover={{ y: -2 }}
+              className={`rounded-xl p-5 ${cardBg}`} style={{ borderTop: `3px solid ${div.color}` }}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold uppercase tracking-wide" style={{ color: div.color }}>{div.name}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                  div.status === 'Strong' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
+                }`}>{div.status}</span>
+              </div>
+              <p className={`text-xl font-bold ${textPrimary}`}>{div.revenue}</p>
+              <p className="text-sm text-emerald-400 font-semibold">{div.growth}</p>
+            </motion.div>
           ))}
         </motion.div>
 
