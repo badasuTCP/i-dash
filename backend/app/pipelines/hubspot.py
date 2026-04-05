@@ -10,11 +10,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from hubspot.crm.contacts import ApiException as HubSpotException
-from hubspot.crm.contacts import ContactsApi
-from hubspot.crm.deals import DealsApi
-from hubspot.crm.objects.tasks import TasksApi
-from hubspot.crm.objects.meetings import EngagementsApi
-from hubspot.crm.objects.emails import EngagementsApi as EmailsApi
 from hubspot.crm.objects import SimplePublicObject
 from hubspot import Client
 
