@@ -68,6 +68,11 @@ class Settings(BaseSettings):
         description="Meta access token for API calls",
     )
 
+        META_AD_ACCOUNT_ID: str = Field(
+                    default="",
+                    description="Meta Ads Ad Account ID (e.g. act_123456789). Used for fetching ad insights.",
+        )
+
     # Google Ads API configuration
     GOOGLE_ADS_DEVELOPER_TOKEN: str = Field(
         default="",
