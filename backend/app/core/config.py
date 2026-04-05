@@ -67,11 +67,10 @@ class Settings(BaseSettings):
         default="",
         description="Meta access token for API calls",
     )
-
-        META_AD_ACCOUNT_ID: str = Field(
-                    default="",
-                    description="Meta Ads Ad Account ID (e.g. act_123456789). Used for fetching ad insights.",
-        )
+    META_AD_ACCOUNT_ID: str = Field(
+        default="",
+        description="Meta Ads Ad Account ID (e.g. act_123456789)",
+    )
 
     # Google Ads API configuration
     GOOGLE_ADS_DEVELOPER_TOKEN: str = Field(
@@ -102,7 +101,7 @@ class Settings(BaseSettings):
     )
     GA4_CREDENTIALS_JSON: str = Field(
         default="",
-        description="Path to GA4 service account credentials JSON file",
+        description="GA4 service account credentials (JSON string or file path)",
     )
 
     # Google Analytics 4 - per division (optional, for multi-property setups)
@@ -150,7 +149,7 @@ class Settings(BaseSettings):
     # Google Sheets configuration
     GOOGLE_SHEETS_CREDENTIALS_FILE: str = Field(
         default="",
-        description="Path to Google Sheets service account credentials JSON file",
+        description="Google Sheets service account credentials (JSON string or file path)",
     )
 
     # Groq API configuration
