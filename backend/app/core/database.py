@@ -5,6 +5,7 @@ Provides async SQLAlchemy engine, session factory, and dependency injection
 for database access across the application.
 """
 
+import re
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -12,14 +13,42 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.core.config import settings
 
+
+def _build_engine_args():
+    """
+    Prepare the database URL and connect_args for asyncpg.
+
+    asyncpg does not accept the 'sslmode' query parameter that Railway
+    (and other Postgres providers) append to DATABASE_URL. We strip it
+    and translate 'sslmode=require' -> connect_args={"ssl": True}.
+    """
+    url = settings.DATABASE_URL
+    connect_args = {}
+
+    if "sslmode=" in url:
+        # Capture the sslmode value before removing it
+        match = re.search(r"sslmode=([^&]+)", url)
+        if match and match.group(1) in ("require", "verify-ca", "verify-full"):
+            connect_args["ssl"] = True
+
+        # Remove the sslmode param cleanly from the query string
+        url = re.sub(r"[?&]sslmode=[^&]*", "", url)
+        url = re.sub(r"\?$", "", url)  # remove trailing '?' if nothing left
+
+    return url, connect_args
+
+
+_db_url, _connect_args = _build_engine_args()
+
 # Create async engine with optimized settings
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    _db_url,
     echo=settings.DEBUG,
     future=True,
     pool_pre_ping=True,
     pool_size=20,
     max_overflow=10,
+    connect_args=_connect_args,
 )
 
 # Session factory for creating new sessions
