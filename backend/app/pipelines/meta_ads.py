@@ -107,7 +107,11 @@ class MetaAdsPipeline(BasePipeline):
 
         try:
             # Get the ad account
-            account_id = settings.META_APP_ID
+            account_id = (
+                settings.META_AD_ACCOUNT_ID
+                or settings.META_AD_ACCOUNT_ID_CP
+                or settings.META_APP_ID
+            )
             if not account_id.startswith("act_"):
                 account_id = f"act_{account_id}"
 

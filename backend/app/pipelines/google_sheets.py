@@ -58,11 +58,18 @@ class GoogleSheetsPipeline(BasePipeline):
         if not settings.GOOGLE_SHEETS_CREDENTIALS_FILE:
             raise ValueError("GOOGLE_SHEETS_CREDENTIALS_FILE must be configured")
 
-        # Initialize gspread client
+        # Initialize gspread client - handle JSON string or file path
         try:
-            self.gc = gspread.service_account(
-                filename=settings.GOOGLE_SHEETS_CREDENTIALS_FILE
-            )
+            import json as _json
+
+            cred_value = settings.GOOGLE_SHEETS_CREDENTIALS_FILE.strip()
+            if cred_value.startswith("{"):
+                # JSON content stored directly in env var (Railway style)
+                cred_info = _json.loads(cred_value)
+                self.gc = gspread.service_account_from_dict(cred_info)
+            else:
+                # Traditional file path
+                self.gc = gspread.service_account(filename=cred_value)
         except Exception as e:
             raise ValueError(
                 f"Failed to initialize Google Sheets client: {str(e)}"

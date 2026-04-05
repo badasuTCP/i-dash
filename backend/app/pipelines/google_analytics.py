@@ -74,14 +74,27 @@ class GoogleAnalyticsPipeline(BasePipeline):
         if not settings.GA4_CREDENTIALS_JSON:
             raise ValueError(
                 "GA4_CREDENTIALS_JSON must be configured "
-                "(path to service account JSON)"
+                "(JSON string or path to service account JSON)"
             )
 
-        # Initialize GA4 Data API client
+        # Initialize GA4 Data API client - handle JSON string or file path
+        import json as _json
         import os
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = (
-            settings.GA4_CREDENTIALS_JSON
-        )
+        import tempfile
+
+        cred_value = settings.GA4_CREDENTIALS_JSON.strip()
+        if cred_value.startswith("{"):
+            # JSON content stored directly in env var (Railway style)
+            _tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            )
+            _tmp.write(cred_value)
+            _tmp.close()
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _tmp.name
+        else:
+            # Traditional file path
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_value
+
         self.client = BetaAnalyticsDataClient()
 
     async def extract(self) -> Dict[str, Any]:
