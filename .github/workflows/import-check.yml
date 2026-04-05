@@ -1,0 +1,50 @@
+name: Import Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+
+jobs:
+  import-check:
+    runs-on: ubuntu-latest
+    name: Verify all backend imports resolve
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Check all imports resolve
+        working-directory: backend
+        env:
+          # Minimal env vars so pydantic-settings can load
+          APP_NAME: "test"
+          APP_VERSION: "0.0.0"
+          DATABASE_URL: "postgresql+asyncpg://x:x@localhost/x"
+          REDIS_URL: "redis://localhost"
+          SECRET_KEY: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          ALGORITHM: "HS256"
+          ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+          DEBUG: "false"
+          CORS_ORIGINS: '["http://localhost:3000"]'
+        run: |
+          python -c "
+          import sys
+          print('Python:', sys.version)
+          print('Checking all backend imports...')
+          import app.main
+          print('SUCCESS: all imports resolved cleanly')
+          "
