@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
@@ -15,22 +15,27 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
   // Default headers match the most common real-data range; override per-page via quarterlyHeaders prop
   const qHeaders = quarterlyHeaders || ['Q1 2025', 'Q2 2025', 'Q3 2025', 'Q4 2025', 'Q1 2026'];
   const { isDark } = useTheme();
-  const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
+  const { handleDateChange, resolveData, isFiltered, clearFilter } = useDashboardDateFilter();
 
-  // Compute filtered datasets — each call returns { data, noDataForPeriod, fallbackMessage }
-  const revFiltered = filterData(revenueData, 'month');
-  const noDataMsg   = revFiltered.noDataForPeriod ? revFiltered.fallbackMessage : null;
+  // ── Unified resolution: one call gives chart data + scorecard metrics ─────
+  // useMemo prevents re-running the filter logic on every render; only reruns
+  // when the active date range or source data changes.
+  const revResolved = useMemo(
+    () => resolveData(revenueData, 'month', metricsPerPeriod),
+    [resolveData, revenueData, metricsPerPeriod]
+  );
+  const noDataMsg = revResolved.noDataForPeriod ? revResolved.fallbackMessage : null;
 
-  // Resolve scorecards against metricsPerPeriod when a date filter is active
-  const activePeriod = isFiltered && revFiltered.data.length > 0 ? revFiltered.data[0].month : null;
-  const periodMetrics = activePeriod && metricsPerPeriod ? metricsPerPeriod[activePeriod] : null;
-  const resolvedScorecards = periodMetrics
-    ? scorecards.map((kpi) =>
-        kpi.metricKey !== undefined && periodMetrics[kpi.metricKey] !== undefined
-          ? { ...kpi, value: periodMetrics[kpi.metricKey] }
-          : kpi
-      )
-    : scorecards;
+  // Scorecards read from the same resolved metrics the chart used — single path
+  const resolvedScorecards = useMemo(() => {
+    const metrics = revResolved.resolvedMetrics;
+    if (!metrics) return scorecards;
+    return scorecards.map((kpi) =>
+      kpi.metricKey !== undefined && metrics[kpi.metricKey] !== undefined
+        ? { ...kpi, value: metrics[kpi.metricKey] }
+        : kpi
+    );
+  }, [scorecards, revResolved.resolvedMetrics]);
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
@@ -105,7 +110,7 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
             className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
             <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Revenue Trend</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={revFiltered.data}>
+              <ComposedChart data={revResolved.data}>
                 <defs>
                   <linearGradient id={`revGrad-${accentColor}`} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />

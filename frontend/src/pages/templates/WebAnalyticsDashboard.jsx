@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
@@ -13,21 +13,25 @@ import PageInsight from '../../components/common/PageInsight';
 
 const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning }) => {
   const { isDark } = useTheme();
-  const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
+  const { handleDateChange, resolveData, isFiltered, clearFilter } = useDashboardDateFilter();
 
-  const vt        = filterData(visitorTrend, 'month');
-  const noDataMsg = vt.noDataForPeriod ? vt.fallbackMessage : null;
+  // ── Unified resolution ────────────────────────────────────────────────────
+  const vtResolved = useMemo(
+    () => resolveData(visitorTrend, 'month', metricsPerPeriod),
+    [resolveData, visitorTrend, metricsPerPeriod]
+  );
+  const noDataMsg = vtResolved.noDataForPeriod ? vtResolved.fallbackMessage : null;
 
-  // Resolve scorecards from metricsPerPeriod when filter active
-  const activePeriod = isFiltered && vt.data.length > 0 ? vt.data[0].month : null;
-  const periodMetrics = activePeriod && metricsPerPeriod ? metricsPerPeriod[activePeriod] : null;
-  const resolvedScorecards = periodMetrics
-    ? scorecards.map((kpi) =>
-        kpi.metricKey !== undefined && periodMetrics[kpi.metricKey] !== undefined
-          ? { ...kpi, value: periodMetrics[kpi.metricKey] }
-          : kpi
-      )
-    : scorecards;
+  // Scorecards from the same resolved metrics — guaranteed same period as chart
+  const resolvedScorecards = useMemo(() => {
+    const metrics = vtResolved.resolvedMetrics;
+    if (!metrics) return scorecards;
+    return scorecards.map((kpi) =>
+      kpi.metricKey !== undefined && metrics[kpi.metricKey] !== undefined
+        ? { ...kpi, value: metrics[kpi.metricKey] }
+        : kpi
+    );
+  }, [scorecards, vtResolved.resolvedMetrics]);
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
@@ -100,7 +104,7 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
           className={`rounded-xl p-6 mb-8 ${cardBg}`}>
           <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Visitor Trend</h3>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={vt.data}>
+            <LineChart data={vtResolved.data}>
               <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
               <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
               <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />

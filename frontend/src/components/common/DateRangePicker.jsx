@@ -98,12 +98,18 @@ const DateRangePicker = ({ onApply, defaultDays = 30 }) => {
     : 'Select date range';
 
   const handlePresetClick = (presetId) => {
+    // Always replace ALL filter state atomically — clears any leftover custom
+    // date inputs so they can't bleed into the next filter selection.
     setSelectedPreset(presetId);
     if (presetId !== 'custom') {
+      // Ghost-state fix: wipe custom fields immediately
+      setCustomStart('');
+      setCustomEnd('');
       const preset = presets.find((p) => p.id === presetId);
-      const range = preset?.getRange?.();
+      const range  = preset?.getRange?.();
       if (range) {
-        onApply?.(range.start, range.end);
+        // Pass presetId as 3rd arg so the hook can tag which preset is active
+        onApply?.(range.start, range.end, presetId);
         setIsOpen(false);
       }
     }
@@ -111,7 +117,7 @@ const DateRangePicker = ({ onApply, defaultDays = 30 }) => {
 
   const handleApplyCustom = () => {
     if (customStart && customEnd) {
-      onApply?.(new Date(customStart), new Date(customEnd));
+      onApply?.(new Date(customStart), new Date(customEnd), 'custom');
       setIsOpen(false);
     }
   };

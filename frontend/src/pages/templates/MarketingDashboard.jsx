@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area,
@@ -13,23 +13,29 @@ import PageInsight from '../../components/common/PageInsight';
 
 const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, spendVsRevenue, funnelData, performanceSummary, spendByPeriod, ctrData, metricsPerPeriod, pageInsights, dataWarning }) => {
   const { isDark } = useTheme();
-  const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
+  const { handleDateChange, resolveData, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
-  const svr     = filterData(spendVsRevenue, 'quarter');
-  const sbp     = filterData(spendByPeriod,  'period');
-  const ctr     = filterData(ctrData,        'quarter');
-  const noDataMsg = svr.noDataForPeriod ? svr.fallbackMessage : null;
+  // ── Unified resolution — single source of truth ───────────────────────────
+  // spendVsRevenue drives both the chart and the scorecard resolution.
+  const svrResolved = useMemo(
+    () => resolveData(spendVsRevenue, 'quarter', metricsPerPeriod),
+    [resolveData, spendVsRevenue, metricsPerPeriod]
+  );
+  // Secondary charts use filterData (no scorecard needed)
+  const sbp = useMemo(() => filterData(spendByPeriod, 'period'), [filterData, spendByPeriod]);
+  const ctr = useMemo(() => filterData(ctrData, 'quarter'),      [filterData, ctrData]);
+  const noDataMsg = svrResolved.noDataForPeriod ? svrResolved.fallbackMessage : null;
 
-  // Resolve scorecards from metricsPerPeriod when filter active
-  const activePeriod = isFiltered && svr.data.length > 0 ? svr.data[0].quarter : null;
-  const periodMetrics = activePeriod && metricsPerPeriod ? metricsPerPeriod[activePeriod] : null;
-  const resolvedScorecards = periodMetrics
-    ? scorecards.map((kpi) =>
-        kpi.metricKey !== undefined && periodMetrics[kpi.metricKey] !== undefined
-          ? { ...kpi, value: periodMetrics[kpi.metricKey] }
-          : kpi
-      )
-    : scorecards;
+  // Scorecards from the same resolved metrics — guaranteed same period as chart
+  const resolvedScorecards = useMemo(() => {
+    const metrics = svrResolved.resolvedMetrics;
+    if (!metrics) return scorecards;
+    return scorecards.map((kpi) =>
+      kpi.metricKey !== undefined && metrics[kpi.metricKey] !== undefined
+        ? { ...kpi, value: metrics[kpi.metricKey] }
+        : kpi
+    );
+  }, [scorecards, svrResolved.resolvedMetrics]);
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
@@ -135,7 +141,7 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
             className={`rounded-xl p-6 ${cardBg}`}>
             <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Marketing Spend vs Revenue</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={svr.data}>
+              <ComposedChart data={svrResolved.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
                 <XAxis dataKey="quarter" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
                 <YAxis yAxisId="left" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
