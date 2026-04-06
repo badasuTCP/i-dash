@@ -11,7 +11,9 @@ import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
-const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueData, salesByCategory, topProducts, quarterlyData, metricsPerPeriod, pageInsights }) => {
+const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueData, salesByCategory, topProducts, quarterlyData, metricsPerPeriod, pageInsights, quarterlyHeaders }) => {
+  // Default headers match the most common real-data range; override per-page via quarterlyHeaders prop
+  const qHeaders = quarterlyHeaders || ['Q1 2025', 'Q2 2025', 'Q3 2025', 'Q4 2025', 'Q1 2026'];
   const { isDark } = useTheme();
   const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
@@ -161,11 +163,10 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
                 <thead>
                   <tr className={`border-b ${tableBorder}`}>
                     <th className={`text-left py-3 px-4 font-semibold ${textSecondary}`}>Metric</th>
-                    <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q1 2024</th>
-                    <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q2 2024</th>
-                    <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q3 2024</th>
-                    <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q4 2024</th>
-                    <th className={`text-right py-3 px-4 font-semibold`} style={{ color: accentColor }}>Q1 2025</th>
+                    {qHeaders.slice(0,4).map((h) => (
+                      <th key={h} className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>{h}</th>
+                    ))}
+                    <th className={`text-right py-3 px-4 font-semibold`} style={{ color: accentColor }}>{qHeaders[4]} ★</th>
                   </tr>
                 </thead>
                 <tbody>

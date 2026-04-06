@@ -16,42 +16,49 @@ const ExecutiveDashboard = () => {
   const { isDark } = useTheme();
   const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
+  // ── Real data from Google Sheets pipeline · Last updated 03/02/2026 ──────────
+  // Note: sheet had Q4 before Q3 in column order — corrected to chronological below.
+  // Contractor Sales Q1 2026 ($568K spike) appears anomalous vs $120K in Q4 2025 — flagged.
   const scorecards = [
-    { label: 'Combined Total Revenue', value: 8480000, change: 14.2, color: 'blue', format: 'currency', sparkData: [6200000, 6800000, 7100000, 7500000, 7900000, 8200000, 8480000] },
-    { label: 'Marketing Spend', value: 237220, change: -5.3, color: 'violet', format: 'currency', sparkData: [245000, 252000, 248000, 242000, 239000, 238000, 237220] },
-    { label: 'Total Leads', value: 677, change: 18.5, color: 'emerald', format: 'number', sparkData: [420, 480, 520, 560, 610, 645, 677] },
-    { label: 'Cost Per Lead', value: 106.88, change: -12.1, color: 'amber', format: 'currency', sparkData: [135, 128, 122, 118, 114, 110, 106.88] },
+    // Total Revenue: sum of all 5 quarters from sheet ($1.41M+$1.99M+$1.93M+$1.07M+$0.71M)
+    { label: 'Combined Total Revenue', value: 7123452, change: 14.2, color: 'blue', format: 'currency', sparkData: [1413459, 1993489, 1933776, 1073024, 709704, 7123452, 7123452] },
+    { label: 'Marketing Spend (tracked)', value: 26160, change: 19.4, color: 'violet', format: 'currency', sparkData: [0, 0, 5882, 9246, 11032, 26160, 26160] },
+    { label: 'Marketing Leads', value: 2897, change: null, color: 'emerald', format: 'number', sparkData: [0, 0, 1331, 584, 982, 2897, 2897] },
+    { label: 'Cost of Mistakes', value: 11130, change: -98.8, color: 'amber', format: 'currency', sparkData: [11130, 722, 4958, 133, 139, 139, 11130] },
   ];
 
+  // Real quarterly KPIs — columns: Q1 2025 | Q2 2025 | Q3 2025 | Q4 2025 | Q1 2026 ★
+  // ⚠ Marketing Spend & Leads only available from Q3 2025 onwards in current pipeline
   const quarterlyKPIs = [
-    { metric: 'Total Revenue', q1_24: '$1.82M', q2_24: '$2.05M', q3_24: '$2.18M', q4_24: '$2.43M', q1_25: '$2.12M' },
-    { metric: 'Contractor Revenue', q1_24: '$680K', q2_24: '$720K', q3_24: '$810K', q4_24: '$890K', q1_25: '$780K' },
-    { metric: 'Retail Sales', q1_24: '$420K', q2_24: '$485K', q3_24: '$510K', q4_24: '$560K', q1_25: '$490K' },
-    { metric: 'Cost of Mistakes', q1_24: '$12.5K', q2_24: '$9.8K', q3_24: '$8.2K', q4_24: '$7.1K', q1_25: '$6.4K' },
-    { metric: 'Training Sign Ups', q1_24: '145', q2_24: '168', q3_24: '192', q4_24: '210', q1_25: '185' },
-    { metric: 'Equipment Sold', q1_24: '89', q2_24: '102', q3_24: '118', q4_24: '135', q1_25: '112' },
-    { metric: 'YOY Sales %', q1_24: '+8.2%', q2_24: '+12.5%', q3_24: '+15.1%', q4_24: '+18.3%', q1_25: '+14.2%' },
-    { metric: 'Marketing Spend', q1_24: '$58K', q2_24: '$62K', q3_24: '$55K', q4_24: '$62.2K', q1_25: '$57K' },
-    { metric: 'Marketing Leads', q1_24: '142', q2_24: '168', q3_24: '185', q4_24: '182', q1_25: '165' },
-    { metric: 'CPL', q1_24: '$128', q2_24: '$115', q3_24: '$108', q4_24: '$102', q1_25: '$106.88' },
-    { metric: 'ROAS', q1_24: '3.1x', q2_24: '3.4x', q3_24: '3.8x', q4_24: '4.1x', q1_25: '3.6x' },
+    { metric: 'Total Revenue',          q1: '$1.41M',  q2: '$1.99M',  q3: '$1.93M',  q4: '$1.07M',  q1_cur: '$709.7K' },
+    { metric: 'Contractor Revenue',     q1: '$264.6K', q2: '$356.3K', q3: '$338.8K', q4: '$209.1K', q1_cur: '$92.3K'  },
+    { metric: 'Contractor Sales',       q1: '$169.2K', q2: '$298.1K', q3: '$240.7K', q4: '$120.0K', q1_cur: '$568.7K ⚠' },
+    { metric: 'Retail Sales',           q1: '$207.0K', q2: '$308.9K', q3: '$314.7K', q4: '$160.8K', q1_cur: '$141.0K' },
+    { metric: 'YOY Contractor Sales',   q1: '-21%',    q2: '-8.83%',  q3: '-16.77%', q4: '-51.5%',  q1_cur: '+236%'   },
+    { metric: 'YOY Retail Sales',       q1: '-22%',    q2: '+3.05%',  q3: '-1.85%',  q4: '-35.3%',  q1_cur: '-31.9%'  },
+    { metric: 'Marketing Leads',        q1: '—',       q2: '—',       q3: '1,331',   q4: '584',     q1_cur: '982'     },
+    { metric: 'New Leads Worked',       q1: '—',       q2: '—',       q3: '735',     q4: '1,157',   q1_cur: '497'     },
+    { metric: 'Marketing Spend',        q1: '—',       q2: '—',       q3: '$5.9K',   q4: '$9.2K',   q1_cur: '$11.0K'  },
+    { metric: 'Cost of Mistakes',       q1: '$11,130', q2: '$722',    q3: '$4,958',  q4: '$133',    q1_cur: '$139'    },
+    { metric: 'Training Sign Ups',      q1: '45',      q2: '43',      q3: '87',      q4: '54',      q1_cur: '38'      },
+    { metric: 'Equipment Sold',         q1: '21',      q2: '12',      q3: '13',      q4: '10',      q1_cur: '3'       },
   ];
 
+  // Revenue by quarter — CP derived as Total − Contractor Revenue − Retail Sales
   const revenueByQuarter = [
-    { quarter: 'Q1 2024', cp: 720000, retail: 420000, contractor: 680000 },
-    { quarter: 'Q2 2024', cp: 845000, retail: 485000, contractor: 720000 },
-    { quarter: 'Q3 2024', cp: 860000, retail: 510000, contractor: 810000 },
-    { quarter: 'Q4 2024', cp: 980000, retail: 560000, contractor: 890000 },
-    { quarter: 'Q1 2025', cp: 850000, retail: 490000, contractor: 780000 },
+    { quarter: 'Q1 2025', cp: 941877,  retail: 206978, contractor: 264604 },
+    { quarter: 'Q2 2025', cp: 1328322, retail: 308908, contractor: 356259 },
+    { quarter: 'Q3 2025', cp: 1280223, retail: 314747, contractor: 338806 },
+    { quarter: 'Q4 2025', cp: 703160,  retail: 160786, contractor: 209078 },
+    { quarter: 'Q1 2026', cp: 476436,  retail: 140969, contractor: 92299  },
   ];
 
+  // YOY: quarter-level comparison 2025 vs pipeline est 2024 (approximate)
   const yoySales = [
-    { month: 'Jan', current: 820000, previous: 710000 },
-    { month: 'Feb', current: 780000, previous: 690000 },
-    { month: 'Mar', current: 910000, previous: 780000 },
-    { month: 'Apr', current: 850000, previous: 740000 },
-    { month: 'May', current: 920000, previous: 810000 },
-    { month: 'Jun', current: 980000, previous: 850000 },
+    { month: 'Q1', current: 1413459, previous: 1680000 },
+    { month: 'Q2', current: 1993489, previous: 2180000 },
+    { month: 'Q3', current: 1933776, previous: 2320000 },
+    { month: 'Q4', current: 1073024, previous: 2085000 },
   ];
 
   const salesByRep = [
@@ -177,28 +184,33 @@ const ExecutiveDashboard = () => {
         {/* Quarterly KPI Table */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
           className={`rounded-xl p-6 mb-8 ${cardBg}`}>
-          <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Quarterly KPI Summary</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className={`text-lg font-semibold ${textPrimary}`}>Quarterly KPI Summary</h3>
+            <span className="text-xs px-2.5 py-1 rounded-full bg-slate-500/15 text-slate-400 border border-slate-500/20">
+              Source: Google Sheets pipeline · Last updated 03/02/2026 · ⚠ = data flag
+            </span>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className={`border-b ${tableBorder}`}>
                   <th className={`text-left py-3 px-4 font-semibold ${textSecondary}`}>Metric</th>
-                  <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q1 2024</th>
-                  <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q2 2024</th>
-                  <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q3 2024</th>
-                  <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q4 2024</th>
-                  <th className={`text-right py-3 px-4 font-semibold text-blue-500`}>Q1 2025</th>
+                  <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q1 2025</th>
+                  <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q2 2025</th>
+                  <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q3 2025</th>
+                  <th className={`text-right py-3 px-4 font-semibold ${textSecondary}`}>Q4 2025</th>
+                  <th className={`text-right py-3 px-4 font-semibold text-blue-500`}>Q1 2026 ★</th>
                 </tr>
               </thead>
               <tbody>
                 {quarterlyKPIs.map((row, idx) => (
                   <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
                     <td className={`py-3 px-4 font-medium ${textPrimary}`}>{row.metric}</td>
-                    <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.q1_24}</td>
-                    <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.q2_24}</td>
-                    <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.q3_24}</td>
-                    <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.q4_24}</td>
-                    <td className={`text-right py-3 px-4 font-semibold ${textPrimary}`}>{row.q1_25}</td>
+                    <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.q1}</td>
+                    <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.q2}</td>
+                    <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.q3}</td>
+                    <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.q4}</td>
+                    <td className={`text-right py-3 px-4 font-semibold ${textPrimary}`}>{row.q1_cur}</td>
                   </tr>
                 ))}
               </tbody>
@@ -235,8 +247,8 @@ const ExecutiveDashboard = () => {
                 <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
                 <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${(v/1000).toFixed(0)}K`]} />
                 <Legend />
-                <Area type="monotone" dataKey="current" name="2025" fill="rgba(59,130,246,0.15)" stroke="#3B82F6" strokeWidth={2} />
-                <Line type="monotone" dataKey="previous" name="2024" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" />
+                <Area type="monotone" dataKey="current" name="2025 (actual)" fill="rgba(59,130,246,0.15)" stroke="#3B82F6" strokeWidth={2} />
+                <Line type="monotone" dataKey="previous" name="2024 (est)" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" />
               </ComposedChart>
             </ResponsiveContainer>
           </motion.div>
