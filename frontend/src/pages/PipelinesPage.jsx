@@ -1,297 +1,727 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '../context/ThemeContext';
+import { useDashboardConfig, ALL_CONTRACTORS } from '../context/DashboardConfigContext';
+import { pipelinesAPI } from '../services/api';
 import {
   Database, Activity, AlertTriangle, CheckCircle, XCircle, Clock,
-  Play, RefreshCw, Settings, Zap, Terminal, BarChart3, Server
+  Play, RefreshCw, Settings, Zap, Terminal, Server, Loader2,
+  ChevronDown, ChevronUp, Users, ToggleLeft, ToggleRight, Eye, EyeOff,
+  Wifi, WifiOff, BarChart3, TrendingUp, Hash
 } from 'lucide-react';
 
-const pipelineStatuses = [
-  { name: 'HubSpot', icon: '🟠', status: 'connected', lastSync: '12 min ago', records: '45,280', nextRun: '1h 48m', enabled: true, frequency: '2hrs' },
-  { name: 'Meta Ads', icon: '🔵', status: 'connected', lastSync: '28 min ago', records: '128,450', nextRun: '1h 32m', enabled: true, frequency: '2hrs' },
-  { name: 'Google Ads', icon: '🟢', status: 'error', lastSync: '2h 15m ago', records: '52,180', nextRun: 'Paused', enabled: false, frequency: '4hrs' },
-  { name: 'Google Sheets', icon: '📊', status: 'connected', lastSync: '45 min ago', records: '19,340', nextRun: '5h 15m', enabled: true, frequency: '6hrs' },
+// ALL_CONTRACTORS is now imported from DashboardConfigContext
+
+// Pipeline display metadata
+const PIPELINE_META = {
+  hubspot:      { icon: '🟠', label: 'HubSpot CRM',    color: 'orange', key: 'hubspot' },
+  meta_ads:     { icon: '🔵', label: 'Meta Ads',        color: 'blue',   key: 'metaAds' },
+  google_ads:   { icon: '🟢', label: 'Google Ads',      color: 'emerald',key: 'googleAds' },
+  google_sheets:{ icon: '📊', label: 'Google Sheets',   color: 'teal',   key: 'googleSheets' },
+  snapshot:     { icon: '📸', label: 'Snapshot Aggregator', color: 'violet', key: 'snapshot' },
+};
+
+const FREQ_OPTIONS = [
+  { value: '30min',  label: 'Every 30 minutes' },
+  { value: '1hr',    label: 'Every 1 hour' },
+  { value: '2hrs',   label: 'Every 2 hours' },
+  { value: '4hrs',   label: 'Every 4 hours' },
+  { value: '6hrs',   label: 'Every 6 hours' },
+  { value: '12hrs',  label: 'Every 12 hours' },
+  { value: 'daily',  label: 'Daily (midnight)' },
 ];
 
-const runHistory = [
-  { pipeline: 'HubSpot', status: 'success', startedAt: 'Mar 26, 10:14 AM', duration: '1m 42s', records: 1245, errors: 0 },
-  { pipeline: 'Meta Ads', status: 'success', startedAt: 'Mar 26, 10:12 AM', duration: '2m 08s', records: 3420, errors: 0 },
-  { pipeline: 'Google Ads', status: 'failed', startedAt: 'Mar 26, 8:00 AM', duration: '0m 14s', records: 0, errors: 1 },
-  { pipeline: 'Google Sheets', status: 'success', startedAt: 'Mar 26, 9:45 AM', duration: '0m 38s', records: 890, errors: 0 },
-  { pipeline: 'HubSpot', status: 'success', startedAt: 'Mar 26, 8:14 AM', duration: '1m 35s', records: 1180, errors: 0 },
-  { pipeline: 'Meta Ads', status: 'success', startedAt: 'Mar 26, 8:12 AM', duration: '2m 22s', records: 3280, errors: 0 },
-  { pipeline: 'Snapshot Aggregator', status: 'success', startedAt: 'Mar 26, 7:00 AM', duration: '3m 45s', records: 12450, errors: 2 },
-  { pipeline: 'HubSpot', status: 'running', startedAt: 'Mar 26, 6:14 AM', duration: '—', records: 0, errors: 0 },
-  { pipeline: 'Google Sheets', status: 'success', startedAt: 'Mar 26, 3:45 AM', duration: '0m 42s', records: 920, errors: 0 },
-  { pipeline: 'Meta Ads', status: 'success', startedAt: 'Mar 25, 10:12 PM', duration: '2m 15s', records: 3150, errors: 0 },
-];
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+function relativeTime(dateStr) {
+  if (!dateStr) return 'Never';
+  try {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  } catch { return '—'; }
+}
 
-const logEntries = [
-  { time: '10:14:22', level: 'info', message: '[HubSpot] Pipeline started — fetching contacts, deals, companies' },
-  { time: '10:14:28', level: 'info', message: '[HubSpot] Fetched 1,245 contacts (42 new, 1,203 updated)' },
-  { time: '10:15:04', level: 'info', message: '[HubSpot] Fetched 89 deals — $487,500 pipeline value' },
-  { time: '10:15:42', level: 'info', message: '[HubSpot] Sync complete — 1,245 records in 1m 42s' },
-  { time: '10:12:15', level: 'info', message: '[Meta Ads] Pipeline started — fetching campaigns, ad sets, ads' },
-  { time: '10:13:22', level: 'warn', message: '[Meta Ads] Rate limit warning — 80% of hourly quota used' },
-  { time: '10:14:23', level: 'info', message: '[Meta Ads] Sync complete — 3,420 records in 2m 08s' },
-  { time: '08:00:02', level: 'error', message: '[Google Ads] Authentication failed — refresh token expired' },
-  { time: '08:00:14', level: 'error', message: '[Google Ads] Pipeline aborted after 3 retry attempts' },
-  { time: '09:45:08', level: 'info', message: '[Google Sheets] Sync complete — 890 records in 0m 38s' },
-];
+function StatusBadge({ status, size = 'sm' }) {
+  const styles = {
+    success: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
+    failed:  'bg-red-500/15 text-red-400 border-red-500/25',
+    running: 'bg-blue-500/15 text-blue-400 border-blue-500/25',
+    error:   'bg-red-500/15 text-red-400 border-red-500/25',
+    unknown: 'bg-slate-500/15 text-slate-400 border-slate-500/25',
+    idle:    'bg-slate-500/15 text-slate-400 border-slate-500/25',
+  };
+  const label = status === 'success' ? 'OK' : status === 'unknown' ? 'Idle' : status;
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border capitalize ${styles[status] || styles.idle}`}>
+      {status === 'running' && <Loader2 size={10} className="inline mr-1 animate-spin" />}
+      {label}
+    </span>
+  );
+}
 
-const aiInsights = [
-  { type: 'warning', text: 'HubSpot contact sync has 3 duplicate records detected — recommend dedup review' },
-  { type: 'info', text: 'Meta Ads spend data shows 2.3% variance from Google Sheets totals — within acceptable range' },
-  { type: 'error', text: 'Google Ads pipeline has been down for 2+ hours — token refresh required' },
-  { type: 'success', text: 'Data freshness improved 8% this week — all pipelines averaging 94% freshness score' },
-];
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Component
+// ─────────────────────────────────────────────────────────────────────────────
 const PipelinesPage = () => {
   const { isDark } = useTheme();
-  const [schedulers, setSchedulers] = useState(
-    pipelineStatuses.map(p => ({ name: p.name, enabled: p.enabled, frequency: p.frequency }))
-  );
+  const { config, updatePipeline, updateContractor, setAllContractors } = useDashboardConfig();
 
-  const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
+  // ── UI state ────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState('pipelines'); // 'pipelines' | 'contractors' | 'logs'
+  const [expandedHistory, setExpandedHistory] = useState(null);
+
+  // ── Pipeline state ───────────────────────────────────────────────────────────
+  const [pipelines, setPipelines]     = useState([]);
+  const [loadingAll, setLoadingAll]   = useState(true);
+  const [loadError, setLoadError]     = useState(null);
+  const [runningJobs, setRunningJobs] = useState({}); // { pipelineName: true/false }
+  const [runResults, setRunResults]   = useState({}); // { pipelineName: result }
+  const [history, setHistory]         = useState({}); // { pipelineName: [...] }
+  const [historyLoading, setHistLoading] = useState({});
+  const [runAllLoading, setRunAllLoading] = useState(false);
+  const [runAllResult, setRunAllResult]   = useState(null);
+  const [lastFetch, setLastFetch]     = useState(null);
+  const [apiConnected, setApiConnected] = useState(null); // null = unknown, true, false
+  const pollingRef = useRef(null);
+
+  // ── Frequencies (local UI state, can later persist to backend) ───────────────
+  const [frequencies, setFrequencies] = useState({
+    hubspot: '2hrs', meta_ads: '2hrs', google_ads: '4hrs',
+    google_sheets: '6hrs', snapshot: '4hrs',
+  });
+
+  // ── Contractor state — driven by DashboardConfigContext ──────────────────────
+  const [contractorFilter, setContractorFilter] = useState('all');
+
+  // Derive contractors array with active flag from context config
+  const contractors = ALL_CONTRACTORS.map((c) => ({
+    ...c,
+    active: config.contractors?.[c.id] !== false,
+  }));
+
+  // ── Styles ───────────────────────────────────────────────────────────────────
+  const cardBg      = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
-  const textSecondary = isDark ? 'text-slate-400' : 'text-slate-600';
-  const tableBorder = isDark ? 'border-slate-700/30' : 'border-slate-200';
-  const tableRowHover = isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50';
+  const textSec     = isDark ? 'text-slate-400' : 'text-slate-500';
+  const border      = isDark ? 'border-slate-700/40' : 'border-slate-200';
+  const rowHover    = isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50';
+  const inputCls    = isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900';
 
-  const statusBadge = (status) => {
-    const styles = {
-      success: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20',
-      failed: 'bg-red-500/15 text-red-500 border-red-500/20',
-      running: 'bg-blue-500/15 text-blue-500 border-blue-500/20',
-      connected: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/20',
-      error: 'bg-red-500/15 text-red-500 border-red-500/20',
-    };
-    return `px-2.5 py-1 rounded-full text-xs font-semibold border ${styles[status] || ''}`;
-  };
+  // ── Load pipeline status from backend ────────────────────────────────────────
+  const fetchStatus = useCallback(async (silent = false) => {
+    if (!silent) setLoadingAll(true);
+    setLoadError(null);
+    try {
+      const res = await pipelinesAPI.getAll();
+      const data = res.data;
+      setPipelines(data.pipelines || []);
+      setLastFetch(new Date());
+      setApiConnected(true);
+    } catch (err) {
+      if (!silent) {
+        const msg = err.response?.data?.detail || err.message || 'Could not reach backend';
+        setLoadError(msg);
+      }
+      setApiConnected(false);
+    } finally {
+      if (!silent) setLoadingAll(false);
+    }
+  }, []);
 
+  // Auto-refresh every 30 seconds
+  useEffect(() => {
+    fetchStatus();
+    pollingRef.current = setInterval(() => fetchStatus(true), 30000);
+    return () => clearInterval(pollingRef.current);
+  }, [fetchStatus]);
+
+  // ── Run a single pipeline ────────────────────────────────────────────────────
+  const handleRunNow = useCallback(async (name) => {
+    setRunningJobs((p) => ({ ...p, [name]: true }));
+    setRunResults((p) => ({ ...p, [name]: null }));
+    try {
+      const res = await pipelinesAPI.run(name);
+      setRunResults((p) => ({ ...p, [name]: { success: true, ...res.data } }));
+      // Refresh status after run
+      setTimeout(() => fetchStatus(true), 1500);
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message || 'Run failed';
+      setRunResults((p) => ({ ...p, [name]: { success: false, error: detail } }));
+    } finally {
+      setRunningJobs((p) => ({ ...p, [name]: false }));
+    }
+  }, [fetchStatus]);
+
+  // ── Run all pipelines ────────────────────────────────────────────────────────
+  const handleRunAll = useCallback(async () => {
+    setRunAllLoading(true);
+    setRunAllResult(null);
+    try {
+      const res = await pipelinesAPI.runAll();
+      setRunAllResult({ success: true, ...res.data });
+      setTimeout(() => fetchStatus(true), 1500);
+    } catch (err) {
+      setRunAllResult({ success: false, error: err.response?.data?.detail || err.message });
+    } finally {
+      setRunAllLoading(false);
+    }
+  }, [fetchStatus]);
+
+  // ── Load history for a specific pipeline ─────────────────────────────────────
+  const loadHistory = useCallback(async (name) => {
+    if (expandedHistory === name) { setExpandedHistory(null); return; }
+    setExpandedHistory(name);
+    if (history[name]) return; // already loaded
+    setHistLoading((p) => ({ ...p, [name]: true }));
+    try {
+      const res = await pipelinesAPI.getHistory(name, 15);
+      setHistory((p) => ({ ...p, [name]: res.data.history || [] }));
+    } catch {
+      setHistory((p) => ({ ...p, [name]: [] }));
+    } finally {
+      setHistLoading((p) => ({ ...p, [name]: false }));
+    }
+  }, [expandedHistory, history]);
+
+  // ── Contractor toggle — writes back to DashboardConfigContext ────────────────
+  const toggleContractor = useCallback((id) => {
+    const current = config.contractors?.[id] !== false;
+    updateContractor(id, !current);
+  }, [config.contractors, updateContractor]);
+
+  const toggleAllContractors = useCallback((active) => {
+    setAllContractors(active);
+  }, [setAllContractors]);
+
+  // ── Derived ───────────────────────────────────────────────────────────────────
+  const activeContractors   = contractors.filter((c) => c.active).length;
+  const totalRecords        = pipelines.reduce((s, p) => s + (p.records_loaded || 0), 0);
+  const failedCount         = pipelines.filter((p) => p.status === 'failed' || p.status === 'error').length;
+  const connectedCount      = pipelines.filter((p) => p.status === 'success').length;
+  const avgDuration         = pipelines.length
+    ? (pipelines.reduce((s, p) => s + (p.duration_seconds || 0), 0) / pipelines.length).toFixed(1)
+    : '—';
+
+  const filteredContractors = contractors.filter((c) => {
+    if (contractorFilter === 'active')   return c.active;
+    if (contractorFilter === 'inactive') return !c.active;
+    return true;
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-          <div className="flex items-center gap-3 mb-1">
-            <Database className={isDark ? 'text-indigo-400' : 'text-indigo-600'} size={28} />
-            <h1 className={`text-3xl font-bold ${textPrimary}`}>Data Pipelines</h1>
-          </div>
-          <p className={textSecondary}>ETL pipeline management, scheduling, and data health monitoring</p>
-        </motion.div>
 
-        {/* Pipeline Status Cards */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {pipelineStatuses.map((pipeline, idx) => (
-            <div key={idx} className={`rounded-xl p-5 ${cardBg}`}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">{pipeline.icon}</span>
-                  <span className={`font-semibold text-sm ${textPrimary}`}>{pipeline.name}</span>
-                </div>
-                <span className={statusBadge(pipeline.status)}>
-                  {pipeline.status === 'connected' ? 'Connected' : 'Error'}
+        {/* ── Header ── */}
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Database className={isDark ? 'text-indigo-400' : 'text-indigo-600'} size={28} />
+              <div>
+                <h1 className={`text-3xl font-bold ${textPrimary}`}>Data Pipelines</h1>
+                <p className={textSec}>ETL pipeline control, scheduling &amp; contractor management</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {/* Connection indicator */}
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${
+                apiConnected === true  ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' :
+                apiConnected === false ? 'border-red-500/30 text-red-400 bg-red-500/10' :
+                'border-slate-500/30 text-slate-400 bg-slate-500/10'
+              }`}>
+                {apiConnected === true  ? <Wifi size={12} /> :
+                 apiConnected === false ? <WifiOff size={12} /> :
+                 <Loader2 size={12} className="animate-spin" />}
+                {apiConnected === true ? 'Backend Connected' :
+                 apiConnected === false ? 'Backend Offline' : 'Connecting...'}
+              </div>
+              {/* Last fetch */}
+              {lastFetch && (
+                <span className={`text-xs ${textSec}`}>
+                  Updated {relativeTime(lastFetch.toISOString())}
                 </span>
-              </div>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className={textSecondary}>Last Sync</span>
-                  <span className={textPrimary}>{pipeline.lastSync}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className={textSecondary}>Records</span>
-                  <span className={textPrimary}>{pipeline.records}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className={textSecondary}>Next Run</span>
-                  <span className={pipeline.nextRun === 'Paused' ? 'text-red-400' : textPrimary}>{pipeline.nextRun}</span>
-                </div>
-              </div>
+              )}
+              {/* Refresh */}
+              <button
+                onClick={() => fetchStatus()}
+                disabled={loadingAll}
+                className="p-2 rounded-lg border border-slate-600/40 hover:border-indigo-500/60 transition-colors"
+                title="Refresh status"
+              >
+                <RefreshCw size={15} className={loadingAll ? 'animate-spin text-indigo-400' : textSec} />
+              </button>
+              {/* Run All */}
+              <button
+                onClick={handleRunAll}
+                disabled={runAllLoading || apiConnected === false}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                {runAllLoading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                Run All Pipelines
+              </button>
             </div>
-          ))}
-        </motion.div>
+          </div>
 
-        {/* Data Health Monitor */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-          className={`rounded-xl p-6 mb-8 ${cardBg}`}>
-          <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Data Health Monitor</h3>
-          <div className="mb-4">
-            <div className="flex justify-between text-sm mb-2">
-              <span className={textSecondary}>Data Freshness</span>
-              <span className="text-emerald-500 font-semibold">94%</span>
-            </div>
-            <div className={`h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+          {/* Run All result banner */}
+          <AnimatePresence>
+            {runAllResult && (
               <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: '94%' }}
-                transition={{ duration: 1.5, ease: 'easeOut' }}
-                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { label: 'Total Records', value: '245,250', icon: Database },
-              { label: 'Failed Jobs (24h)', value: '3', icon: AlertTriangle },
-              { label: 'Avg Sync Time', value: '2m 15s', icon: Clock },
-              { label: 'Uptime', value: '99.8%', icon: Activity },
-            ].map((stat, idx) => (
-              <div key={idx} className={`p-3 rounded-lg ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
-                <div className="flex items-center gap-2 mb-1">
-                  <stat.icon size={14} className={textSecondary} />
-                  <span className={`text-xs ${textSecondary}`}>{stat.label}</span>
-                </div>
-                <span className={`text-lg font-bold ${textPrimary}`}>{stat.value}</span>
-              </div>
-            ))}
-          </div>
+                initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-2 ${
+                  runAllResult.success
+                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400'
+                    : 'bg-red-500/15 border border-red-500/30 text-red-400'
+                }`}
+              >
+                {runAllResult.success
+                  ? <><CheckCircle size={15} /> All pipelines completed — {runAllResult.successful} success, {runAllResult.failed} failed in {runAllResult.duration_seconds?.toFixed(1)}s</>
+                  : <><XCircle size={15} /> {runAllResult.error}</>}
+                <button onClick={() => setRunAllResult(null)} className="ml-auto opacity-60 hover:opacity-100">✕</button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
-        {/* Scheduler Controls */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-          className={`rounded-xl p-6 mb-8 ${cardBg}`}>
-          <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Scheduler Controls</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className={`border-b ${tableBorder}`}>
-                  <th className={`text-left py-3 px-4 font-semibold ${textSecondary}`}>Pipeline</th>
-                  <th className={`text-center py-3 px-4 font-semibold ${textSecondary}`}>Enabled</th>
-                  <th className={`text-center py-3 px-4 font-semibold ${textSecondary}`}>Frequency</th>
-                  <th className={`text-center py-3 px-4 font-semibold ${textSecondary}`}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {schedulers.map((sched, idx) => (
-                  <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover}`}>
-                    <td className={`py-3 px-4 font-medium ${textPrimary}`}>{sched.name}</td>
-                    <td className="text-center py-3 px-4">
-                      <button
-                        onClick={() => {
-                          const updated = [...schedulers];
-                          updated[idx].enabled = !updated[idx].enabled;
-                          setSchedulers(updated);
-                        }}
-                        className={`w-10 h-5 rounded-full transition-colors relative ${
-                          sched.enabled ? 'bg-emerald-500' : isDark ? 'bg-slate-700' : 'bg-slate-300'
-                        }`}
-                      >
-                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                          sched.enabled ? 'translate-x-5' : 'translate-x-0.5'
-                        }`} />
-                      </button>
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <select
-                        value={sched.frequency}
-                        onChange={(e) => {
-                          const updated = [...schedulers];
-                          updated[idx].frequency = e.target.value;
-                          setSchedulers(updated);
-                        }}
-                        className={`px-2 py-1 rounded text-xs border ${
-                          isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300'
-                        }`}
-                      >
-                        <option value="2hrs">Every 2 hours</option>
-                        <option value="4hrs">Every 4 hours</option>
-                        <option value="6hrs">Every 6 hours</option>
-                        <option value="12hrs">Every 12 hours</option>
-                        <option value="daily">Daily</option>
-                      </select>
-                    </td>
-                    <td className="text-center py-3 px-4">
-                      <button className="px-3 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-medium hover:bg-indigo-700 transition-colors flex items-center gap-1 mx-auto">
-                        <Play size={12} /> Run Now
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </motion.div>
+        {/* ── Tab Nav ── */}
+        <div className={`flex gap-1 p-1 rounded-xl mb-6 w-fit ${isDark ? 'bg-slate-800/60' : 'bg-slate-100'}`}>
+          {[
+            { id: 'pipelines', label: 'Pipeline Control', icon: Server },
+            { id: 'contractors', label: 'Contractor Management', icon: Users },
+            { id: 'logs', label: 'Run Logs', icon: Terminal },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === id
+                  ? `${isDark ? 'bg-indigo-600 text-white' : 'bg-white shadow text-indigo-700'}`
+                  : `${textSec} hover:text-indigo-400`
+              }`}
+            >
+              <Icon size={14} />{label}
+            </button>
+          ))}
+        </div>
 
-        {/* Run History + ETL Logs */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Pipeline Run History</h3>
-            <div className="space-y-2 max-h-[400px] overflow-y-auto">
-              {runHistory.map((run, idx) => (
-                <div key={idx} className={`flex items-center justify-between p-3 rounded-lg ${
-                  isDark ? 'bg-slate-800/30' : 'bg-slate-50'
-                }`}>
-                  <div>
-                    <span className={`font-medium text-sm ${textPrimary}`}>{run.pipeline}</span>
-                    <span className={`text-xs block ${textSecondary}`}>{run.startedAt}</span>
+        {/* ═══════════════════════════════════════════════════════════════════════
+            TAB: PIPELINE CONTROL
+        ═══════════════════════════════════════════════════════════════════════ */}
+        {activeTab === 'pipelines' && (
+          <>
+            {/* Health Metrics */}
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+              className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              {[
+                { label: 'Pipelines Online', value: loadingAll ? '—' : `${connectedCount}/${pipelines.length}`, icon: CheckCircle, color: 'text-emerald-400' },
+                { label: 'Failed Pipelines', value: loadingAll ? '—' : failedCount, icon: XCircle, color: failedCount > 0 ? 'text-red-400' : 'text-slate-400' },
+                { label: 'Records (last run)', value: loadingAll ? '—' : totalRecords.toLocaleString(), icon: Hash, color: 'text-blue-400' },
+                { label: 'Avg Duration', value: loadingAll ? '—' : `${avgDuration}s`, icon: Clock, color: 'text-violet-400' },
+              ].map((stat, idx) => (
+                <div key={idx} className={`rounded-xl p-4 ${cardBg}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <stat.icon size={15} className={stat.color} />
+                    <span className={`text-xs ${textSec}`}>{stat.label}</span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-xs ${textSecondary}`}>{run.duration}</span>
-                    <span className={statusBadge(run.status)}>
-                      {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
-                    </span>
-                  </div>
+                  <span className={`text-2xl font-bold ${textPrimary}`}>{stat.value}</span>
                 </div>
               ))}
-            </div>
-          </motion.div>
+            </motion.div>
 
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
-            <div className="flex items-center gap-2 mb-4">
-              <Terminal size={18} className={textPrimary} />
-              <h3 className={`text-lg font-semibold ${textPrimary}`}>ETL Log Viewer</h3>
+            {/* Load error banner */}
+            {loadError && !loadingAll && (
+              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center gap-2">
+                <AlertTriangle size={15} />
+                Backend unavailable: {loadError}. Showing last known state.
+              </div>
+            )}
+
+            {/* Pipeline Cards */}
+            {loadingAll ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="animate-spin text-indigo-400" size={32} />
+                <span className={`ml-3 ${textSec}`}>Loading pipeline status...</span>
+              </div>
+            ) : (
+              <div className="space-y-3 mb-6">
+                {Object.entries(PIPELINE_META).map(([name, meta]) => {
+                  const pipe      = pipelines.find((p) => p.name === name) || {};
+                  const isRunning = runningJobs[name];
+                  const result    = runResults[name];
+                  const isEnabled = config.pipelines[meta.key] !== false;
+                  const histExpanded = expandedHistory === name;
+                  const pipeHistory  = history[name];
+                  const histLoad     = historyLoading[name];
+
+                  return (
+                    <motion.div
+                      key={name}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className={`rounded-xl overflow-hidden ${cardBg}`}
+                    >
+                      {/* Main row */}
+                      <div className="p-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                          {/* Icon + name */}
+                          <span className="text-2xl">{meta.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`font-semibold ${textPrimary}`}>{meta.label}</span>
+                              <StatusBadge status={pipe.status || 'idle'} />
+                              {!isEnabled && (
+                                <span className="px-2 py-0.5 rounded-full text-xs border bg-slate-500/10 text-slate-400 border-slate-500/25">
+                                  Hidden from dashboards
+                                </span>
+                              )}
+                            </div>
+                            <div className={`text-xs mt-0.5 ${textSec} flex flex-wrap gap-3`}>
+                              <span>Last sync: <b className={textPrimary}>{relativeTime(pipe.last_success || pipe.last_run)}</b></span>
+                              {pipe.records_loaded != null && (
+                                <span>Records: <b className={textPrimary}>{pipe.records_loaded?.toLocaleString()}</b></span>
+                              )}
+                              {pipe.duration_seconds != null && (
+                                <span>Duration: <b className={textPrimary}>{pipe.duration_seconds?.toFixed(1)}s</b></span>
+                              )}
+                              {pipe.error && (
+                                <span className="text-red-400">Error: {pipe.error}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Frequency picker */}
+                          <select
+                            value={frequencies[name] || '2hrs'}
+                            onChange={(e) => setFrequencies((p) => ({ ...p, [name]: e.target.value }))}
+                            className={`px-2 py-1 rounded-lg text-xs border ${inputCls}`}
+                          >
+                            {FREQ_OPTIONS.map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+
+                          {/* Enable/disable dashboard visibility */}
+                          <button
+                            onClick={() => updatePipeline(meta.key, !isEnabled)}
+                            title={isEnabled ? 'Visible on dashboards (click to hide)' : 'Hidden from dashboards (click to show)'}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              isEnabled ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-slate-500 hover:bg-slate-500/10'
+                            }`}
+                          >
+                            {isEnabled ? <Eye size={16} /> : <EyeOff size={16} />}
+                          </button>
+
+                          {/* History toggle */}
+                          <button
+                            onClick={() => loadHistory(name)}
+                            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+                              isDark ? 'border-slate-600 text-slate-300 hover:border-indigo-500/60' : 'border-slate-300 text-slate-600 hover:border-indigo-500/60'
+                            }`}
+                          >
+                            {histExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                            History
+                          </button>
+
+                          {/* Run Now */}
+                          <button
+                            onClick={() => handleRunNow(name)}
+                            disabled={isRunning || apiConnected === false}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors"
+                          >
+                            {isRunning
+                              ? <><Loader2 size={12} className="animate-spin" /> Running...</>
+                              : <><Play size={12} /> Run Now</>}
+                          </button>
+                        </div>
+
+                        {/* Per-pipeline run result */}
+                        <AnimatePresence>
+                          {result && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                              className={`mt-2 p-2 rounded-lg text-xs flex items-center gap-2 ${
+                                result.success
+                                  ? 'bg-emerald-500/10 text-emerald-400'
+                                  : 'bg-red-500/10 text-red-400'
+                              }`}
+                            >
+                              {result.success
+                                ? <><CheckCircle size={12} /> Done — {result.records_loaded} records in {result.duration_seconds?.toFixed(1)}s</>
+                                : <><XCircle size={12} /> {result.error}</>}
+                              <button onClick={() => setRunResults((p) => ({ ...p, [name]: null }))} className="ml-auto opacity-50 hover:opacity-100">✕</button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+
+                      {/* History panel */}
+                      <AnimatePresence>
+                        {histExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                            className={`border-t ${border} overflow-hidden`}
+                          >
+                            <div className="p-4">
+                              <p className={`text-xs font-semibold mb-3 ${textSec}`}>LAST 15 RUNS</p>
+                              {histLoad ? (
+                                <div className="flex items-center gap-2 text-sm py-3">
+                                  <Loader2 size={14} className="animate-spin text-indigo-400" />
+                                  <span className={textSec}>Loading history...</span>
+                                </div>
+                              ) : pipeHistory && pipeHistory.length > 0 ? (
+                                <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                                  {pipeHistory.map((run, i) => (
+                                    <div key={i} className={`flex items-center justify-between text-xs p-2 rounded-lg ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+                                      <div className="flex items-center gap-2">
+                                        <StatusBadge status={run.status || 'unknown'} />
+                                        <span className={textSec}>{run.started_at ? new Date(run.started_at).toLocaleString() : '—'}</span>
+                                      </div>
+                                      <div className="flex items-center gap-3">
+                                        <span className={textSec}>{run.records_loaded?.toLocaleString() ?? '—'} records</span>
+                                        <span className={textSec}>{run.duration_seconds ? `${run.duration_seconds?.toFixed(1)}s` : '—'}</span>
+                                        {run.error && <span className="text-red-400 truncate max-w-[200px]">{run.error}</span>}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className={`text-xs ${textSec} py-3`}>No history available for this pipeline yet.</p>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Data Health */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+              className={`rounded-xl p-5 ${cardBg}`}>
+              <h3 className={`font-semibold mb-4 ${textPrimary}`}>Data Health Overview</h3>
+              <div className="space-y-3">
+                {Object.entries(PIPELINE_META).map(([name, meta]) => {
+                  const pipe    = pipelines.find((p) => p.name === name) || {};
+                  const health  = pipe.status === 'success' ? 100 : pipe.status === 'failed' || pipe.status === 'error' ? 0 : 50;
+                  const barClr  = health === 100 ? 'bg-emerald-500' : health === 0 ? 'bg-red-500' : 'bg-amber-500';
+                  return (
+                    <div key={name}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className={textSec}>{meta.icon} {meta.label}</span>
+                        <span className={health === 100 ? 'text-emerald-400' : health === 0 ? 'text-red-400' : 'text-amber-400'}>
+                          {health}%
+                        </span>
+                      </div>
+                      <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${health}%` }}
+                          transition={{ duration: 1.2, ease: 'easeOut' }}
+                          className={`h-full rounded-full ${barClr}`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════════════
+            TAB: CONTRACTOR MANAGEMENT
+        ═══════════════════════════════════════════════════════════════════════ */}
+        {activeTab === 'contractors' && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            {/* Summary bar */}
+            <div className={`rounded-xl p-5 mb-5 ${cardBg}`}>
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className={`font-semibold ${textPrimary}`}>Contractor Visibility Control</h3>
+                  <p className={`text-xs mt-0.5 ${textSec}`}>
+                    Active contractors feed data to all I-BOS dashboards. Disable to exclude from reports.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`text-sm ${textSec}`}>
+                    <b className="text-emerald-400">{activeContractors}</b>/{contractors.length} active
+                  </span>
+                  <button
+                    onClick={() => toggleAllContractors(true)}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors"
+                  >
+                    Enable All
+                  </button>
+                  <button
+                    onClick={() => toggleAllContractors(false)}
+                    className="px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded-lg text-xs font-medium transition-colors"
+                  >
+                    Disable All
+                  </button>
+                </div>
+              </div>
+              {/* Filter tabs */}
+              <div className="flex gap-2 mt-4">
+                {[
+                  { id: 'all',      label: `All (${contractors.length})` },
+                  { id: 'active',   label: `Active (${contractors.filter((c) => c.active).length})` },
+                  { id: 'inactive', label: `Inactive (${contractors.filter((c) => !c.active).length})` },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setContractorFilter(t.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      contractorFilter === t.id
+                        ? 'bg-indigo-600 text-white'
+                        : `${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'} hover:bg-indigo-500/20`
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="bg-[#0d1117] rounded-lg p-4 max-h-[400px] overflow-y-auto font-mono text-xs leading-relaxed">
-              {logEntries.map((entry, idx) => {
-                const levelColors = { info: 'text-emerald-400', warn: 'text-yellow-400', error: 'text-red-400' };
+
+            {/* Contractor grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {filteredContractors.map((contractor) => (
+                <motion.div
+                  key={contractor.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className={`rounded-xl p-4 flex items-center justify-between ${cardBg} ${
+                    !contractor.active ? (isDark ? 'opacity-50' : 'opacity-60') : ''
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg ${
+                      isDark ? 'bg-slate-800' : 'bg-slate-100'
+                    }`}>
+                      🏗️
+                    </div>
+                    <div>
+                      <p className={`text-sm font-medium ${textPrimary}`}>{contractor.name}</p>
+                      <p className={`text-xs ${textSec}`}>
+                        {contractor.active ? '✅ Visible on dashboards' : '🚫 Hidden from dashboards'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => toggleContractor(contractor.id)}
+                    className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                      contractor.active ? 'bg-emerald-500' : isDark ? 'bg-slate-700' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                      contractor.active ? 'translate-x-6' : 'translate-x-1'
+                    }`} />
+                  </button>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Warning if many inactive */}
+            {activeContractors < 3 && (
+              <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
+                <AlertTriangle size={15} />
+                Fewer than 3 contractors active — I-BOS dashboards may show incomplete data.
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════════════
+            TAB: RUN LOGS
+        ═══════════════════════════════════════════════════════════════════════ */}
+        {activeTab === 'logs' && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {Object.entries(PIPELINE_META).map(([name, meta]) => {
+                const pipe       = pipelines.find((p) => p.name === name) || {};
+                const pipeHistory = history[name];
+                const histLoad    = historyLoading[name];
+
                 return (
-                  <div key={idx} className="mb-1">
-                    <span className="text-slate-500">[{entry.time}]</span>{' '}
-                    <span className={levelColors[entry.level]}>[{entry.level.toUpperCase()}]</span>{' '}
-                    <span className="text-slate-300">{entry.message}</span>
+                  <div key={name} className={`rounded-xl ${cardBg}`}>
+                    <div className="p-4 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">{meta.icon}</span>
+                        <span className={`font-semibold text-sm ${textPrimary}`}>{meta.label}</span>
+                        <StatusBadge status={pipe.status || 'idle'} />
+                      </div>
+                      <button
+                        onClick={() => {
+                          // Force reload history
+                          setHistory((p) => ({ ...p, [name]: undefined }));
+                          setHistLoading((p) => ({ ...p, [name]: true }));
+                          pipelinesAPI.getHistory(name, 15)
+                            .then((res) => setHistory((p) => ({ ...p, [name]: res.data.history || [] })))
+                            .catch(() => setHistory((p) => ({ ...p, [name]: [] })))
+                            .finally(() => setHistLoading((p) => ({ ...p, [name]: false })));
+                        }}
+                        className={`p-1.5 rounded-lg hover:bg-indigo-500/10 transition-colors ${textSec}`}
+                        title="Reload history"
+                      >
+                        <RefreshCw size={13} />
+                      </button>
+                    </div>
+                    <div className={`border-t ${border} p-3`}>
+                      {histLoad ? (
+                        <div className="flex items-center gap-2 py-4 justify-center">
+                          <Loader2 size={14} className="animate-spin text-indigo-400" />
+                          <span className={`text-sm ${textSec}`}>Loading...</span>
+                        </div>
+                      ) : pipeHistory && pipeHistory.length > 0 ? (
+                        <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                          {pipeHistory.map((run, i) => (
+                            <div key={i} className={`text-xs p-2.5 rounded-lg ${isDark ? 'bg-slate-800/50' : 'bg-slate-50'}`}>
+                              <div className="flex items-center justify-between mb-0.5">
+                                <StatusBadge status={run.status || 'unknown'} />
+                                <span className={textSec}>{run.started_at ? new Date(run.started_at).toLocaleString() : '—'}</span>
+                              </div>
+                              <div className={`flex gap-3 mt-1 ${textSec}`}>
+                                <span>{run.records_loaded?.toLocaleString() ?? 0} records</span>
+                                <span>{run.duration_seconds ? `${run.duration_seconds?.toFixed(1)}s` : '—'}</span>
+                              </div>
+                              {run.error && <p className="text-red-400 mt-1 truncate">{run.error}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : pipeHistory && pipeHistory.length === 0 ? (
+                        <p className={`text-xs text-center py-4 ${textSec}`}>No run history found.</p>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setHistLoading((p) => ({ ...p, [name]: true }));
+                            pipelinesAPI.getHistory(name, 15)
+                              .then((res) => setHistory((p) => ({ ...p, [name]: res.data.history || [] })))
+                              .catch(() => setHistory((p) => ({ ...p, [name]: [] })))
+                              .finally(() => setHistLoading((p) => ({ ...p, [name]: false })));
+                          }}
+                          className="w-full py-4 text-xs text-center text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                          Load history
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
           </motion.div>
-        </div>
+        )}
 
-        {/* AI Data Quality Insights */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
-          className={`rounded-xl p-6 ${cardBg}`}>
-          <div className="flex items-center gap-2 mb-4">
-            <Zap size={18} className="text-violet-400" />
-            <h3 className={`text-lg font-semibold ${textPrimary}`}>AI-Powered Data Quality Insights</h3>
-          </div>
-          <div className="space-y-3">
-            {aiInsights.map((insight, idx) => {
-              const iconMap = {
-                warning: <AlertTriangle size={16} className="text-yellow-400" />,
-                info: <Activity size={16} className="text-blue-400" />,
-                error: <XCircle size={16} className="text-red-400" />,
-                success: <CheckCircle size={16} className="text-emerald-400" />,
-              };
-              const borderMap = {
-                warning: 'border-l-yellow-400',
-                info: 'border-l-blue-400',
-                error: 'border-l-red-400',
-                success: 'border-l-emerald-400',
-              };
-              return (
-                <div key={idx} className={`flex items-start gap-3 p-3 rounded-lg border-l-4 ${borderMap[insight.type]} ${
-                  isDark ? 'bg-slate-800/30' : 'bg-slate-50'
-                }`}>
-                  {iconMap[insight.type]}
-                  <span className={`text-sm ${textSecondary}`}>{insight.text}</span>
-                </div>
-              );
-            })}
-          </div>
-        </motion.div>
       </div>
     </motion.div>
   );

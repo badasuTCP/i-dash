@@ -4,12 +4,15 @@ import {
   BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
+import { Filter } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import DateRangePicker from '../../components/common/DateRangePicker';
+import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 
 const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend }) => {
   const { isDark } = useTheme();
+  const { handleDateChange, filterData, isFiltered } = useDashboardDateFilter();
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
@@ -32,7 +35,17 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
             <h1 className={`text-3xl font-bold mb-1 ${textPrimary}`}>{title}</h1>
             <p className={textSecondary}>{subtitle}</p>
           </div>
-          <DateRangePicker onApply={() => {}} />
+          <div className="flex items-center gap-2">
+            {isFiltered && (
+              <motion.span
+                initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/25"
+              >
+                <Filter size={10} /> Filtered
+              </motion.span>
+            )}
+            <DateRangePicker onApply={handleDateChange} />
+          </div>
         </motion.div>
 
         {/* Scorecards */}
@@ -48,7 +61,7 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
           className={`rounded-xl p-6 mb-8 ${cardBg}`}>
           <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Visitor Trend</h3>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={visitorTrend}>
+            <LineChart data={filterData(visitorTrend, 'month')}>
               <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
               <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
               <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />

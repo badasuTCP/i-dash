@@ -86,7 +86,7 @@ async def run_pipeline(
     name: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: None = Depends(role_required(["admin"])),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
     pipeline_service: PipelineService = Depends(get_pipeline_service),
 ) -> Dict[str, Any]:
     """
@@ -160,7 +160,7 @@ async def run_pipeline(
 async def run_all_pipelines(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: None = Depends(role_required(["admin"])),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
     pipeline_service: PipelineService = Depends(get_pipeline_service),
 ) -> Dict[str, Any]:
     """

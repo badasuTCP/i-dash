@@ -1,9 +1,10 @@
 import React, { createContext, useState, useCallback, useContext } from 'react';
 import { Navigate } from 'react-router-dom';
+import { authAPI } from '../services/api';
 
 export const AuthContext = createContext(null);
 
-// Demo accounts for RBA preview
+// Demo fallback — used when backend is unreachable or email matches demo list
 const DEMO_ACCOUNTS = {
   'daniel@theconcreteprotector.com': {
     id: 1,
@@ -41,120 +42,225 @@ export const ROLE_PERMISSIONS = {
     canManage: ['pipelines', 'accounts', 'settings', 'dashboards'],
     description: 'Full access to all features including data pipelines and account management',
   },
+  'admin': {
+    label: 'Administrator',
+    canView: ['dashboards', 'ai-insights', 'pipelines', 'accounts', 'settings'],
+    canManage: ['pipelines', 'accounts', 'settings', 'dashboards'],
+    description: 'Full system access',
+  },
 };
 
-const STORAGE_KEY_USER  = 'idash_user';
-const STORAGE_KEY_TOKEN = 'idash_token';
+const STORAGE_KEY_USER    = 'idash_user';
+const STORAGE_KEY_TOKEN   = 'idash_token';
+const STORAGE_KEY_REFRESH = 'idash_refresh_token';
 
 function loadFromStorage() {
   try {
-    const storedToken = localStorage.getItem(STORAGE_KEY_TOKEN);
-    const storedUser  = JSON.parse(localStorage.getItem(STORAGE_KEY_USER) || 'null');
-    return { storedToken, storedUser };
+    const storedToken   = localStorage.getItem(STORAGE_KEY_TOKEN);
+    const storedRefresh = localStorage.getItem(STORAGE_KEY_REFRESH);
+    const storedUser    = JSON.parse(localStorage.getItem(STORAGE_KEY_USER) || 'null');
+    return { storedToken, storedRefresh, storedUser };
   } catch {
-    return { storedToken: null, storedUser: null };
+    return { storedToken: null, storedRefresh: null, storedUser: null };
   }
 }
 
+function normaliseUser(apiUser) {
+  // Normalise API response into the shape our app expects
+  return {
+    id:          apiUser.id,
+    email:       apiUser.email,
+    first_name:  apiUser.first_name || apiUser.firstName || apiUser.email?.split('@')[0] || '',
+    last_name:   apiUser.last_name  || apiUser.lastName  || '',
+    full_name:   apiUser.full_name  || apiUser.fullName  || `${apiUser.first_name || ''} ${apiUser.last_name || ''}`.trim(),
+    role:        apiUser.role       || 'executive',
+    department:  apiUser.department || apiUser.role || 'general',
+    is_active:   apiUser.is_active  ?? true,
+  };
+}
+
 export const AuthProvider = ({ children }) => {
-  const { storedToken, storedUser } = loadFromStorage();
-  const [user,  setUser]  = useState(storedUser);
-  const [token, setToken] = useState(storedToken);
+  const { storedToken, storedRefresh, storedUser } = loadFromStorage();
+  const [user,    setUser]    = useState(storedUser);
+  const [token,   setToken]   = useState(storedToken);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
+  const [authMode, setAuthMode] = useState(storedToken?.startsWith('demo-') ? 'demo' : 'live');
 
+  const _persist = useCallback((tok, usr, refresh = null) => {
+    localStorage.setItem(STORAGE_KEY_TOKEN, tok);
+    localStorage.setItem(STORAGE_KEY_USER,  JSON.stringify(usr));
+    if (refresh) localStorage.setItem(STORAGE_KEY_REFRESH, refresh);
+    setToken(tok);
+    setUser(usr);
+  }, []);
+
+  // ─── LOGIN ────────────────────────────────────────────────────────────────────
   const login = useCallback(async (email, password) => {
     setLoading(true);
     setError(null);
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // ── 1. Try real backend first ─────────────────────────────────────────────
     try {
-      await new Promise((r) => setTimeout(r, 800)); // simulate network
+      const res = await authAPI.login(normalizedEmail, password);
+      const data = res.data;
 
-      const normalizedEmail = email.toLowerCase().trim();
-      const account = DEMO_ACCOUNTS[normalizedEmail];
+      // Backend typically returns { access_token, token_type, user } or { access_token, ... }
+      const accessToken  = data.access_token  || data.token;
+      const refreshToken = data.refresh_token || null;
 
-      if (!account) {
-        // Default: treat any unknown login as executive
-        const fallbackUser = {
-          id: 99,
-          email: normalizedEmail,
-          first_name: normalizedEmail.split('@')[0],
-          last_name: '',
-          full_name: normalizedEmail.split('@')[0],
-          role: 'executive',
-          department: 'executive',
-          is_active: true,
-        };
-        const t = 'demo-token-exec';
-        localStorage.setItem(STORAGE_KEY_TOKEN, t);
-        localStorage.setItem(STORAGE_KEY_USER,  JSON.stringify(fallbackUser));
-        setToken(t);
-        setUser(fallbackUser);
-        return { success: true };
+      // Get user info — either embedded in login response or via /users/me
+      let userObj = data.user || data.profile || null;
+      if (!userObj && accessToken) {
+        // Set token temporarily so the interceptor works for /users/me
+        localStorage.setItem(STORAGE_KEY_TOKEN, accessToken);
+        try {
+          const meRes = await authAPI.me();
+          userObj = meRes.data;
+        } catch {
+          // If /me fails, build minimal user from email
+          userObj = { id: 1, email: normalizedEmail, role: 'data-analyst' };
+        }
       }
 
-      const t = `demo-token-${account.role}`;
-      localStorage.setItem(STORAGE_KEY_TOKEN, t);
-      localStorage.setItem(STORAGE_KEY_USER,  JSON.stringify(account));
-      setToken(t);
-      setUser(account);
-      return { success: true };
-    } catch (err) {
-      const message = 'Login failed';
-      setError(message);
-      return { success: false, error: message };
-    } finally {
+      const normUser = normaliseUser(userObj || { email: normalizedEmail });
+      _persist(accessToken, normUser, refreshToken);
+      setAuthMode('live');
       setLoading(false);
-    }
-  }, []);
+      return { success: true, mode: 'live' };
 
+    } catch (backendErr) {
+      // 401 = wrong credentials — don't fall back to demo
+      if (backendErr.response?.status === 401) {
+        const msg = 'Invalid email or password';
+        setError(msg);
+        setLoading(false);
+        return { success: false, error: msg };
+      }
+
+      // Network / 5xx — fall through to demo mode
+    }
+
+    // ── 2. Demo fallback (backend unreachable) ────────────────────────────────
+    await new Promise((r) => setTimeout(r, 600));
+
+    const account = DEMO_ACCOUNTS[normalizedEmail];
+    if (account) {
+      const t = `demo-token-${account.role}`;
+      _persist(t, account);
+      setAuthMode('demo');
+      setLoading(false);
+      return { success: true, mode: 'demo' };
+    }
+
+    // Unknown email in demo mode — treat as executive
+    const fallback = {
+      id:         99,
+      email:      normalizedEmail,
+      first_name: normalizedEmail.split('@')[0],
+      last_name:  '',
+      full_name:  normalizedEmail.split('@')[0],
+      role:       'executive',
+      department: 'executive',
+      is_active:  true,
+    };
+    _persist('demo-token-exec', fallback);
+    setAuthMode('demo');
+    setLoading(false);
+    return { success: true, mode: 'demo' };
+
+  }, [_persist]);
+
+  // ─── REGISTER ─────────────────────────────────────────────────────────────────
   const register = useCallback(async (email, password, firstName, lastName) => {
     setLoading(true);
     setError(null);
-    try {
-      await new Promise((r) => setTimeout(r, 800));
-      const newUser = {
-        id: Date.now(),
-        email,
-        first_name: firstName,
-        last_name: lastName,
-        full_name: `${firstName} ${lastName}`,
-        role: 'executive',
-        department: 'executive',
-        is_active: true,
-      };
-      const t = 'demo-token-exec';
-      localStorage.setItem(STORAGE_KEY_TOKEN, t);
-      localStorage.setItem(STORAGE_KEY_USER,  JSON.stringify(newUser));
-      setToken(t);
-      setUser(newUser);
-      return { success: true };
-    } catch (err) {
-      const message = 'Registration failed';
-      setError(message);
-      return { success: false, error: message };
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
+    // Try real backend
+    try {
+      const res = await authAPI.register(email, password, firstName, lastName);
+      const data = res.data;
+      const accessToken  = data.access_token || data.token;
+      const refreshToken = data.refresh_token || null;
+
+      let userObj = data.user || null;
+      if (!userObj) {
+        userObj = {
+          id:         data.id || Date.now(),
+          email,
+          first_name: firstName,
+          last_name:  lastName,
+          role:       'executive',
+          department: 'executive',
+          is_active:  true,
+        };
+      }
+      const normUser = normaliseUser(userObj);
+      if (accessToken) {
+        _persist(accessToken, normUser, refreshToken);
+        setAuthMode('live');
+      } else {
+        // Registration without auto-login — just sign them in as demo
+        _persist('demo-token-exec', normUser);
+        setAuthMode('demo');
+      }
+      setLoading(false);
+      return { success: true };
+    } catch (backendErr) {
+      if (backendErr.response?.status === 400 || backendErr.response?.status === 422) {
+        const msg = backendErr.response?.data?.detail || 'Registration failed';
+        setError(msg);
+        setLoading(false);
+        return { success: false, error: msg };
+      }
+      // Backend unreachable — demo registration
+    }
+
+    // Demo fallback
+    await new Promise((r) => setTimeout(r, 600));
+    const newUser = {
+      id:         Date.now(),
+      email,
+      first_name: firstName,
+      last_name:  lastName,
+      full_name:  `${firstName} ${lastName}`,
+      role:       'executive',
+      department: 'executive',
+      is_active:  true,
+    };
+    _persist('demo-token-exec', newUser);
+    setAuthMode('demo');
+    setLoading(false);
+    return { success: true, mode: 'demo' };
+  }, [_persist]);
+
+  // ─── LOGOUT ───────────────────────────────────────────────────────────────────
   const logout = useCallback(() => {
+    // Best-effort backend logout
+    if (token && !token.startsWith('demo-')) {
+      authAPI.logout().catch(() => {});
+    }
     localStorage.removeItem(STORAGE_KEY_TOKEN);
     localStorage.removeItem(STORAGE_KEY_USER);
+    localStorage.removeItem(STORAGE_KEY_REFRESH);
     setUser(null);
     setToken(null);
     setError(null);
-  }, []);
+    setAuthMode('live');
+  }, [token]);
 
-  // Permission helpers
+  // ─── Permission helpers ───────────────────────────────────────────────────────
   const hasPermission = useCallback((feature) => {
     if (!user) return false;
-    const perms = ROLE_PERMISSIONS[user.role];
+    const perms = ROLE_PERMISSIONS[user.role] || ROLE_PERMISSIONS['executive'];
     return perms?.canView?.includes(feature) || perms?.canManage?.includes(feature) || false;
   }, [user]);
 
   const canManage = useCallback((feature) => {
     if (!user) return false;
-    const perms = ROLE_PERMISSIONS[user.role];
+    const perms = ROLE_PERMISSIONS[user.role] || ROLE_PERMISSIONS['executive'];
     return perms?.canManage?.includes(feature) || false;
   }, [user]);
 
@@ -163,11 +269,12 @@ export const AuthProvider = ({ children }) => {
     token,
     loading,
     error,
+    authMode,   // 'live' | 'demo'
     login,
     register,
     logout,
     isAuthenticated: !!token,
-    userRole: user?.role,
+    userRole:       user?.role,
     userDepartment: user?.department,
     hasPermission,
     canManage,

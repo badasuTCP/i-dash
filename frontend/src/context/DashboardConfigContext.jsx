@@ -1,5 +1,22 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 
+// Full I-BOS contractor list — source of truth for the whole app
+export const ALL_CONTRACTORS = [
+  { id: 'beckley',     name: 'Beckley Concrete Decor',      division: 'i-bos', active: true },
+  { id: 'tailored',   name: 'Tailored Concrete Coatings',   division: 'i-bos', active: true },
+  { id: 'slg',        name: 'SLG Concrete Coatings',        division: 'i-bos', active: true },
+  { id: 'columbus',   name: 'Columbus Concrete Coatings',   division: 'i-bos', active: true },
+  { id: 'tvs',        name: 'TVS Coatings',                 division: 'i-bos', active: true },
+  { id: 'eminence',   name: 'Eminence',                     division: 'i-bos', active: true },
+  { id: 'permasurface',name:'PermaSurface',                  division: 'i-bos', active: true },
+  { id: 'diamond',    name: 'Diamond Topcoat',               division: 'i-bos', active: true },
+  { id: 'floor-warriors', name: 'Floor Warriors',           division: 'i-bos', active: true },
+  { id: 'graber',     name: 'Graber Design',                 division: 'i-bos', active: true },
+  { id: 'dec-idaho',  name: 'Decorative Concrete Idaho',    division: 'i-bos', active: true },
+  { id: 'reeves',     name: 'Reeves Solutions',              division: 'i-bos', active: true },
+  { id: 'elite-pool', name: 'Elite Pool Coatings',           division: 'i-bos', active: true },
+];
+
 const defaultConfig = {
   // Pipeline sections visibility
   pipelines: {
@@ -36,6 +53,8 @@ const defaultConfig = {
     sanitred: true,
     ibos: true,
   },
+  // Contractor visibility (keyed by contractor ID)
+  contractors: Object.fromEntries(ALL_CONTRACTORS.map((c) => [c.id, true])),
 };
 
 const DashboardConfigContext = createContext();
@@ -71,9 +90,32 @@ export const DashboardConfigProvider = ({ children }) => {
     }));
   }, []);
 
+  const updateContractor = useCallback((id, active) => {
+    setConfig((prev) => ({
+      ...prev,
+      contractors: { ...prev.contractors, [id]: active },
+    }));
+  }, []);
+
+  const setAllContractors = useCallback((active) => {
+    setConfig((prev) => ({
+      ...prev,
+      contractors: Object.fromEntries(ALL_CONTRACTORS.map((c) => [c.id, active])),
+    }));
+  }, []);
+
   const resetToDefaults = useCallback(() => {
     setConfig(defaultConfig);
   }, []);
+
+  // Helpers
+  const isContractorActive = useCallback((id) => {
+    return config.contractors?.[id] !== false;
+  }, [config.contractors]);
+
+  const getActiveContractors = useCallback(() => {
+    return ALL_CONTRACTORS.filter((c) => config.contractors?.[c.id] !== false);
+  }, [config.contractors]);
 
   return (
     <DashboardConfigContext.Provider value={{
@@ -81,10 +123,14 @@ export const DashboardConfigProvider = ({ children }) => {
       updatePipeline,
       updateSection,
       updateDivision,
+      updateContractor,
+      setAllContractors,
       resetToDefaults,
-      isPipelineVisible: (key) => config.pipelines[key] !== false,
-      isSectionVisible: (key) => config.sections[key] !== false,
-      isDivisionVisible: (key) => config.divisions[key] !== false,
+      isPipelineVisible:   (key) => config.pipelines[key]   !== false,
+      isSectionVisible:    (key) => config.sections[key]    !== false,
+      isDivisionVisible:   (key) => config.divisions[key]   !== false,
+      isContractorActive,
+      getActiveContractors,
     }}>
       {children}
     </DashboardConfigContext.Provider>

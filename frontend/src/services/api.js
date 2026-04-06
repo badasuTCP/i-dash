@@ -10,10 +10,14 @@ const apiClient = axios.create({
   },
 });
 
+// Storage keys — must match AuthContext
+const STORAGE_KEY_TOKEN = 'idash_token';
+const STORAGE_KEY_REFRESH = 'idash_refresh_token';
+
 // Request interceptor - add auth token
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem(STORAGE_KEY_TOKEN);
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -32,22 +36,22 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = localStorage.getItem('refresh_token');
+        const refreshToken = localStorage.getItem(STORAGE_KEY_REFRESH);
         if (refreshToken) {
           const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
             refresh_token: refreshToken,
           });
 
           const { access_token } = response.data;
-          localStorage.setItem('token', access_token);
+          localStorage.setItem(STORAGE_KEY_TOKEN, access_token);
           apiClient.defaults.headers.common.Authorization = `Bearer ${access_token}`;
 
           return apiClient(originalRequest);
         }
       } catch (refreshError) {
         // Redirect to login
-        localStorage.removeItem('token');
-        localStorage.removeItem('refresh_token');
+        localStorage.removeItem(STORAGE_KEY_TOKEN);
+        localStorage.removeItem(STORAGE_KEY_REFRESH);
         window.location.href = '/login';
         return Promise.reject(refreshError);
       }
@@ -110,16 +114,12 @@ export const dashboardAPI = {
     }),
 };
 
-// Pipeline endpoints
+// Pipeline endpoints — matches /api/pipelines backend router
 export const pipelinesAPI = {
-  getAll: () => apiClient.get('/pipelines'),
-  getById: (id) => apiClient.get(`/pipelines/${id}`),
-  create: (data) => apiClient.post('/pipelines', data),
-  update: (id, data) => apiClient.put(`/pipelines/${id}`, data),
-  delete: (id) => apiClient.delete(`/pipelines/${id}`),
-  getStages: (pipelineId) => apiClient.get(`/pipelines/${pipelineId}/stages`),
-  getDealsByStage: (pipelineId) =>
-    apiClient.get(`/pipelines/${pipelineId}/deals-by-stage`),
+  getAll:    ()           => apiClient.get('/pipelines'),
+  run:       (name)       => apiClient.post(`/pipelines/${name}/run`),
+  runAll:    ()           => apiClient.post('/pipelines/run-all'),
+  getHistory:(name, limit=20) => apiClient.get(`/pipelines/${name}/history`, { params: { limit } }),
 };
 
 // AI endpoints

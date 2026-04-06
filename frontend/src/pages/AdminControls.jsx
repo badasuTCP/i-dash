@@ -1,8 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Shield, Eye, EyeOff, RotateCcw, Database, LayoutDashboard, Building2 } from 'lucide-react';
+import { Shield, Eye, EyeOff, RotateCcw, Database, LayoutDashboard, Building2, Users, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
-import { useDashboardConfig } from '../context/DashboardConfigContext';
+import { useDashboardConfig, ALL_CONTRACTORS } from '../context/DashboardConfigContext';
 import toast from 'react-hot-toast';
 
 const ToggleSwitch = ({ enabled, onChange, isDark }) => (
@@ -63,7 +64,7 @@ const ControlRow = ({ label, description, enabled, onChange, isDark }) => {
 
 const AdminControls = () => {
   const { isDark } = useTheme();
-  const { config, updatePipeline, updateSection, updateDivision, resetToDefaults } = useDashboardConfig();
+  const { config, updatePipeline, updateSection, updateDivision, updateContractor, setAllContractors, resetToDefaults } = useDashboardConfig();
 
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
   const textSecondary = isDark ? 'text-slate-400' : 'text-slate-600';
@@ -103,9 +104,10 @@ const AdminControls = () => {
     { key: 'ibos', label: 'I-BOS', description: 'Contractor network division' },
   ];
 
-  const enabledPipelines = Object.values(config.pipelines).filter(Boolean).length;
-  const enabledSections = Object.values(config.sections).filter(Boolean).length;
-  const enabledDivisions = Object.values(config.divisions).filter(Boolean).length;
+  const enabledPipelines   = Object.values(config.pipelines).filter(Boolean).length;
+  const enabledSections    = Object.values(config.sections).filter(Boolean).length;
+  const enabledDivisions   = Object.values(config.divisions).filter(Boolean).length;
+  const enabledContractors = ALL_CONTRACTORS.filter((c) => config.contractors?.[c.id] !== false).length;
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
@@ -133,11 +135,12 @@ const AdminControls = () => {
         </motion.div>
 
         {/* Quick Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           {[
-            { label: 'Pipelines Active', value: `${enabledPipelines}/${pipelineItems.length}`, color: '#3B82F6' },
-            { label: 'Sections Visible', value: `${enabledSections}/${sectionItems.length}`, color: '#10B981' },
-            { label: 'Divisions Shown', value: `${enabledDivisions}/${divisionItems.length}`, color: '#F59E0B' },
+            { label: 'Pipelines Active',    value: `${enabledPipelines}/${pipelineItems.length}`,    color: '#3B82F6' },
+            { label: 'Sections Visible',    value: `${enabledSections}/${sectionItems.length}`,      color: '#10B981' },
+            { label: 'Divisions Shown',     value: `${enabledDivisions}/${divisionItems.length}`,    color: '#F59E0B' },
+            { label: 'Contractors Active',  value: `${enabledContractors}/${ALL_CONTRACTORS.length}`, color: '#F97066' },
           ].map((stat, idx) => (
             <motion.div key={idx} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }}
               className={`rounded-xl p-4 text-center ${isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm'}`}>
@@ -168,6 +171,49 @@ const AdminControls = () => {
           {divisionItems.map((item) => (
             <ControlRow key={item.key} label={item.label} description={item.description}
               enabled={config.divisions[item.key]} onChange={(v) => updateDivision(item.key, v)} isDark={isDark} />
+          ))}
+        </ControlSection>
+
+        {/* Contractor Management */}
+        <ControlSection icon={Users} title="I-BOS Contractor Visibility"
+          description="Active contractors feed data into all I-BOS dashboards. Disabling a contractor hides their data from reports and charts."
+          isDark={isDark}>
+          {/* Bulk actions */}
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => { setAllContractors(true); toast.success('All contractors enabled'); }}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors"
+            >
+              Enable All
+            </button>
+            <button
+              onClick={() => { setAllContractors(false); toast.success('All contractors disabled'); }}
+              className="px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded-lg text-xs font-medium transition-colors"
+            >
+              Disable All
+            </button>
+            <Link
+              to="/dashboard/pipelines"
+              className={`ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                isDark ? 'border-slate-600 text-slate-300 hover:border-indigo-500/60' : 'border-slate-300 text-slate-600 hover:border-indigo-400'
+              }`}
+            >
+              <ExternalLink size={11} /> Full contractor management
+            </Link>
+          </div>
+          {/* Per-contractor toggles */}
+          {ALL_CONTRACTORS.map((contractor) => (
+            <ControlRow
+              key={contractor.id}
+              label={contractor.name}
+              description={`I-BOS contractor — ${config.contractors?.[contractor.id] !== false ? 'visible in dashboards' : 'hidden from dashboards'}`}
+              enabled={config.contractors?.[contractor.id] !== false}
+              onChange={(v) => {
+                updateContractor(contractor.id, v);
+                toast.success(`${contractor.name} ${v ? 'enabled' : 'disabled'}`);
+              }}
+              isDark={isDark}
+            />
           ))}
         </ControlSection>
       </div>
