@@ -11,7 +11,7 @@ import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
-const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning }) => {
+const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning, contractorDetails }) => {
   const { isDark } = useTheme();
   const { handleDateChange, resolveData, isFiltered, clearFilter } = useDashboardDateFilter();
 
@@ -192,6 +192,51 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
             </table>
           </div>
         </motion.div>
+
+        {/* Per-Contractor Web Analytics (I-BOS specific) */}
+        {contractorDetails && contractorDetails.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+            className={`rounded-xl p-6 mt-8 ${cardBg}`}>
+            <h3 className={`text-lg font-semibold mb-1 ${textPrimary}`}>Per-Contractor Web Performance</h3>
+            <p className={`text-xs mb-4 ${textSecondary}`}>Individual website metrics for each active contractor — visits, engagement, bounce rate, and traffic split.</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={`border-b ${tableBorder}`}>
+                    <th className={`text-left py-3 px-3 font-semibold ${textSecondary}`}>Contractor</th>
+                    <th className={`text-right py-3 px-3 font-semibold ${textSecondary}`}>Visits</th>
+                    <th className={`text-right py-3 px-3 font-semibold ${textSecondary}`}>Visitors</th>
+                    <th className={`text-right py-3 px-3 font-semibold ${textSecondary}`}>New</th>
+                    <th className={`text-right py-3 px-3 font-semibold ${textSecondary}`}>Returning</th>
+                    <th className={`text-right py-3 px-3 font-semibold ${textSecondary}`}>Avg Eng.</th>
+                    <th className={`text-right py-3 px-3 font-semibold ${textSecondary}`}>Bounce</th>
+                    <th className={`text-right py-3 px-3 font-semibold ${textSecondary}`}>Top Source</th>
+                    <th className={`text-center py-3 px-3 font-semibold ${textSecondary}`}>Paid / Organic / Direct</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {contractorDetails.map((row, idx) => (
+                    <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
+                      <td className={`py-3 px-3 font-medium ${textPrimary}`}>{row.contractor}</td>
+                      <td className={`text-right py-3 px-3 ${textSecondary}`}>{row.visits > 0 ? row.visits.toLocaleString() : '—'}</td>
+                      <td className={`text-right py-3 px-3 ${textSecondary}`}>{row.visitors > 0 ? row.visitors.toLocaleString() : '—'}</td>
+                      <td className={`text-right py-3 px-3 ${textSecondary}`}>{row.newVisitors > 0 ? row.newVisitors.toLocaleString() : '—'}</td>
+                      <td className={`text-right py-3 px-3 ${textSecondary}`}>{row.returning > 0 ? row.returning.toLocaleString() : '—'}</td>
+                      <td className={`text-right py-3 px-3 ${textSecondary}`}>{row.avgEngagement}</td>
+                      <td className={`text-right py-3 px-3 ${textSecondary}`}>{row.bounceRate}</td>
+                      <td className={`text-right py-3 px-3 text-xs ${textSecondary}`}>{row.topSource}</td>
+                      <td className={`text-center py-3 px-3 text-xs ${textSecondary}`}>
+                        {row.paidShare !== '—'
+                          ? <span><span className="text-blue-400">{row.paidShare}</span> / <span className="text-emerald-400">{row.organicShare}</span> / <span className="text-amber-400">{row.directShare}</span></span>
+                          : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </motion.div>
+        )}
       </div>
     </motion.div>
   );

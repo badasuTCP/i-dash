@@ -2,17 +2,34 @@ import React, { useMemo } from 'react';
 import WebAnalyticsDashboard from '../templates/WebAnalyticsDashboard';
 import { useDashboardConfig } from '../../context/DashboardConfigContext';
 
-// ── Contractor name → ID mapping (must match IBOSContractors IDs) ─────────────
+// ── Per-contractor web metrics (visits, visitors, engagement, bounce, source) ──
 const ALL_WEBSITE_BREAKDOWN = [
   { name: 'Columbus Concrete Coatings', value: 71800, color: '#8B5CF6', contractorId: 'columbus' },
   { name: 'SLG Concrete Coatings',      value: 10200, color: '#F59E0B', contractorId: 'slg' },
-  { name: 'Dec. Concrete Idaho',         value: 9500,  color: '#0EA5E9', contractorId: 'decorative' },
+  { name: 'Dec. Concrete Idaho',        value: 9500,  color: '#0EA5E9', contractorId: 'decorative' },
   { name: 'Floor Warriors',             value: 7300,  color: '#F97316', contractorId: 'floorwarriors' },
   { name: 'Tailored Concrete',          value: 5400,  color: '#10B981', contractorId: 'tailored' },
   { name: 'Beckley Concrete Decor',     value: 5300,  color: '#3B82F6', contractorId: 'beckley' },
   { name: 'Reeves Solutions',           value: 1928,  color: '#64748B', contractorId: 'reeves' },
   { name: 'Graber Design',              value: 85,    color: '#7C3AED', contractorId: 'graber' },
   { name: 'Elite Pool Coatings',        value: 21,    color: '#2DD4BF', contractorId: 'elitepool' },
+];
+
+// ── Deep per-contractor analytics ──────────────────────────────────────────────
+const ALL_CONTRACTOR_WEB_DETAILS = [
+  { contractor: 'Columbus Concrete Coatings', visits: 71800, visitors: 53800, newVisitors: 44200, returning: 9600,  avgEngagement: '2:08', bounceRate: '35.4%', topSource: 'google / organic',  paidShare: '28%',  organicShare: '62%', directShare: '10%', contractorId: 'columbus' },
+  { contractor: 'SLG Concrete Coatings',      visits: 10200, visitors: 8100,  newVisitors: 6800,  returning: 1300,  avgEngagement: '1:42', bounceRate: '46.1%', topSource: 'google / cpc',      paidShare: '54%',  organicShare: '32%', directShare: '14%', contractorId: 'slg' },
+  { contractor: 'Decorative Concrete Idaho',  visits: 9500,  visitors: 7800,  newVisitors: 6500,  returning: 1300,  avgEngagement: '2:23', bounceRate: '33.8%', topSource: 'google / organic',  paidShare: '0%',   organicShare: '78%', directShare: '22%', contractorId: 'decorative' },
+  { contractor: 'Floor Warriors',             visits: 7300,  visitors: 6500,  newVisitors: 5800,  returning: 700,   avgEngagement: '1:05', bounceRate: '52.6%', topSource: 'google / organic',  paidShare: '0%',   organicShare: '71%', directShare: '29%', contractorId: 'floorwarriors' },
+  { contractor: 'Tailored Concrete Coatings', visits: 5400,  visitors: 4200,  newVisitors: 3400,  returning: 800,   avgEngagement: '1:38', bounceRate: '41.2%', topSource: 'google / cpc',      paidShare: '48%',  organicShare: '35%', directShare: '17%', contractorId: 'tailored' },
+  { contractor: 'Beckley Concrete Decor',     visits: 5300,  visitors: 4100,  newVisitors: 3200,  returning: 900,   avgEngagement: '2:15', bounceRate: '36.7%', topSource: 'google / cpc',      paidShare: '52%',  organicShare: '31%', directShare: '17%', contractorId: 'beckley' },
+  { contractor: 'Reeves Concrete Solutions',  visits: 1928,  visitors: 1806,  newVisitors: 1620,  returning: 186,   avgEngagement: '1:10', bounceRate: '48.3%', topSource: 'google / organic',  paidShare: '0%',   organicShare: '82%', directShare: '18%', contractorId: 'reeves' },
+  { contractor: 'Graber Design Coatings',     visits: 85,    visitors: 54,    newVisitors: 42,    returning: 12,    avgEngagement: '8:33', bounceRate: '18.2%', topSource: 'direct / (none)',   paidShare: '0%',   organicShare: '35%', directShare: '65%', contractorId: 'graber' },
+  { contractor: 'Elite Pool Coatings',        visits: 21,    visitors: 17,    newVisitors: 14,    returning: 3,     avgEngagement: '18:02',bounceRate: '9.5%',  topSource: 'direct / (none)',   paidShare: '0%',   organicShare: '24%', directShare: '76%', contractorId: 'elitepool' },
+  { contractor: 'Eminence',                   visits: 0,     visitors: 0,     newVisitors: 0,     returning: 0,     avgEngagement: '—',    bounceRate: '—',     topSource: '—',                 paidShare: '—',    organicShare: '—',   directShare: '—',   contractorId: 'eminence' },
+  { contractor: 'PermaSurface',               visits: 0,     visitors: 0,     newVisitors: 0,     returning: 0,     avgEngagement: '—',    bounceRate: '—',     topSource: '—',                 paidShare: '—',    organicShare: '—',   directShare: '—',   contractorId: 'permasurface' },
+  { contractor: 'Diamond Topcoat',            visits: 0,     visitors: 0,     newVisitors: 0,     returning: 0,     avgEngagement: '—',    bounceRate: '—',     topSource: '—',                 paidShare: '—',    organicShare: '—',   directShare: '—',   contractorId: 'diamond' },
+  { contractor: 'TVS Coatings',               visits: 0,     visitors: 0,     newVisitors: 0,     returning: 0,     avgEngagement: '—',    bounceRate: '—',     topSource: '—',                 paidShare: '—',    organicShare: '—',   directShare: '—',   contractorId: 'tvs' },
 ];
 
 // ── Per-period metrics for seamless scorecard filtering ──────────────────────
@@ -28,6 +45,11 @@ const IBOSSWebAnalytics = () => {
 
   const websiteBreakdown = useMemo(
     () => ALL_WEBSITE_BREAKDOWN.filter((item) => isContractorActive(item.contractorId)),
+    [isContractorActive]
+  );
+
+  const contractorDetails = useMemo(
+    () => ALL_CONTRACTOR_WEB_DETAILS.filter((row) => isContractorActive(row.contractorId)),
     [isContractorActive]
   );
 
@@ -54,6 +76,7 @@ const IBOSSWebAnalytics = () => {
         { month: 'Q1 2026', visits: 109000, returning: 14900 },
       ]}
       websiteBreakdown={websiteBreakdown}
+      contractorDetails={contractorDetails}
       deviceData={[
         { device: 'Mobile',  users: 391 },
         { device: 'Desktop', users: 224 },
