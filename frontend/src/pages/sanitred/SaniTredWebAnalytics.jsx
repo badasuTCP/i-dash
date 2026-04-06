@@ -17,6 +17,7 @@ const METRICS_PER_PERIOD = {
 const SaniTredWebAnalytics = () => (
   <WebAnalyticsDashboard
     title="Sani-Tred Web Analytics"
+    dataWarning="GA4 not yet connected for Sani-Tred. Traffic sources, device data, and session metrics shown are estimates — connect Google Analytics for real data."
     subtitle="Sani-Tred Retail — Website traffic and eCommerce engagement"
     accentColor="#10B981"
     pageInsights={[

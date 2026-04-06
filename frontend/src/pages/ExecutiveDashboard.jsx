@@ -61,25 +61,35 @@ const ExecutiveDashboard = () => {
     { month: 'Q4', current: 1073024, previous: 2085000 },
   ];
 
-  const salesByRep = [
-    { name: 'Mike T.', sales: 1250000 },
-    { name: 'Sarah K.', sales: 1080000 },
-    { name: 'James R.', sales: 980000 },
-    { name: 'Linda P.', sales: 870000 },
-    { name: 'David W.', sales: 760000 },
-    { name: 'Amy C.', sales: 650000 },
-  ];
+  // Revenue by division — derived from Google Sheets quarterly totals (Q1 2025–Q1 2026)
+  // CP derived = Total Revenue − Contractor Revenue − Retail Sales
+  const divisionRevenue = {
+    cp:         4730018,  // 941,877 + 1,328,322 + 1,280,223 + 703,160 + 476,436
+    sanitled:   1132388,  // 206,978 + 308,908 + 314,747 + 160,786 + 140,969
+    ibos:       1261046,  // contractor fees to TCP: 264,604 + 356,259 + 338,806 + 209,078 + 92,299
+  };
 
+  // Performance summary — only showing metrics sourced from real pipelines
+  // Growth %, ROAS, Conversion Rate, Customer Satisfaction not yet in any connected pipeline
   const performanceSummary = [
-    { metric: 'Revenue', cp: '$3.41M', retail: '$2.07M', contractor: '$3.00M' },
-    { metric: 'Growth %', cp: '+14.8%', retail: '+11.2%', contractor: '+16.5%' },
-    { metric: 'Leads', cp: '285', retail: '180', contractor: '212' },
-    { metric: 'Conversion Rate', cp: '4.2%', retail: '3.8%', contractor: '5.1%' },
-    { metric: 'ROAS', cp: '3.8x', retail: '3.2x', contractor: '4.1x' },
-    { metric: 'Customer Satisfaction', cp: '92%', retail: '88%', contractor: '94%' },
+    { metric: 'Revenue (5Q Total · Google Sheets)', cp: '$4.73M', retail: '$1.13M', contractor: '$1.26M' },
+    { metric: 'Marketing Leads (Q3 2025+)',          cp: '—',       retail: '—',       contractor: '727'    },
+    { metric: 'Marketing Spend (Q3 2025+)',          cp: '—',       retail: '—',       contractor: '$74.6K' },
+    { metric: 'Cost of Mistakes',                   cp: '$17.1K',  retail: '—',       contractor: '—'      },
+    { metric: 'Training Sign Ups',                  cp: '229',     retail: '—',       contractor: '—'      },
+    { metric: 'Growth % / ROAS / Conv. Rate',       cp: '⚠ Not in pipeline yet', retail: '⚠ Not in pipeline yet', contractor: '⚠ Not in pipeline yet' },
   ];
 
   const DIVISION_COLORS = ['#3B82F6', '#10B981', '#F59E0B'];
+
+  // Pipeline connection status — honest view of what data is live
+  const pipelineStatus = [
+    { name: 'Google Sheets (TCP MAIN)', status: 'live',    detail: 'Executive KPIs · Quarterly revenue · Cost of Mistakes · Training · Equipment', color: '#10B981' },
+    { name: 'Meta / Google Ads (I-BOS)',status: 'live',    detail: '5 contractors · Spend, leads, clicks, CPL per contractor', color: '#10B981' },
+    { name: 'CP Product Pipeline',      status: 'pending', detail: 'Product sales, orders, category breakdown — not yet connected', color: '#F59E0B' },
+    { name: 'SaniTred Retail Pipeline', status: 'pending', detail: 'Channel split, SKU data, order-level detail — not yet connected', color: '#F59E0B' },
+    { name: 'GA4 / Web Analytics',      status: 'pending', detail: 'Site traffic data for CP and SaniTred — not yet connected', color: '#F59E0B' },
+  ];
 
   // Filtered datasets
   const rbyq    = filterData(revenueByQuarter, 'quarter');
@@ -155,28 +165,27 @@ const ExecutiveDashboard = () => {
               <span className="text-xs font-bold uppercase tracking-wide text-violet-400">AI Insight</span>
             </div>
             <p className={`text-sm leading-relaxed ${textPrimary}`}>
-              Revenue is up <span className="text-emerald-400 font-semibold">14.2% YoY</span> driven by strong I-BOS contractor growth (+16.5%).
-              Cost per lead dropped to <span className="text-emerald-400 font-semibold">$106.88</span>, a 12.1% improvement.
-              Consider scaling the top-performing retargeting campaigns which are delivering 5.1x ROAS.
-              Sani-Tred's Amazon channel is growing fastest at <span className="text-emerald-400 font-semibold">+22.4%</span>.
+              Combined 5-quarter revenue is <span className="text-emerald-400 font-semibold">$7.12M</span> from Google Sheets pipeline.
+              I-BOS contractor CPL is at <span className="text-emerald-400 font-semibold">$102.68</span> — down from $145 two quarters ago.
+              Cost of Mistakes dropped from <span className="text-emerald-400 font-semibold">$11,130 → $139</span> — biggest improvement metric on record.
+              CP and SaniTred detailed breakdowns pending pipeline connection.
             </p>
           </div>
 
-          {/* Division Health Cards */}
+          {/* Division Revenue Cards — sourced from Google Sheets Q1 2025–Q1 2026 */}
           {[
-            { name: 'CP', color: '#3B82F6', revenue: '$3.41M', growth: '+14.8%', status: 'Strong' },
-            { name: 'Sani-Tred', color: '#10B981', revenue: '$2.07M', growth: '+11.2%', status: 'Steady' },
+            { name: 'CP (Main)',             color: '#3B82F6', revenue: '$4.73M', note: 'Derived: Total − Contractor − Retail',  badge: 'Google Sheets' },
+            { name: 'SaniTred (Retail)',      color: '#10B981', revenue: '$1.13M', note: 'Retail Sales column · 5 quarters',      badge: 'Google Sheets' },
+            { name: 'I-BOS (Contractor Fee)', color: '#F59E0B', revenue: '$1.26M', note: 'Contractor Revenue to TCP · 5 quarters', badge: 'Google Sheets' },
           ].map((div, idx) => (
             <motion.div key={idx} whileHover={{ y: -2 }}
               className={`rounded-xl p-5 ${cardBg}`} style={{ borderTop: `3px solid ${div.color}` }}>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wide" style={{ color: div.color }}>{div.name}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                  div.status === 'Strong' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
-                }`}>{div.status}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-500/15 text-emerald-400">{div.badge}</span>
               </div>
               <p className={`text-xl font-bold ${textPrimary}`}>{div.revenue}</p>
-              <p className="text-sm text-emerald-400 font-semibold">{div.growth}</p>
+              <p className={`text-xs mt-1 ${textSecondary}`}>{div.note}</p>
             </motion.div>
           ))}
         </motion.div>
@@ -258,23 +267,26 @@ const ExecutiveDashboard = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
             className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Sales by Business Rep</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={salesByRep} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
-                <XAxis type="number" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
-                <YAxis dataKey="name" type="category" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} width={80} />
-                <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${(v/1000).toFixed(0)}K`]} />
-                <Bar dataKey="sales" fill="url(#salesGradient)" radius={[0, 6, 6, 0]}>
-                  <defs>
-                    <linearGradient id="salesGradient" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#4F46E5" />
-                      <stop offset="100%" stopColor="#7C3AED" />
-                    </linearGradient>
-                  </defs>
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <h3 className={`text-lg font-semibold mb-1 ${textPrimary}`}>Data Pipeline Status</h3>
+            <p className={`text-xs mb-4 ${textSecondary}`}>Live view of which pipelines are feeding this dashboard</p>
+            <div className="space-y-3">
+              {pipelineStatus.map((p, idx) => (
+                <div key={idx} className={`flex items-start gap-3 p-3 rounded-lg ${isDark ? 'bg-slate-800/40' : 'bg-slate-50'}`}>
+                  <div className="mt-0.5 w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: p.color, boxShadow: p.status === 'live' ? `0 0 6px ${p.color}` : 'none' }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-semibold ${textPrimary}`}>{p.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide ${
+                        p.status === 'live'
+                          ? 'bg-emerald-500/15 text-emerald-400'
+                          : 'bg-amber-500/15 text-amber-400'
+                      }`}>{p.status === 'live' ? '● Live' : '○ Pending'}</span>
+                    </div>
+                    <p className={`text-[11px] mt-0.5 ${textSecondary}`}>{p.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}

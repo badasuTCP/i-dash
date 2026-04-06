@@ -17,6 +17,7 @@ const METRICS_PER_PERIOD = {
 const CPWebAnalytics = () => (
   <WebAnalyticsDashboard
     title="CP Web Analytics"
+    dataWarning="GA4 not yet connected for CP. Traffic numbers shown are estimates — connect Google Analytics to pull real session, bounce rate, and source data."
     subtitle="The Concrete Protector — Website traffic and user engagement"
     accentColor="#3B82F6"
     pageInsights={[

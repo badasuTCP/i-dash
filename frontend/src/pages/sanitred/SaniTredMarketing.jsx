@@ -13,6 +13,7 @@ const METRICS_PER_PERIOD = {
 const SaniTredMarketing = () => (
   <MarketingDashboardTemplate
     title="Sani-Tred Marketing Campaign"
+    dataWarning="Sani-Tred ad accounts not yet connected. Spend, leads, and ROAS shown are estimates — connect Meta/Google Ads for real campaign data."
     subtitle="Sani-Tred Retail — Ad performance and campaign ROI"
     accentColor="#10B981"
     pageInsights={[

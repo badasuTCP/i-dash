@@ -17,6 +17,7 @@ const METRICS_PER_PERIOD = {
 const SaniTredDashboard = () => (
   <DivisionDashboard
     title="Sani-Tred Dashboard"
+    dataWarning="Sani-Tred retail pipeline not yet connected. Product sales, orders, and AOV shown are estimates — connect Sani-Tred store data to get real figures."
     subtitle="Sani-Tred Retail Outlet — Sales and product performance"
     accentColor="#10B981"
     pageInsights={[

@@ -13,6 +13,7 @@ const METRICS_PER_PERIOD = {
 const CPMarketing = () => (
   <MarketingDashboardTemplate
     title="CP Marketing Campaign"
+    dataWarning="CP ad spend data not yet pulled from Meta/Google. Values shown are estimates — connect CP ad accounts to get real spend and lead data."
     subtitle="The Concrete Protector — Ad spend, ROAS, and campaign performance"
     accentColor="#3B82F6"
     pageInsights={[

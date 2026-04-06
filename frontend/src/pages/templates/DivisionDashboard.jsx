@@ -11,7 +11,7 @@ import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
-const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueData, salesByCategory, topProducts, quarterlyData, metricsPerPeriod, pageInsights, quarterlyHeaders }) => {
+const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueData, salesByCategory, topProducts, quarterlyData, metricsPerPeriod, pageInsights, quarterlyHeaders, dataWarning }) => {
   // Default headers match the most common real-data range; override per-page via quarterlyHeaders prop
   const qHeaders = quarterlyHeaders || ['Q1 2025', 'Q2 2025', 'Q3 2025', 'Q4 2025', 'Q1 2026'];
   const { isDark } = useTheme();
@@ -69,6 +69,18 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
 
         {/* Page Insights */}
         <PageInsight insights={pageInsights} />
+
+        {/* Data warning banner — shown when page has no live pipeline connection */}
+        {dataWarning && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
+            <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-400">⚠ Estimated Data — No Live Pipeline Connected</p>
+              <p className="text-xs text-amber-300/80 mt-0.5">{dataWarning}</p>
+            </div>
+          </motion.div>
+        )}
 
         {/* No-data-for-period banner */}
         {noDataMsg && (

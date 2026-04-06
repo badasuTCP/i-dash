@@ -17,6 +17,7 @@ const METRICS_PER_PERIOD = {
 const CPDashboard = () => (
   <DivisionDashboard
     title="CP Dashboard"
+    dataWarning="CP product pipeline not yet connected. Values shown are estimates — do not use for financial decisions until live data is wired."
     subtitle="The Concrete Protector — Main company performance metrics"
     accentColor="#3B82F6"
     pageInsights={[

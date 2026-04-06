@@ -5,7 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart,
   AreaChart, Area,
 } from 'recharts';
-import { Filter } from 'lucide-react';
+import { Filter, AlertCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import DateRangePicker from '../../components/common/DateRangePicker';
@@ -126,6 +126,16 @@ const SaniTredRetail = () => {
           'Amazon fastest-growing at +22.4% — Basement Waterproof Kit leads Amazon SKUs',
           'NPS of 72 and 4.6 review score signal strong brand loyalty — leverage for upsell',
         ]} />
+
+        {/* Data warning */}
+        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+          className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
+          <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-amber-400">⚠ Estimated Data — No Live Pipeline Connected</p>
+            <p className="text-xs text-amber-300/80 mt-0.5">Sani-Tred retail channel and order data not yet connected. Channel split, product units, and regional figures shown are estimates — connect the Sani-Tred store pipeline for real data.</p>
+          </div>
+        </motion.div>
 
         {/* View Tabs */}
         <div className="flex gap-2 mb-8">

@@ -11,7 +11,7 @@ import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
-const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, spendVsRevenue, funnelData, performanceSummary, spendByPeriod, ctrData, metricsPerPeriod, pageInsights }) => {
+const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, spendVsRevenue, funnelData, performanceSummary, spendByPeriod, ctrData, metricsPerPeriod, pageInsights, dataWarning }) => {
   const { isDark } = useTheme();
   const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
@@ -68,6 +68,18 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
 
         {/* Page Insights */}
         <PageInsight insights={pageInsights} />
+
+        {/* Data warning — shown when no live pipeline is connected */}
+        {dataWarning && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
+            <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-400">⚠ Estimated Data — No Live Pipeline Connected</p>
+              <p className="text-xs text-amber-300/80 mt-0.5">{dataWarning}</p>
+            </div>
+          </motion.div>
+        )}
 
         {noDataMsg && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
