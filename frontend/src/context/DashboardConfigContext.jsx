@@ -6,10 +6,10 @@ export const ALL_CONTRACTORS = [
   { id: 'tailored',   name: 'Tailored Concrete Coatings',   division: 'i-bos', active: true },
   { id: 'slg',        name: 'SLG Concrete Coatings',        division: 'i-bos', active: true },
   { id: 'columbus',   name: 'Columbus Concrete Coatings',   division: 'i-bos', active: true },
-  { id: 'tvs',        name: 'TVS Coatings',                 division: 'i-bos', active: true },
-  { id: 'eminence',   name: 'Eminence',                     division: 'i-bos', active: true },
-  { id: 'permasurface',name:'PermaSurface',                  division: 'i-bos', active: true },
-  { id: 'diamond',    name: 'Diamond Topcoat',               division: 'i-bos', active: true },
+  { id: 'tvs',        name: 'TVS Coatings',                 division: 'i-bos', active: false },
+  { id: 'eminence',   name: 'Eminence',                     division: 'i-bos', active: false },
+  { id: 'permasurface',name:'PermaSurface',                  division: 'i-bos', active: false },
+  { id: 'diamond',    name: 'Diamond Topcoat',               division: 'i-bos', active: false },
   { id: 'floorwarriors', name: 'Floor Warriors',            division: 'i-bos', active: true },
   { id: 'graber',     name: 'Graber Design Coatings',        division: 'i-bos', active: true },
   { id: 'decorative', name: 'Decorative Concrete Idaho',     division: 'i-bos', active: true },
@@ -54,7 +54,7 @@ const defaultConfig = {
     ibos: true,
   },
   // Contractor visibility (keyed by contractor ID)
-  contractors: Object.fromEntries(ALL_CONTRACTORS.map((c) => [c.id, true])),
+  contractors: Object.fromEntries(ALL_CONTRACTORS.map((c) => [c.id, c.active !== false])),
 };
 
 const DashboardConfigContext = createContext();
