@@ -15,10 +15,12 @@ const STORAGE_KEY_TOKEN = 'idash_token';
 const STORAGE_KEY_REFRESH = 'idash_refresh_token';
 
 // Request interceptor - add auth token
+// Demo tokens (demo-token-*) are local-only and must never be sent to the backend
+// — the backend's JWT lib will reject them and crash the exception handler
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem(STORAGE_KEY_TOKEN);
-    if (token) {
+    if (token && !token.startsWith('demo-')) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;

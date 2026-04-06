@@ -7,7 +7,8 @@ Configures routes, middleware, startup/shutdown events, and core application set
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -231,45 +232,43 @@ app.include_router(
 )
 
 
-# Custom exception handlers
+# Custom exception handlers — must return Response objects, not plain dicts
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """
     Custom handler for HTTP exceptions.
 
-    Args:
-        request: The request object.
-        exc: The HTTPException.
-
     Returns:
-        JSON response with error details.
+        JSONResponse with error details and correct status code.
     """
-    return {
-        "detail": exc.detail,
-        "status_code": exc.status_code,
-        "type": "http_error",
-    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail,
+            "status_code": exc.status_code,
+            "type": "http_error",
+        },
+    )
 
 
 @app.exception_handler(Exception)
-async def general_exception_handler(request, exc):
+async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     Custom handler for unexpected exceptions.
 
-    Args:
-        request: The request object.
-        exc: The exception.
-
     Returns:
-        JSON response with error message.
+        JSONResponse with 500 status and error message.
     """
     logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
 
-    return {
-        "detail": "Internal server error",
-        "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-        "type": "server_error",
-    }
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": "Internal server error",
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "type": "server_error",
+        },
+    )
 
 
 # Root endpoint
