@@ -131,8 +131,8 @@ const PipelinesPage = () => {
       setLastFetch(new Date());
       setApiConnected(true);
     } catch (err) {
-      // In demo mode, a 401 is expected — check health to confirm backend is reachable
-      if (isDemoMode && err.response?.status === 401) {
+      // In demo mode, a 401/403 is expected — check health to confirm backend is reachable
+      if (isDemoMode && (err.response?.status === 401 || err.response?.status === 403)) {
         try {
           const baseUrl = import.meta.env.VITE_API_URL?.replace(/\/api$/, '') ||
             (window.location.hostname.endsWith('.up.railway.app') ? 'https://i-dash-production.up.railway.app' : 'http://localhost:8000');
