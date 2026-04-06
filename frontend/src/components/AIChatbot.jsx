@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, X, Send, Loader } from 'lucide-react';
+import { Bot, X, Send, Loader, WifiOff } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import { aiAPI } from '../services/api';
 
 const AIChatbot = () => {
   const { isDark } = useTheme();
@@ -25,28 +26,45 @@ const AIChatbot = () => {
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
 
-    const userMsg = { role: 'user', content: input.trim() };
+    const question = input.trim();
+    const userMsg = { role: 'user', content: question };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
 
-    // Simulate AI response
-    await new Promise((r) => setTimeout(r, 1200 + Math.random() * 800));
+    try {
+      const { data } = await aiAPI.chat(question);
 
-    const responses = [
-      "Based on the current data, your executive dashboard shows a 12.4% increase in overall revenue compared to last quarter. CP division is leading with the highest growth rate.",
-      "I've analyzed the marketing spend across all divisions. The cost per lead has decreased by 8.2% this month, with Sani-Tred showing the most improvement in ROAS.",
-      "Looking at web analytics, organic traffic is up 18% across all properties. I-BOS contractor portal has the highest engagement rate at 4.12 minutes average session duration.",
-      "The pipeline data shows all 4 data sources (HubSpot, Meta Ads, Google Ads, Google Sheets) are syncing successfully. Last sync was within the last hour.",
-      "Your top performing campaigns this quarter are Google Search ads for CP division with a 5.8x ROAS, followed by Meta retargeting campaigns for Sani-Tred at 4.2x ROAS.",
-    ];
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: data.answer || 'Sorry, I could not generate a response.',
+          live: true,
+        },
+      ]);
+    } catch (err) {
+      const status = err?.response?.status;
+      let fallback;
 
-    const aiMsg = {
-      role: 'assistant',
-      content: responses[Math.floor(Math.random() * responses.length)],
-    };
-    setMessages((prev) => [...prev, aiMsg]);
-    setIsTyping(false);
+      if (status === 503) {
+        fallback =
+          'The AI service is not configured yet. Ask your admin to set the GROQ_API_KEY in Railway Variables to enable live AI insights.';
+      } else if (status === 401 || status === 403) {
+        fallback =
+          'You need to be logged in to use AI chat. Please sign in and try again.';
+      } else {
+        fallback =
+          "I'm having trouble reaching the analytics backend right now. Data may still be syncing — please try again in a moment.";
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: fallback, error: true },
+      ]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   return (
@@ -88,7 +106,7 @@ const AIChatbot = () => {
                 <Bot size={20} className="text-white" />
                 <div>
                   <span className="text-white font-semibold text-sm block">I-Dash AI</span>
-                  <span className="text-white/70 text-[10px]">Powered by AI</span>
+                  <span className="text-white/70 text-[10px]">Powered by Groq</span>
                 </div>
               </div>
               <button
@@ -112,11 +130,18 @@ const AIChatbot = () => {
                     className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                       msg.role === 'user'
                         ? 'bg-[#265AA9] text-white rounded-br-md'
-                        : isDark
-                          ? 'bg-[#1e2235] text-slate-200 border border-slate-700/30 rounded-bl-md'
-                          : 'bg-white text-slate-700 border border-slate-200 rounded-bl-md shadow-sm'
+                        : msg.error
+                          ? isDark
+                            ? 'bg-amber-900/30 text-amber-200 border border-amber-700/30 rounded-bl-md'
+                            : 'bg-amber-50 text-amber-800 border border-amber-200 rounded-bl-md'
+                          : isDark
+                            ? 'bg-[#1e2235] text-slate-200 border border-slate-700/30 rounded-bl-md'
+                            : 'bg-white text-slate-700 border border-slate-200 rounded-bl-md shadow-sm'
                     }`}
                   >
+                    {msg.error && (
+                      <WifiOff size={12} className="inline mr-1.5 opacity-60" />
+                    )}
                     {msg.content}
                   </div>
                 </div>

@@ -15,6 +15,26 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+# ── Contractor-level marketing data (from Looker / Google Sheets / GA4) ──
+# This data feeds the AI until the pipeline populates per-contractor metrics
+# in the database.  Updated alongside the frontend CONTRACTORS array.
+CONTRACTOR_MARKETING_DATA = [
+    {"name": "Beckley Concrete Decor",      "spend": 37749, "leads": 290, "clicks": 87728, "revenue": 392470, "roas": 47, "cpl": 130.17},
+    {"name": "Tailored Concrete Coatings",  "spend": 15887, "leads": 275, "clicks": 29097, "revenue": 0,      "roas": None, "cpl": 57.77},
+    {"name": "SLG Concrete Coatings",       "spend": 11328, "leads": 42,  "clicks": 13388, "revenue": 47790,  "roas": 40, "cpl": 269.72},
+    {"name": "Columbus Concrete Coatings",  "spend": 5180,  "leads": 10,  "clicks": 87260, "revenue": 113720, "roas": 26, "cpl": 518.00},
+    {"name": "TVS Coatings",                "spend": 4502,  "leads": 16,  "clicks": 10995, "revenue": 0,      "roas": None, "cpl": 281.36},
+    {"name": "Eminence",                    "spend": 0,     "leads": 3,   "clicks": 0,     "revenue": 330770, "roas": None, "cpl": 0},
+    {"name": "PermaSurface",                "spend": 0,     "leads": 2,   "clicks": 0,     "revenue": 156330, "roas": None, "cpl": 0},
+    {"name": "Diamond Topcoat",             "spend": 0,     "leads": 89,  "clicks": 0,     "revenue": 113730, "roas": None, "cpl": 0},
+    {"name": "Floor Warriors",              "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
+    {"name": "Graber Design Coatings",      "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
+    {"name": "Decorative Concrete Idaho",   "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
+    {"name": "Reeves Concrete Solutions",   "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
+    {"name": "Elite Pool Coatings",         "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
+]
+
+
 class AIService:
     """
     AI-powered analytics service using Groq API.
@@ -146,6 +166,26 @@ Current Analytics Context (Last {context.get('period_days', 30)} days):
 
 """
 
+        # ── Per-contractor marketing spend (I-BOS division) ──────────
+        contractors = context.get("contractors", CONTRACTOR_MARKETING_DATA)
+        if contractors:
+            metrics_text += "I-BOS Contractor Marketing Spend (2026 YTD):\n"
+            # Sort by spend descending for easy ranking
+            sorted_c = sorted(contractors, key=lambda c: c.get("spend", 0), reverse=True)
+            for c in sorted_c:
+                spend = c.get("spend", 0)
+                leads = c.get("leads", 0)
+                revenue = c.get("revenue", 0)
+                roas = c.get("roas")
+                cpl = c.get("cpl", 0)
+                roas_str = f"{roas}x" if roas else "N/A"
+                metrics_text += (
+                    f"- {c['name']}: Spend=${spend:,.0f}, "
+                    f"Leads={leads:,}, Revenue=${revenue:,.0f}, "
+                    f"ROAS={roas_str}, CPL=${cpl:,.2f}\n"
+                )
+            metrics_text += "\n"
+
         return metrics_text
 
     async def chat(
@@ -180,16 +220,24 @@ an enterprise analytics platform for a company with three divisions:
 The Concrete Protector (CP), Sani-Tred, and I-BOS.
 
 You have access to real-time metrics from marketing campaigns (Meta Ads, Google Ads),
-web analytics (GA4), sales CRM (HubSpot), and revenue data.
+web analytics (GA4), sales CRM (HubSpot), revenue data, and per-contractor
+marketing spend for all 13 I-BOS contractors.
 
 Department Access: {user_department}
 
 Your role is to:
 - Answer questions about business metrics and KPIs
 - Provide data-driven insights across all three divisions
+- Compare contractor performance (spend, leads, revenue, ROAS, CPL)
 - Explain trends and patterns
 - Offer actionable recommendations
 - Be concise but thorough
+
+IMPORTANT: If a question asks about data you do not have (e.g. a metric that
+shows $0 or N/A for all contractors), respond with:
+"That data is currently syncing from the pipeline. Please check back shortly
+or verify the integration on the Data Pipelines page."
+Do NOT fabricate numbers or give generic answers unrelated to the question.
 
 Current Data:
 {metrics_context}

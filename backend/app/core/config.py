@@ -81,6 +81,10 @@ class Settings(BaseSettings):
         default="",
         description="Meta Ads Ad Account ID (e.g. act_123456789)",
     )
+    META_BUSINESS_ID: str = Field(
+        default="",
+        description="Meta Business Manager ID for auto-discovering ad accounts",
+    )
 
     # Google Ads API configuration
     GOOGLE_ADS_DEVELOPER_TOKEN: str = Field(

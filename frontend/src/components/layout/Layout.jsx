@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import AIChatbot from '../AIChatbot';
+import PendingContractorNotifier from '../PendingContractorNotifier';
 import { useTheme } from '../../context/ThemeContext';
 
 export const Layout = ({
@@ -47,6 +48,9 @@ export const Layout = ({
 
       {/* AI Chatbot - Floating */}
       <AIChatbot />
+
+      {/* Admin notification for pending Meta-discovered contractors */}
+      <PendingContractorNotifier />
     </div>
   );
 };

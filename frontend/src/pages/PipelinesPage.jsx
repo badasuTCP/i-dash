@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '../context/ThemeContext';
 import { useDashboardConfig, ALL_CONTRACTORS } from '../context/DashboardConfigContext';
-import { pipelinesAPI } from '../services/api';
+import { pipelinesAPI, contractorsAPI } from '../services/api';
 import {
   Database, Activity, AlertTriangle, CheckCircle, XCircle, Clock,
   Play, RefreshCw, Settings, Zap, Terminal, Server, Loader2,
@@ -100,12 +100,44 @@ const PipelinesPage = () => {
 
   // ── Contractor state — driven by DashboardConfigContext ──────────────────────
   const [contractorFilter, setContractorFilter] = useState('all');
+  const [pendingContractors, setPendingContractors] = useState([]);
+  const [approvingId, setApprovingId] = useState(null);
 
   // Derive contractors array with active flag from context config
   const contractors = ALL_CONTRACTORS.map((c) => ({
     ...c,
     active: config.contractors?.[c.id] !== false,
   }));
+
+  // ── Fetch pending contractors (Meta auto-discovery) ────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPending = async () => {
+      try {
+        const { data } = await contractorsAPI.getPending();
+        if (!cancelled && Array.isArray(data)) {
+          setPendingContractors(data);
+        }
+      } catch {
+        // Endpoint may not exist yet or user isn't admin — ignore
+      }
+    };
+    fetchPending();
+    return () => { cancelled = true; };
+  }, []);
+
+  // ── Approve / Reject a pending contractor ──────────────────────────────────
+  const approveContractor = useCallback(async (id, approve = true) => {
+    setApprovingId(id);
+    try {
+      await contractorsAPI.approve(id, { active: approve, division: 'i-bos' });
+      setPendingContractors((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      console.warn('Failed to approve contractor:', err);
+    } finally {
+      setApprovingId(null);
+    }
+  }, []);
 
   // ── Styles ───────────────────────────────────────────────────────────────────
   const cardBg      = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
@@ -244,11 +276,13 @@ const PipelinesPage = () => {
     ? (pipelines.reduce((s, p) => s + (p.duration_seconds || 0), 0) / pipelines.length).toFixed(1)
     : '—';
 
-  const filteredContractors = contractors.filter((c) => {
-    if (contractorFilter === 'active')   return c.active;
-    if (contractorFilter === 'inactive') return !c.active;
-    return true;
-  });
+  const filteredContractors = contractorFilter === 'pending'
+    ? [] // pending contractors rendered separately
+    : contractors.filter((c) => {
+        if (contractorFilter === 'active')   return c.active;
+        if (contractorFilter === 'inactive') return !c.active;
+        return true;
+      });
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Render
@@ -624,63 +658,135 @@ const PipelinesPage = () => {
                   { id: 'all',      label: `All (${contractors.length})` },
                   { id: 'active',   label: `Active (${contractors.filter((c) => c.active).length})` },
                   { id: 'inactive', label: `Inactive (${contractors.filter((c) => !c.active).length})` },
+                  ...(pendingContractors.length > 0
+                    ? [{ id: 'pending', label: `Pending`, badge: pendingContractors.length }]
+                    : []),
                 ].map((t) => (
                   <button
                     key={t.id}
                     onClick={() => setContractorFilter(t.id)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors relative ${
                       contractorFilter === t.id
-                        ? 'bg-indigo-600 text-white'
+                        ? t.id === 'pending' ? 'bg-amber-600 text-white' : 'bg-indigo-600 text-white'
                         : `${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'} hover:bg-indigo-500/20`
                     }`}
                   >
                     {t.label}
+                    {t.badge && (
+                      <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold rounded-full bg-red-500 text-white">
+                        {t.badge}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Contractor grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {filteredContractors.map((contractor) => (
-                <motion.div
-                  key={contractor.id}
-                  layout
-                  initial={{ opacity: 0, scale: 0.97 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className={`rounded-xl p-4 flex items-center justify-between ${cardBg} ${
-                    !contractor.active ? (isDark ? 'opacity-50' : 'opacity-60') : ''
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg ${
-                      isDark ? 'bg-slate-800' : 'bg-slate-100'
-                    }`}>
-                      🏗️
-                    </div>
-                    <div>
-                      <p className={`text-sm font-medium ${textPrimary}`}>{contractor.name}</p>
-                      <p className={`text-xs ${textSec}`}>
-                        {contractor.active ? '✅ Visible on dashboards' : '🚫 Hidden from dashboards'}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => toggleContractor(contractor.id)}
-                    className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
-                      contractor.active ? 'bg-emerald-500' : isDark ? 'bg-slate-700' : 'bg-slate-300'
+            {/* Contractor grid (regular) */}
+            {contractorFilter !== 'pending' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {filteredContractors.map((contractor) => (
+                  <motion.div
+                    key={contractor.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.97 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className={`rounded-xl p-4 flex items-center justify-between ${cardBg} ${
+                      !contractor.active ? (isDark ? 'opacity-50' : 'opacity-60') : ''
                     }`}
                   >
-                    <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                      contractor.active ? 'translate-x-6' : 'translate-x-1'
-                    }`} />
-                  </button>
-                </motion.div>
-              ))}
-            </div>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg ${
+                        isDark ? 'bg-slate-800' : 'bg-slate-100'
+                      }`}>
+                        🏗️
+                      </div>
+                      <div>
+                        <p className={`text-sm font-medium ${textPrimary}`}>{contractor.name}</p>
+                        <p className={`text-xs ${textSec}`}>
+                          {contractor.active ? '✅ Visible on dashboards' : '🚫 Hidden from dashboards'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => toggleContractor(contractor.id)}
+                      className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                        contractor.active ? 'bg-emerald-500' : isDark ? 'bg-slate-700' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                        contractor.active ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+
+            {/* Pending contractors grid (Meta auto-discovery) */}
+            {contractorFilter === 'pending' && (
+              <div className="space-y-3">
+                {pendingContractors.length === 0 ? (
+                  <div className={`text-center py-12 ${textSec}`}>
+                    No pending contractors. The Meta pipeline will detect new ad accounts automatically.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {pendingContractors.map((contractor) => (
+                      <motion.div
+                        key={contractor.id}
+                        layout
+                        initial={{ opacity: 0, scale: 0.97 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className={`rounded-xl p-4 ${cardBg} border-2 ${
+                          isDark ? 'border-amber-500/30' : 'border-amber-400/40'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg ${
+                            isDark ? 'bg-amber-900/30' : 'bg-amber-50'
+                          }`}>
+                            🆕
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className={`text-sm font-medium truncate ${textPrimary}`}>{contractor.name}</p>
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex-shrink-0">
+                                NEW
+                              </span>
+                            </div>
+                            {contractor.meta_account_id && (
+                              <p className={`text-xs ${textSec} truncate`}>
+                                Meta: {contractor.meta_account_id}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => approveContractor(contractor.id, true)}
+                            disabled={approvingId === contractor.id}
+                            className="flex-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                          >
+                            {approvingId === contractor.id ? 'Approving...' : '✅ Approve'}
+                          </button>
+                          <button
+                            onClick={() => approveContractor(contractor.id, false)}
+                            disabled={approvingId === contractor.id}
+                            className="flex-1 px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                          >
+                            🚫 Reject
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Warning if many inactive */}
-            {activeContractors < 3 && (
+            {activeContractors < 3 && contractorFilter !== 'pending' && (
               <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
                 <AlertTriangle size={15} />
                 Fewer than 3 contractors active — I-BOS dashboards may show incomplete data.

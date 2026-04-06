@@ -18,7 +18,7 @@ from app.pipelines.base import BasePipeline
 from app.pipelines.google_ads import GoogleAdsPipeline
 from app.pipelines.google_sheets import GoogleSheetsPipeline
 from app.pipelines.hubspot import HubSpotPipeline
-from app.pipelines.meta_ads import MetaAdsPipeline
+from app.pipelines.meta_ads import MetaAdsPipeline, reconcile_meta_contractors
 from app.pipelines.snapshot import SnapshotPipeline
 
 logger = logging.getLogger(__name__)
@@ -115,6 +115,21 @@ class PipelineService:
                 successful += 1
             else:
                 failed += 1
+
+            # After meta_ads completes, run contractor auto-discovery
+            if pipeline_name == "meta_ads":
+                try:
+                    recon = await reconcile_meta_contractors()
+                    if recon.get("new_contractors"):
+                        self.logger.info(
+                            "Meta auto-discovery found %d new contractor(s): %s",
+                            len(recon["new_contractors"]),
+                            ", ".join(c["name"] for c in recon["new_contractors"]),
+                        )
+                except Exception as e:
+                    self.logger.warning(
+                        "Meta contractor reconciliation skipped: %s", e
+                    )
 
         duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 

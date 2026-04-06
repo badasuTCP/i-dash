@@ -137,13 +137,29 @@ export const pipelinesAPI = {
   getHistory:(name, limit=20) => apiClient.get(`/pipelines/${name}/history`, { params: { limit } }),
 };
 
-// AI endpoints
+// AI endpoints — backend uses query params, not body
 export const aiAPI = {
-  generateInsight: (data) => apiClient.post('/ai/insights', data),
-  analyzeData: (data) => apiClient.post('/ai/analyze', data),
-  predictTrends: (data) => apiClient.post('/ai/predict', data),
-  chat: (message, context = null) =>
-    apiClient.post('/ai/chat', { message, context }),
+  chat: (question) =>
+    apiClient.post(`/ai/chat?question=${encodeURIComponent(question)}`),
+  getInsights: (days = 7) =>
+    apiClient.get('/ai/insights', { params: { days } }),
+  generateReport: (dateFrom, dateTo, reportType = 'summary') =>
+    apiClient.post('/ai/report', null, {
+      params: { date_from: _fmtDate(dateFrom), date_to: _fmtDate(dateTo), report_type: reportType },
+    }),
+};
+
+// Contractor endpoints — server-persisted visibility + auto-discovery
+export const contractorsAPI = {
+  getAll: () => apiClient.get('/contractors'),
+  updateVisibility: (id, active) =>
+    apiClient.put(`/contractors/${id}/visibility`, { active }),
+  bulkVisibility: (active) =>
+    apiClient.put('/contractors/bulk-visibility', { active }),
+  getPending: () => apiClient.get('/contractors/pending'),
+  getPendingCount: () => apiClient.get('/contractors/pending/count'),
+  approve: (id, data = { active: true }) =>
+    apiClient.put(`/contractors/${id}/approve`, data),
 };
 
 // Users endpoints

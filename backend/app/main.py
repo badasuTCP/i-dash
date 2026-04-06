@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import (
     ai_router,
     auth_router,
+    contractors_router,
     dashboard_router,
     pipelines_router,
     users_router,
@@ -228,6 +229,11 @@ app.include_router(
 
 app.include_router(
     ai_router,
+    prefix="/api",
+)
+
+app.include_router(
+    contractors_router,
     prefix="/api",
 )
 

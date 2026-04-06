@@ -130,6 +130,8 @@ Thumbs.db
 credentials.json
 service-account.json
 secrets.json
+json_key.json
+ga4_credentials_value.txt
 backend/credentials/
 google_oauth_credentials.txt
 
