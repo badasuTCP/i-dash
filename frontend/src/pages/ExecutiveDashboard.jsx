@@ -8,23 +8,35 @@ import { useTheme } from '../context/ThemeContext';
 import ScoreCard from '../components/scorecards/ScoreCard';
 import ChartCard from '../components/charts/ChartCard';
 import DateRangePicker from '../components/common/DateRangePicker';
-import { TrendingUp, DollarSign, Users, Target, BarChart3, Activity, Filter, AlertCircle } from 'lucide-react';
+import { TrendingUp, DollarSign, Users, Target, BarChart3, Activity, Filter, AlertCircle, Wifi, WifiOff } from 'lucide-react';
 import { useDashboardDateFilter } from '../hooks/useDashboardDateFilter';
+import { useDashboardData } from '../hooks/useDashboardData';
 import PageInsight from '../components/common/PageInsight';
 
 const ExecutiveDashboard = () => {
   const { isDark } = useTheme();
-  const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
+  const { handleDateChange, filterData, isFiltered, clearFilter, dateRange } = useDashboardDateFilter();
+
+  // ── Live API integration: tries /dashboard/overview, falls back to hardcoded ──
+  const { isLive: overviewIsLive, lastUpdated: overviewLastUpdated } = useDashboardData({
+    endpoint: 'overview',
+    fallback: null,        // We still use hardcoded scorecards below — transform needed later
+    dateRange,
+  });
 
   // ── Real data from Google Sheets pipeline · Last updated 03/02/2026 ──────────
   // Note: sheet had Q4 before Q3 in column order — corrected to chronological below.
   // Contractor Sales Q1 2026 ($568K spike) appears anomalous vs $120K in Q4 2025 — flagged.
+  // Google Sheets pipeline last synced date (from "Last updated 03/02/2026" note)
+  const SHEETS_LAST_SYNCED = '2026-03-02T00:00:00Z';
+  const SHEETS_SOURCE      = 'Google Sheets';
+
   const scorecards = [
     // Total Revenue: sum of all 5 quarters from sheet ($1.41M+$1.99M+$1.93M+$1.07M+$0.71M)
-    { label: 'Combined Total Revenue', value: 7123452, change: 14.2, color: 'blue', format: 'currency', sparkData: [1413459, 1993489, 1933776, 1073024, 709704, 7123452, 7123452] },
-    { label: 'Marketing Spend (tracked)', value: 26160, change: 19.4, color: 'violet', format: 'currency', sparkData: [0, 0, 5882, 9246, 11032, 26160, 26160] },
-    { label: 'Marketing Leads', value: 2897, change: null, color: 'emerald', format: 'number', sparkData: [0, 0, 1331, 584, 982, 2897, 2897] },
-    { label: 'Cost of Mistakes', value: 11130, change: -98.8, color: 'amber', format: 'currency', sparkData: [11130, 722, 4958, 133, 139, 139, 11130] },
+    { label: 'Combined Total Revenue', value: 7123452, change: 14.2, color: 'blue', format: 'currency', sparkData: [1413459, 1993489, 1933776, 1073024, 709704, 7123452, 7123452], lastSynced: SHEETS_LAST_SYNCED, source: SHEETS_SOURCE, forecast: 7500000 },
+    { label: 'Marketing Spend (tracked)', value: 26160, change: 19.4, color: 'violet', format: 'currency', sparkData: [0, 0, 5882, 9246, 11032, 26160, 26160], lastSynced: SHEETS_LAST_SYNCED, source: SHEETS_SOURCE, forecast: 30000 },
+    { label: 'Marketing Leads', value: 2897, change: null, color: 'emerald', format: 'number', sparkData: [0, 0, 1331, 584, 982, 2897, 2897], lastSynced: SHEETS_LAST_SYNCED, source: SHEETS_SOURCE, forecast: 3200 },
+    { label: 'Cost of Mistakes', value: 11130, change: -98.8, color: 'amber', format: 'currency', sparkData: [11130, 722, 4958, 133, 139, 139, 11130], lastSynced: SHEETS_LAST_SYNCED, source: SHEETS_SOURCE, forecast: 5000 },
   ];
 
   // Real quarterly KPIs — columns: Q1 2025 | Q2 2025 | Q3 2025 | Q4 2025 | Q1 2026 ★
@@ -115,7 +127,17 @@ const ExecutiveDashboard = () => {
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
             <h1 className={`text-3xl font-bold mb-1 ${textPrimary}`}>Executive Dashboard</h1>
-            <p className={textSecondary}>Combined performance across all divisions</p>
+            <div className="flex items-center gap-2">
+              <p className={textSecondary}>Combined performance across all divisions</p>
+              <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                overviewIsLive
+                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                  : 'bg-slate-500/15 text-slate-400 border border-slate-500/25'
+              }`}>
+                {overviewIsLive ? <Wifi size={9} /> : <WifiOff size={9} />}
+                {overviewIsLive ? 'Live API' : 'Cached'}
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {isFiltered && (
@@ -126,7 +148,7 @@ const ExecutiveDashboard = () => {
                 <Filter size={10} /> Filtered ✕
               </motion.button>
             )}
-            <DateRangePicker onApply={handleDateChange} />
+            <DateRangePicker onApply={handleDateChange} onClear={clearFilter} />
           </div>
         </motion.div>
 

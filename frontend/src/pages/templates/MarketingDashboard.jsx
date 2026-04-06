@@ -68,7 +68,7 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
                 <Filter size={10} /> Filtered ✕
               </motion.button>
             )}
-            <DateRangePicker onApply={handleDateChange} />
+            <DateRangePicker onApply={handleDateChange} onClear={clearFilter} />
           </div>
         </motion.div>
 

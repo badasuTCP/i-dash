@@ -1,126 +1,111 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar, ChevronDown } from 'lucide-react';
+import { Calendar, ChevronDown, X } from 'lucide-react';
 import { format, subDays, subWeeks, subMonths, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, startOfWeek, endOfWeek } from 'date-fns';
 
-const DateRangePicker = ({ onApply, defaultDays = 30 }) => {
+/**
+ * DateRangePicker — Exclusive filter control.
+ *
+ * RULES:
+ * 1. Preset click → immediately fires onApply, clears custom inputs, closes dropdown.
+ * 2. Custom input interaction → immediately deselects active preset.
+ * 3. "Apply Custom" only enabled when BOTH dates are valid & mode is custom.
+ * 4. Custom inputs greyed-out when a preset is active.
+ */
+const DateRangePicker = ({ onApply, onClear }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState('last30');
+  // null = no filter active, string = active preset id or 'custom'
+  const [activeMode, setActiveMode] = useState(null);
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
-  const today = new Date();
+  const today = useMemo(() => new Date(), []);
 
-  const presets = [
-    {
-      id: 'today',
-      label: 'Today',
-      getRange: () => ({ start: today, end: today }),
-    },
-    {
-      id: 'yesterday',
-      label: 'Yesterday',
-      getRange: () => ({ start: subDays(today, 1), end: subDays(today, 1) }),
-    },
-    {
-      id: 'thisWeek',
-      label: 'This Week',
-      getRange: () => ({ start: startOfWeek(today, { weekStartsOn: 1 }), end: today }),
-    },
-    {
-      id: 'lastWeek',
-      label: 'Last Week',
-      getRange: () => {
-        const lastWeekStart = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 });
-        return { start: lastWeekStart, end: endOfWeek(lastWeekStart, { weekStartsOn: 1 }) };
-      },
-    },
-    {
-      id: 'last7',
-      label: 'Last 7 Days',
-      getRange: () => ({ start: subDays(today, 6), end: today }),
-    },
-    {
-      id: 'last30',
-      label: 'Last 30 Days',
-      getRange: () => ({ start: subDays(today, 29), end: today }),
-    },
-    {
-      id: 'thisMonth',
-      label: 'This Month',
-      getRange: () => ({ start: startOfMonth(today), end: today }),
-    },
-    {
-      id: 'lastMonth',
-      label: 'Last Month',
-      getRange: () => {
-        const lastMonth = subMonths(today, 1);
-        return { start: startOfMonth(lastMonth), end: endOfMonth(lastMonth) };
-      },
-    },
-    {
-      id: 'thisQuarter',
-      label: 'This Quarter',
-      getRange: () => ({ start: startOfQuarter(today), end: today }),
-    },
-    {
-      id: 'lastQuarter',
-      label: 'Last Quarter',
-      getRange: () => {
-        const prevQ = subMonths(startOfQuarter(today), 1);
-        return { start: startOfQuarter(prevQ), end: endOfQuarter(prevQ) };
-      },
-    },
-    {
-      id: 'last90',
-      label: 'Last 90 Days',
-      getRange: () => ({ start: subDays(today, 89), end: today }),
-    },
-    {
-      id: 'ytd',
-      label: 'Year to Date',
-      getRange: () => ({ start: startOfYear(today), end: today }),
-    },
-    {
-      id: 'custom',
-      label: 'Custom Range',
-      getRange: () => {
-        if (!customStart || !customEnd) return null;
-        return { start: new Date(customStart), end: new Date(customEnd) };
-      },
-    },
-  ];
+  const presets = useMemo(() => [
+    { id: 'today',       label: 'Today',         getRange: () => ({ start: today, end: today }) },
+    { id: 'yesterday',   label: 'Yesterday',     getRange: () => ({ start: subDays(today, 1), end: subDays(today, 1) }) },
+    { id: 'thisWeek',    label: 'This Week',     getRange: () => ({ start: startOfWeek(today, { weekStartsOn: 1 }), end: today }) },
+    { id: 'lastWeek',    label: 'Last Week',     getRange: () => {
+      const s = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 });
+      return { start: s, end: endOfWeek(s, { weekStartsOn: 1 }) };
+    }},
+    { id: 'last7',       label: 'Last 7 Days',   getRange: () => ({ start: subDays(today, 6), end: today }) },
+    { id: 'last30',      label: 'Last 30 Days',  getRange: () => ({ start: subDays(today, 29), end: today }) },
+    { id: 'thisMonth',   label: 'This Month',    getRange: () => ({ start: startOfMonth(today), end: today }) },
+    { id: 'lastMonth',   label: 'Last Month',    getRange: () => {
+      const lm = subMonths(today, 1);
+      return { start: startOfMonth(lm), end: endOfMonth(lm) };
+    }},
+    { id: 'thisQuarter', label: 'This Quarter',  getRange: () => ({ start: startOfQuarter(today), end: today }) },
+    { id: 'lastQuarter', label: 'Last Quarter',  getRange: () => {
+      const prevQ = subMonths(startOfQuarter(today), 1);
+      return { start: startOfQuarter(prevQ), end: endOfQuarter(prevQ) };
+    }},
+    { id: 'last90',      label: 'Last 90 Days',  getRange: () => ({ start: subDays(today, 89), end: today }) },
+    { id: 'ytd',         label: 'Year to Date',  getRange: () => ({ start: startOfYear(today), end: today }) },
+  ], [today]);
 
-  const currentPreset = presets.find((p) => p.id === selectedPreset);
-  const range = currentPreset?.getRange?.();
-  const displayText = range
-    ? `${format(range.start, 'MMM d')} - ${format(range.end, 'MMM d, yyyy')}`
-    : 'Select date range';
-
-  const handlePresetClick = (presetId) => {
-    // Always replace ALL filter state atomically — clears any leftover custom
-    // date inputs so they can't bleed into the next filter selection.
-    setSelectedPreset(presetId);
-    if (presetId !== 'custom') {
-      // Ghost-state fix: wipe custom fields immediately
-      setCustomStart('');
-      setCustomEnd('');
-      const preset = presets.find((p) => p.id === presetId);
-      const range  = preset?.getRange?.();
-      if (range) {
-        // Pass presetId as 3rd arg so the hook can tag which preset is active
-        onApply?.(range.start, range.end, presetId);
-        setIsOpen(false);
-      }
+  // ── Display text ──────────────────────────────────────────────────────
+  const displayText = useMemo(() => {
+    if (!activeMode) return 'All Time';
+    if (activeMode === 'custom' && customStart && customEnd) {
+      try {
+        return `${format(new Date(customStart), 'MMM d')} – ${format(new Date(customEnd), 'MMM d, yyyy')}`;
+      } catch { return 'Custom Range'; }
     }
-  };
-
-  const handleApplyCustom = () => {
-    if (customStart && customEnd) {
-      onApply?.(new Date(customStart), new Date(customEnd), 'custom');
-      setIsOpen(false);
+    const preset = presets.find(p => p.id === activeMode);
+    if (preset) {
+      const range = preset.getRange();
+      return `${format(range.start, 'MMM d')} – ${format(range.end, 'MMM d, yyyy')}`;
     }
-  };
+    return 'Select range';
+  }, [activeMode, customStart, customEnd, presets]);
+
+  const isCustomMode = activeMode === 'custom';
+  const customValid  = customStart && customEnd && new Date(customStart) <= new Date(customEnd);
+
+  // ── Preset click: auto-apply, close, clear custom ─────────────────────
+  const handlePresetClick = useCallback((presetId) => {
+    const preset = presets.find(p => p.id === presetId);
+    if (!preset) return;
+    const range = preset.getRange();
+
+    // Exclusive: wipe custom state
+    setCustomStart('');
+    setCustomEnd('');
+    setActiveMode(presetId);
+    setIsOpen(false);
+
+    onApply?.(range.start, range.end, presetId);
+  }, [presets, onApply]);
+
+  // ── Custom input change: deselect preset ──────────────────────────────
+  const handleCustomStartChange = useCallback((e) => {
+    setCustomStart(e.target.value);
+    setActiveMode('custom'); // Exclusive: deselect any preset
+  }, []);
+
+  const handleCustomEndChange = useCallback((e) => {
+    setCustomEnd(e.target.value);
+    setActiveMode('custom');
+  }, []);
+
+  // ── Apply custom ──────────────────────────────────────────────────────
+  const handleApplyCustom = useCallback(() => {
+    if (!customValid) return;
+    setActiveMode('custom');
+    setIsOpen(false);
+    onApply?.(new Date(customStart), new Date(customEnd), 'custom');
+  }, [customStart, customEnd, customValid, onApply]);
+
+  // ── Clear all filters ─────────────────────────────────────────────────
+  const handleClear = useCallback(() => {
+    setActiveMode(null);
+    setCustomStart('');
+    setCustomEnd('');
+    setIsOpen(false);
+    onClear?.();
+  }, [onClear]);
 
   return (
     <div className="relative">
@@ -128,20 +113,27 @@ const DateRangePicker = ({ onApply, defaultDays = 30 }) => {
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50 transition-all text-slate-300 text-sm"
+        className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border transition-all text-sm ${
+          activeMode
+            ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300'
+            : 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50 text-slate-300'
+        }`}
       >
         <Calendar className="w-4 h-4" />
         <span className="font-medium">{displayText}</span>
-        <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        {activeMode ? (
+          <X className="w-3.5 h-3.5 opacity-60 hover:opacity-100" onClick={(e) => { e.stopPropagation(); handleClear(); }} />
+        ) : (
+          <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        )}
       </motion.button>
 
       <AnimatePresence>
         {isOpen && (
           <>
+            {/* Backdrop */}
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsOpen(false)}
               className="fixed inset-0 z-40"
             />
@@ -153,17 +145,17 @@ const DateRangePicker = ({ onApply, defaultDays = 30 }) => {
               transition={{ duration: 0.2 }}
               className="absolute top-full mt-2 right-0 z-50 glass-dark p-4 rounded-xl min-w-[360px] shadow-xl"
             >
-              {/* Quick Presets */}
+              {/* ── Quick Presets ─────────────────────────────────────── */}
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Quick Filters</p>
               <div className="grid grid-cols-3 gap-1.5 mb-4">
-                {presets.filter(p => p.id !== 'custom').map((preset) => (
+                {presets.map((preset) => (
                   <motion.button
                     key={preset.id}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => handlePresetClick(preset.id)}
                     className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                      selectedPreset === preset.id
+                      activeMode === preset.id
                         ? 'bg-gradient-to-r from-[#F97066] to-[#FEB47B] text-white shadow-lg shadow-orange-500/20'
                         : 'bg-slate-800/30 text-slate-300 hover:bg-slate-700/50'
                     }`}
@@ -173,16 +165,23 @@ const DateRangePicker = ({ onApply, defaultDays = 30 }) => {
                 ))}
               </div>
 
-              {/* Custom Date Inputs */}
-              <div className="space-y-3 pt-4 border-t border-slate-700/30">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Custom Date Range</p>
+              {/* ── Custom Date Range ────────────────────────────────── */}
+              <div className={`space-y-3 pt-4 border-t border-slate-700/30 transition-opacity ${
+                activeMode && activeMode !== 'custom' ? 'opacity-40 pointer-events-none' : 'opacity-100'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Custom Date Range</p>
+                  {isCustomMode && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-400 font-semibold">Active</span>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[10px] text-slate-500 mb-1 block">Start Date</label>
                     <input
                       type="date"
                       value={customStart}
-                      onChange={(e) => { setCustomStart(e.target.value); setSelectedPreset('custom'); }}
+                      onChange={handleCustomStartChange}
                       className="input-field text-sm w-full"
                     />
                   </div>
@@ -191,28 +190,35 @@ const DateRangePicker = ({ onApply, defaultDays = 30 }) => {
                     <input
                       type="date"
                       value={customEnd}
-                      onChange={(e) => { setCustomEnd(e.target.value); setSelectedPreset('custom'); }}
+                      onChange={handleCustomEndChange}
                       className="input-field text-sm w-full"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Action Buttons */}
+              {/* ── Action Buttons ───────────────────────────────────── */}
               <div className="flex gap-2 mt-4">
+                {activeMode && (
+                  <motion.button
+                    whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                    onClick={handleClear}
+                    className="px-4 py-2 rounded-lg bg-slate-700/30 text-slate-300 hover:bg-slate-700/50 transition-all text-sm font-medium"
+                  >
+                    Clear Filter
+                  </motion.button>
+                )}
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                   onClick={() => setIsOpen(false)}
                   className="flex-1 px-4 py-2 rounded-lg bg-slate-700/30 text-slate-300 hover:bg-slate-700/50 transition-all text-sm font-medium"
                 >
                   Cancel
                 </motion.button>
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                   onClick={handleApplyCustom}
-                  disabled={selectedPreset !== 'custom' || !customStart || !customEnd}
+                  disabled={!isCustomMode || !customValid}
                   className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-[#F97066] to-[#FEB47B] text-white hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-sm font-medium"
                 >
                   Apply Custom

@@ -95,38 +95,37 @@ export const authAPI = {
 };
 
 // Dashboard endpoints
+// Backend FastAPI expects `date_from` and `date_to` query params (YYYY-MM-DD)
+const _fmtDate = (d) => {
+  if (!d) return undefined;
+  if (typeof d === 'string') return d;
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+};
+
 export const dashboardAPI = {
   getOverview: (startDate, endDate) =>
     apiClient.get('/dashboard/overview', {
-      params: { start_date: startDate, end_date: endDate },
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
     }),
   getScorecards: (startDate, endDate) =>
     apiClient.get('/dashboard/scorecards', {
-      params: { start_date: startDate, end_date: endDate },
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
     }),
   getRevenue: (startDate, endDate, granularity = 'daily') =>
     apiClient.get('/dashboard/revenue', {
-      params: { start_date: startDate, end_date: endDate, granularity },
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), granularity },
     }),
-  getAds: (startDate, endDate, platform = null) =>
-    apiClient.get('/dashboard/ads', {
-      params: { start_date: startDate, end_date: endDate, platform },
+  getAdsPerformance: (startDate, endDate) =>
+    apiClient.get('/dashboard/ads-performance', {
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
     }),
   getHubspot: (startDate, endDate) =>
     apiClient.get('/dashboard/hubspot', {
-      params: { start_date: startDate, end_date: endDate },
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
     }),
-  getMarketing: (startDate, endDate) =>
-    apiClient.get('/dashboard/marketing', {
-      params: { start_date: startDate, end_date: endDate },
-    }),
-  getSales: (startDate, endDate) =>
-    apiClient.get('/dashboard/sales', {
-      params: { start_date: startDate, end_date: endDate },
-    }),
-  getExecutive: (startDate, endDate) =>
-    apiClient.get('/dashboard/executive', {
-      params: { start_date: startDate, end_date: endDate },
+  getCustomMetric: (metric, startDate, endDate, granularity = 'daily') =>
+    apiClient.get('/dashboard/custom', {
+      params: { metric, date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), granularity },
     }),
 };
 

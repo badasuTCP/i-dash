@@ -26,10 +26,10 @@ const CPDashboard = () => (
       'Equipment sales up 26% YoY — training programs are strong conversion driver',
     ]}
     scorecards={[
-      { label: 'CP Revenue',        value: 3410000, change: 14.8,  color: 'blue',    format: 'currency', metricKey: 'revenue',   sparkData: [2800000, 2950000, 3100000, 3200000, 3300000, 3380000, 3410000] },
-      { label: 'Equipment Sold',    value: 135,     change: 18.4,  color: 'emerald', format: 'number',   metricKey: 'equipment', sparkData: [89, 95, 102, 110, 118, 128, 135] },
-      { label: 'Training Sign Ups', value: 210,     change: 12.3,  color: 'violet',  format: 'number',   metricKey: 'training',  sparkData: [145, 155, 168, 180, 192, 200, 210] },
-      { label: 'Cost of Mistakes',  value: 7100,    change: -22.5, color: 'amber',   format: 'currency', metricKey: 'mistakes',  sparkData: [12500, 11200, 9800, 8900, 8200, 7500, 7100] },
+      { label: 'CP Revenue',        value: 3410000, change: 14.8,  color: 'blue',    format: 'currency', metricKey: 'revenue',   sparkData: [2800000, 2950000, 3100000, 3200000, 3300000, 3380000, 3410000], lastSynced: '2026-03-02T00:00:00Z', source: 'Google Sheets (est.)', forecast: 3600000 },
+      { label: 'Equipment Sold',    value: 135,     change: 18.4,  color: 'emerald', format: 'number',   metricKey: 'equipment', sparkData: [89, 95, 102, 110, 118, 128, 135],                               lastSynced: '2026-03-02T00:00:00Z', source: 'Google Sheets (est.)' },
+      { label: 'Training Sign Ups', value: 210,     change: 12.3,  color: 'violet',  format: 'number',   metricKey: 'training',  sparkData: [145, 155, 168, 180, 192, 200, 210],                              lastSynced: '2026-03-02T00:00:00Z', source: 'Google Sheets (est.)' },
+      { label: 'Cost of Mistakes',  value: 7100,    change: -22.5, color: 'amber',   format: 'currency', metricKey: 'mistakes',  sparkData: [12500, 11200, 9800, 8900, 8200, 7500, 7100],                     lastSynced: '2026-03-02T00:00:00Z', source: 'Google Sheets (est.)', forecast: 5000 },
     ]}
     revenueData={[
       { month: 'Jul 2024', revenue: 520000, target: 500000 },

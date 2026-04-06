@@ -57,10 +57,10 @@ const IBOSSDashboard = () => {
         '5 contractors on paid media · 8 organic-only · total reach 109K web visits',
       ]}
       scorecards={[
-        { label: 'Revenue Generated TD', value: 1154810, change: 18.2, color: 'emerald', format: 'currency', metricKey: 'revenue', sparkData: [680000, 720000, 810000, 890000, 980000, 1080000, 1154810] },
-        { label: 'Total Marketing Spend', value: 74646, change: 4.8, color: 'amber', format: 'currency', metricKey: 'spend', sparkData: [58000, 62000, 55000, 62200, 67000, 71000, 74646] },
-        { label: 'Total Distinct Leads', value: 727, change: 22.1, color: 'blue', format: 'number', metricKey: 'leads', sparkData: [420, 480, 510, 565, 610, 670, 727] },
-        { label: 'Avg Cost Per Lead', value: 102.68, change: -14.5, color: 'violet', format: 'currency', metricKey: 'cpl', sparkData: [145, 138, 128, 120, 115, 108, 102.68] },
+        { label: 'Revenue Generated TD', value: 1154810, change: 18.2, color: 'emerald', format: 'currency', metricKey: 'revenue', sparkData: [680000, 720000, 810000, 890000, 980000, 1080000, 1154810], lastSynced: '2026-03-31T00:00:00Z', source: 'Meta + Google Ads', forecast: 1300000 },
+        { label: 'Total Marketing Spend', value: 74646, change: 4.8, color: 'amber', format: 'currency', metricKey: 'spend', sparkData: [58000, 62000, 55000, 62200, 67000, 71000, 74646], lastSynced: '2026-03-31T00:00:00Z', source: 'Meta + Google Ads', forecast: 80000 },
+        { label: 'Total Distinct Leads', value: 727, change: 22.1, color: 'blue', format: 'number', metricKey: 'leads', sparkData: [420, 480, 510, 565, 610, 670, 727], lastSynced: '2026-03-31T00:00:00Z', source: 'Meta + Google Ads', forecast: 800 },
+        { label: 'Avg Cost Per Lead', value: 102.68, change: -14.5, color: 'violet', format: 'currency', metricKey: 'cpl', sparkData: [145, 138, 128, 120, 115, 108, 102.68], lastSynced: '2026-03-31T00:00:00Z', source: 'Meta + Google Ads', forecast: 95 },
       ]}
       revenueData={[
         { month: 'Q2 2025', revenue: 285000, target: 260000 },

@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, ReferenceLine,
 } from 'recharts';
 import { Filter, AlertCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
@@ -11,7 +11,7 @@ import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
-const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueData, salesByCategory, topProducts, quarterlyData, metricsPerPeriod, pageInsights, quarterlyHeaders, dataWarning }) => {
+const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueData, salesByCategory, topProducts, quarterlyData, metricsPerPeriod, pageInsights, quarterlyHeaders, dataWarning, revenueForecast }) => {
   // Default headers match the most common real-data range; override per-page via quarterlyHeaders prop
   const qHeaders = quarterlyHeaders || ['Q1 2025', 'Q2 2025', 'Q3 2025', 'Q4 2025', 'Q1 2026'];
   const { isDark } = useTheme();
@@ -25,6 +25,31 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
     [resolveData, revenueData, metricsPerPeriod]
   );
   const noDataMsg = revResolved.noDataForPeriod ? revResolved.fallbackMessage : null;
+
+  // ── Run-rate projection: extend chart data by 1 period with dashed line ───
+  const chartDataWithProjection = useMemo(() => {
+    const data = revResolved.data;
+    if (!data || data.length < 3) return data;
+    // Average slope of last 3 revenue values
+    const n = data.length;
+    const last3 = data.slice(-3).map(d => d.revenue || 0);
+    const avgSlope = (last3[2] - last3[0]) / 2;
+    const projected = Math.max(0, last3[2] + avgSlope);
+    // Append a projected point with a separate key so it renders as dashed
+    return [
+      ...data.map(d => ({ ...d, runRate: null })),
+      // Bridge: last real point also gets runRate so the dashed line connects
+      { ...data[n - 1], runRate: data[n - 1].revenue },
+      { month: 'Proj.', revenue: null, target: null, runRate: Math.round(projected) },
+    ].filter((d, i, arr) => {
+      // Deduplicate: the bridge row has same month as last data row — merge them
+      if (i > 0 && d.month === arr[i - 1].month && d.runRate !== null && arr[i - 1].runRate === null) {
+        arr[i - 1].runRate = d.runRate;
+        return false;
+      }
+      return true;
+    });
+  }, [revResolved.data]);
 
   // Scorecards read from the same resolved metrics the chart used — single path
   const resolvedScorecards = useMemo(() => {
@@ -68,7 +93,7 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
                 <Filter size={10} /> Filtered ✕
               </motion.button>
             )}
-            <DateRangePicker onApply={handleDateChange} />
+            <DateRangePicker onApply={handleDateChange} onClear={clearFilter} />
           </div>
         </motion.div>
 
@@ -110,7 +135,7 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
             className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
             <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Revenue Trend</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={revResolved.data}>
+              <ComposedChart data={chartDataWithProjection}>
                 <defs>
                   <linearGradient id={`revGrad-${accentColor}`} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />
@@ -120,10 +145,15 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
                 <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
                 <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
-                <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${(v/1000).toFixed(0)}K`]} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [v != null ? `$${(v/1000).toFixed(0)}K` : '—', name]} />
                 <Legend />
-                <Area type="monotone" dataKey="revenue" name="Revenue" fill={`url(#revGrad-${accentColor})`} stroke={accentColor} strokeWidth={2} />
-                <Line type="monotone" dataKey="target" name="Target" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" />
+                {/* Forecast reference line */}
+                {revenueForecast && (
+                  <ReferenceLine y={revenueForecast} stroke="#8B5CF6" strokeDasharray="8 4" strokeWidth={1.5} label={{ value: 'Forecast', position: 'right', fill: '#8B5CF6', fontSize: 11 }} />
+                )}
+                <Area type="monotone" dataKey="revenue" name="Revenue" fill={`url(#revGrad-${accentColor})`} stroke={accentColor} strokeWidth={2} connectNulls={false} />
+                <Line type="monotone" dataKey="target" name="Target" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" connectNulls={false} />
+                <Line type="monotone" dataKey="runRate" name="Run Rate" stroke={accentColor} strokeWidth={2} strokeDasharray="4 3" strokeOpacity={0.5} dot={false} connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
           </motion.div>

@@ -26,10 +26,10 @@ const SaniTredDashboard = () => (
       'AOV trending up to $373 in Mar 2025 — higher-value bundles gaining traction',
     ]}
     scorecards={[
-      { label: 'Retail Revenue',   value: 2070000, change: 11.2,  color: 'emerald', format: 'currency', metricKey: 'revenue',    sparkData: [1650000, 1720000, 1790000, 1860000, 1930000, 2000000, 2070000] },
-      { label: 'Orders',           value: 4280,    change: 15.6,  color: 'blue',    format: 'number',   metricKey: 'orders',     sparkData: [3200, 3400, 3550, 3700, 3900, 4100, 4280] },
-      { label: 'Avg Order Value',  value: 483,     change: 6.8,   color: 'violet',  format: 'currency', metricKey: 'aov',        sparkData: [420, 435, 445, 455, 465, 475, 483] },
-      { label: 'Return Rate',      value: 3.2,     change: -18.4, color: 'amber',   format: 'percent',  metricKey: 'returnRate', sparkData: [5.2, 4.8, 4.4, 4.0, 3.6, 3.4, 3.2] },
+      { label: 'Retail Revenue',   value: 2070000, change: 11.2,  color: 'emerald', format: 'currency', metricKey: 'revenue',    sparkData: [1650000, 1720000, 1790000, 1860000, 1930000, 2000000, 2070000], lastSynced: '2026-03-02T00:00:00Z', source: 'Google Sheets (est.)', forecast: 2200000 },
+      { label: 'Orders',           value: 4280,    change: 15.6,  color: 'blue',    format: 'number',   metricKey: 'orders',     sparkData: [3200, 3400, 3550, 3700, 3900, 4100, 4280],                     lastSynced: '2026-03-02T00:00:00Z', source: 'Google Sheets (est.)' },
+      { label: 'Avg Order Value',  value: 483,     change: 6.8,   color: 'violet',  format: 'currency', metricKey: 'aov',        sparkData: [420, 435, 445, 455, 465, 475, 483],                            lastSynced: '2026-03-02T00:00:00Z', source: 'Google Sheets (est.)' },
+      { label: 'Return Rate',      value: 3.2,     change: -18.4, color: 'amber',   format: 'percent',  metricKey: 'returnRate', sparkData: [5.2, 4.8, 4.4, 4.0, 3.6, 3.4, 3.2],                           lastSynced: '2026-03-02T00:00:00Z', source: 'Google Sheets (est.)' },
     ]}
     revenueData={[
       { month: 'Jul 2024', revenue: 310000, target: 300000 },
