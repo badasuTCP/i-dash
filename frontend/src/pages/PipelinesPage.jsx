@@ -115,6 +115,11 @@ const PipelinesPage = () => {
   const rowHover    = isDark ? 'hover:bg-slate-800/30' : 'hover:bg-slate-50';
   const inputCls    = isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900';
 
+  // ── Detect demo mode (demo tokens can't auth with the real backend) ──────────
+  const isDemoMode = (() => {
+    try { const t = localStorage.getItem('idash_token') || localStorage.getItem('token'); return t && t.startsWith('demo-'); } catch { return false; }
+  })();
+
   // ── Load pipeline status from backend ────────────────────────────────────────
   const fetchStatus = useCallback(async (silent = false) => {
     if (!silent) setLoadingAll(true);
@@ -126,15 +131,34 @@ const PipelinesPage = () => {
       setLastFetch(new Date());
       setApiConnected(true);
     } catch (err) {
-      if (!silent) {
-        const msg = err.response?.data?.detail || err.message || 'Could not reach backend';
-        setLoadError(msg);
+      // In demo mode, a 401 is expected — check health to confirm backend is reachable
+      if (isDemoMode && err.response?.status === 401) {
+        try {
+          const baseUrl = import.meta.env.VITE_API_URL?.replace(/\/api$/, '') ||
+            (window.location.hostname.endsWith('.up.railway.app') ? 'https://i-dash-production.up.railway.app' : 'http://localhost:8000');
+          const health = await fetch(`${baseUrl}/health`);
+          if (health.ok) {
+            setApiConnected(true);
+            if (!silent) setLoadError('Demo mode — sign in with real credentials to control pipelines');
+          } else {
+            setApiConnected(false);
+            if (!silent) setLoadError('Backend unreachable');
+          }
+        } catch {
+          setApiConnected(false);
+          if (!silent) setLoadError('Backend unreachable');
+        }
+      } else {
+        if (!silent) {
+          const msg = err.response?.data?.detail || err.message || 'Could not reach backend';
+          setLoadError(msg);
+        }
+        setApiConnected(false);
       }
-      setApiConnected(false);
     } finally {
       if (!silent) setLoadingAll(false);
     }
-  }, []);
+  }, [isDemoMode]);
 
   // Auto-refresh every 30 seconds with countdown
   useEffect(() => {
@@ -253,8 +277,9 @@ const PipelinesPage = () => {
                 {apiConnected === true  ? <Wifi size={12} /> :
                  apiConnected === false ? <WifiOff size={12} /> :
                  <Loader2 size={12} className="animate-spin" />}
-                {apiConnected === true ? 'Backend Connected' :
-                 apiConnected === false ? 'Backend Offline' : 'Connecting...'}
+                {apiConnected === true
+                  ? (isDemoMode ? 'Backend Online · Demo' : 'Backend Connected')
+                  : apiConnected === false ? 'Backend Offline' : 'Connecting...'}
               </div>
               {/* Auto-refresh indicator + manual refresh */}
               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border ${isDark ? 'border-slate-600/40 bg-slate-800/40' : 'border-slate-200 bg-slate-50'}`}>
@@ -353,11 +378,17 @@ const PipelinesPage = () => {
               ))}
             </motion.div>
 
-            {/* Load error banner */}
+            {/* Load error / demo mode banner */}
             {loadError && !loadingAll && (
-              <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center gap-2">
+              <div className={`mb-4 p-3 rounded-lg text-sm flex items-center gap-2 ${
+                isDemoMode && apiConnected
+                  ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
+                  : 'bg-red-500/10 border border-red-500/30 text-red-400'
+              }`}>
                 <AlertTriangle size={15} />
-                Backend unavailable: {loadError}. Showing last known state.
+                {isDemoMode && apiConnected
+                  ? <>{loadError}</>
+                  : <>Backend unavailable: {loadError}. Showing last known state.</>}
               </div>
             )}
 
