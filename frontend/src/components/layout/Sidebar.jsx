@@ -30,8 +30,8 @@ const BrandPill = ({ brand, isActive, collapsed, onClick }) => (
       }
     `}
   >
-    <span className={`font-bold ${collapsed ? 'text-xs' : 'text-[11px]'}`}>
-      {brand.shortName}
+    <span className={`font-bold ${collapsed ? 'text-xs' : 'text-[11px]'} whitespace-nowrap`}>
+      {collapsed ? brand.shortName : brand.pillLabel}
     </span>
   </button>
 );

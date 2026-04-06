@@ -2,21 +2,23 @@ import React, { useMemo } from 'react';
 import MarketingDashboardTemplate from '../templates/MarketingDashboard';
 import { useDashboardConfig } from '../../context/DashboardConfigContext';
 
-// ── Per-contractor name → ID mapping (for performanceSummary filtering) ──────
-const CONTRACTOR_NAME_TO_ID = {
-  'Beckley Concrete Decor':     'beckley',
-  'Tailored Concrete Coatings': 'tailored',
-  'SLG Concrete Coatings':      'slg',
-  'Columbus Concrete Coatings': 'columbus',
-  'TVS Coatings':               'tvs',
-};
-
+// ── All contractors with marketing data (paid + organic) ────────────────────
 const ALL_PERFORMANCE_SUMMARY = [
-  { division: 'Beckley Concrete Decor',    spend: '$37.7K', revenue: '$392.5K', roas: '10.4x', conversions: '290', cpl: '$130.17', contractorId: 'beckley' },
-  { division: 'Tailored Concrete Coatings',spend: '$15.9K', revenue: '—',       roas: '—',     conversions: '275', cpl: '$57.77',  contractorId: 'tailored' },
-  { division: 'SLG Concrete Coatings',     spend: '$11.3K', revenue: '$47.8K',  roas: '4.2x',  conversions: '42',  cpl: '$269.72', contractorId: 'slg' },
-  { division: 'Columbus Concrete Coatings',spend: '$5.2K',  revenue: '$113.7K', roas: '21.9x', conversions: '10',  cpl: '$518.00', contractorId: 'columbus' },
-  { division: 'TVS Coatings',              spend: '$4.5K',  revenue: '—',       roas: '—',     conversions: '16',  cpl: '$281.36', contractorId: 'tvs' },
+  // ── Paid media contractors ──
+  { division: 'Beckley Concrete Decor',     spend: '$37.7K', revenue: '$392.5K', roas: '10.4x',   conversions: '290', cpl: '$130.17', contractorId: 'beckley' },
+  { division: 'Tailored Concrete Coatings', spend: '$15.9K', revenue: '—',       roas: '—',       conversions: '275', cpl: '$57.77',  contractorId: 'tailored' },
+  { division: 'SLG Concrete Coatings',      spend: '$11.3K', revenue: '$47.8K',  roas: '4.2x',    conversions: '42',  cpl: '$269.72', contractorId: 'slg' },
+  { division: 'Columbus Concrete Coatings', spend: '$5.2K',  revenue: '$113.7K', roas: '21.9x',   conversions: '10',  cpl: '$518.00', contractorId: 'columbus' },
+  { division: 'TVS Coatings',               spend: '$4.5K',  revenue: '—',       roas: '—',       conversions: '16',  cpl: '$281.36', contractorId: 'tvs' },
+  // ── Organic-only contractors ──
+  { division: 'Eminence',                   spend: 'Organic', revenue: '$330.8K', roas: 'Organic', conversions: '3',   cpl: 'Organic', contractorId: 'eminence' },
+  { division: 'PermaSurface',               spend: 'Organic', revenue: '$156.3K', roas: 'Organic', conversions: '2',   cpl: 'Organic', contractorId: 'permasurface' },
+  { division: 'Diamond Topcoat',            spend: 'Organic', revenue: '$113.7K', roas: 'Organic', conversions: '89',  cpl: 'Organic', contractorId: 'diamond' },
+  { division: 'Floor Warriors',             spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'floorwarriors' },
+  { division: 'Graber Design Coatings',     spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'graber' },
+  { division: 'Decorative Concrete Idaho',  spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'decorative' },
+  { division: 'Reeves Concrete Solutions',  spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'reeves' },
+  { division: 'Elite Pool Coatings',        spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'elitepool' },
 ];
 
 // ── Per-period metrics for seamless scorecard filtering ──────────────────────
@@ -38,7 +40,7 @@ const IBOSSMarketing = () => {
   return (
     <MarketingDashboardTemplate
       title="I-BOS Marketing Campaign"
-      subtitle="Contractor Division — $74.65K spend · 727 leads · $102.68 avg CPL · 228.5K total clicks"
+      subtitle="Contractor Division — 13 contractors · 5 paid media · 8 organic · $74.65K spend · 727 leads"
       accentColor="#F59E0B"
       pageInsights={[
         'Tailored achieves best CPL at $57.77 — efficiency benchmark for the division',

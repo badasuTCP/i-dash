@@ -26,6 +26,7 @@ export const brands = [
   {
     id: 'cp',
     shortName: 'CP',
+    pillLabel: 'CP',
     fullName: 'The Concrete Protector',
     accent: '#F97066',       // coral/orange
     accentRing: 'ring-[#F97066]/40',
@@ -35,6 +36,7 @@ export const brands = [
   {
     id: 'sanitred',
     shortName: 'ST',
+    pillLabel: 'Sani-Tred',
     fullName: 'Sani-Tred',
     accent: '#34D399',       // emerald
     accentRing: 'ring-emerald-400/40',
@@ -44,6 +46,7 @@ export const brands = [
   {
     id: 'ibos',
     shortName: 'IB',
+    pillLabel: 'I-BOS',
     fullName: 'I-BOS',
     accent: '#60A5FA',       // blue
     accentRing: 'ring-blue-400/40',
