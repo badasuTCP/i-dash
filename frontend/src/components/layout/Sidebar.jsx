@@ -69,6 +69,24 @@ const SectionLabel = ({ children, collapsed }) =>
     </div>
   );
 
+// Module-key → admin link path mapping (used to filter sidebar for executives)
+const MODULE_TO_PATH = {
+  'pipelines':      '/dashboard/pipelines',
+  'data-intel':     '/dashboard/data-intelligence',
+  'admin-controls': '/dashboard/admin-controls',
+  'ai-insights':    '/dashboard/ai',
+  'accounts':       '/dashboard/accounts',
+  'settings':       '/settings',
+};
+
+// Module-key → brand page label matching (for filtering brand sub-pages)
+const MODULE_TO_BRAND_LABEL = {
+  'dashboards':     'Dashboard',
+  'web-analytics':  'Web Analytics',
+  'marketing':      'Marketing Campaign',
+  'contractors':    'Contractor Breakdown',
+};
+
 // ─── Main Sidebar ───────────────────────────────────────────────────────────
 const Sidebar = () => {
   const { isDark, toggleTheme } = useTheme();
@@ -95,13 +113,48 @@ const Sidebar = () => {
     () => brands.find((b) => b.id === activeBrand) || brands[0],
     [activeBrand],
   );
-  const pages = brandPages[activeBrand] || [];
 
-  // Role-filtered admin links
-  const filteredAdmin = useMemo(
-    () => adminLinks.filter((a) => a.roles.includes(userRole)),
-    [userRole],
-  );
+  // ── Module access for executive users ─────────────────────────────────────
+  const userModules = useMemo(() => {
+    // Super admins get everything
+    if (userRole === 'data-analyst') return null;
+    // Executive users — read their allowed modules from localStorage
+    try {
+      const moduleMap = JSON.parse(localStorage.getItem('idash_user_modules') || '{}');
+      const allowed = moduleMap[user?.id];
+      if (Array.isArray(allowed)) return allowed;
+    } catch { /* ignore */ }
+    // Default executive modules if nothing saved
+    return ['dashboards', 'web-analytics', 'marketing', 'contractors', 'ai-insights'];
+  }, [userRole, user?.id]);
+
+  // Filter brand sub-pages based on module access
+  const pages = useMemo(() => {
+    const allPages = brandPages[activeBrand] || [];
+    if (!userModules) return allPages; // super admin sees all
+    return allPages.filter((page) => {
+      // Find which module key matches this page label
+      const moduleKey = Object.keys(MODULE_TO_BRAND_LABEL).find(
+        (k) => MODULE_TO_BRAND_LABEL[k] === page.label
+      );
+      return !moduleKey || userModules.includes(moduleKey);
+    });
+  }, [activeBrand, userModules]);
+
+  // Role-filtered admin links + module access enforcement
+  const filteredAdmin = useMemo(() => {
+    let links = adminLinks.filter((a) => a.roles.includes(userRole));
+    // For executives, further filter by their allowed modules
+    if (userModules) {
+      links = links.filter((link) => {
+        const moduleKey = Object.keys(MODULE_TO_PATH).find(
+          (k) => MODULE_TO_PATH[k] === link.to
+        );
+        return !moduleKey || userModules.includes(moduleKey);
+      });
+    }
+    return links;
+  }, [userRole, userModules]);
 
   return (
     <aside

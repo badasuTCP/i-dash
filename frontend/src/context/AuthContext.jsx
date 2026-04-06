@@ -65,15 +65,27 @@ function loadFromStorage() {
   }
 }
 
+// Map backend roles → frontend roles used by sidebar & route guards
+const BACKEND_TO_FRONTEND_ROLE = {
+  admin:    'data-analyst',   // super admin → full access
+  director: 'executive',      // executive   → restricted
+  manager:  'executive',
+  analyst:  'executive',
+  viewer:   'executive',
+};
+
 function normaliseUser(apiUser) {
   // Normalise API response into the shape our app expects
+  const backendRole = (apiUser.role || 'executive').toLowerCase();
+  const frontendRole = BACKEND_TO_FRONTEND_ROLE[backendRole] || 'executive';
   return {
     id:          apiUser.id,
     email:       apiUser.email,
     first_name:  apiUser.first_name || apiUser.firstName || apiUser.email?.split('@')[0] || '',
     last_name:   apiUser.last_name  || apiUser.lastName  || '',
     full_name:   apiUser.full_name  || apiUser.fullName  || `${apiUser.first_name || ''} ${apiUser.last_name || ''}`.trim(),
-    role:        apiUser.role       || 'executive',
+    role:        frontendRole,
+    backendRole: backendRole,        // keep original for Account Management display
     department:  apiUser.department || apiUser.role || 'general',
     is_active:   apiUser.is_active  ?? true,
   };
@@ -120,8 +132,8 @@ export const AuthProvider = ({ children }) => {
           const meRes = await authAPI.me();
           userObj = meRes.data;
         } catch {
-          // If /me fails, build minimal user from email
-          userObj = { id: 1, email: normalizedEmail, role: 'data-analyst' };
+          // If /me fails, build minimal user — default to RESTRICTED role for safety
+          userObj = { id: 1, email: normalizedEmail, role: 'viewer' };
         }
       }
 

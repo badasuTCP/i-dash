@@ -47,7 +47,19 @@ const ProtectedPageRoute = ({ children, requiredRole }) => {
     return <Navigate to="/login" replace />;
   }
   // Role gating: if requiredRole specified, check user has it
+  // user.role is already the frontend role (data-analyst or executive)
   if (requiredRole && user?.role !== requiredRole) {
+    // Also check if executive user has module access for this specific route
+    if (user?.role === 'executive') {
+      try {
+        const moduleMap = JSON.parse(localStorage.getItem('idash_user_modules') || '{}');
+        const allowed = moduleMap[user?.id];
+        // If no module access stored, or module not in allowed list → redirect
+        if (!Array.isArray(allowed)) {
+          return <Navigate to="/dashboard/executive" replace />;
+        }
+      } catch { /* fall through to redirect */ }
+    }
     return <Navigate to="/dashboard/executive" replace />;
   }
   return <Layout>{children}</Layout>;
