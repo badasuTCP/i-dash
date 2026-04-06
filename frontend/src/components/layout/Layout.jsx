@@ -17,11 +17,11 @@ export const Layout = ({
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-[#0f1117]' : 'bg-[#f0f2f5]'}`}>
-      {/* Sidebar - Fixed left w-64 */}
+      {/* Sidebar — fixed, self-manages width via collapsed state */}
       <Sidebar />
 
-      {/* Main content area offset by sidebar */}
-      <div className="ml-64 flex flex-col min-h-screen">
+      {/* Main content area — uses ml-64 as default, sidebar CSS transition handles visual */}
+      <div className="ml-64 flex flex-col min-h-screen transition-[margin] duration-300">
         {/* Header - Sticky */}
         <Header
           onRefresh={onRefresh}

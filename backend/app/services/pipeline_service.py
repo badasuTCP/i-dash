@@ -45,36 +45,26 @@ class PipelineService:
         self._initialize_pipelines()
 
     def _initialize_pipelines(self) -> None:
-        """Initialize all available pipelines."""
-        try:
-            # HubSpot Pipeline
-            self.pipelines["hubspot"] = HubSpotPipeline()
+        """Initialize all available pipelines with per-pipeline error isolation."""
+        pipeline_factories = [
+            ("hubspot", lambda: HubSpotPipeline()),
+            ("meta_ads", lambda: MetaAdsPipeline()),
+            ("google_ads", lambda: GoogleAdsPipeline()),
+            ("google_sheets", lambda: GoogleSheetsPipeline(sheet_id="")),
+            ("snapshot", lambda: SnapshotPipeline()),
+        ]
 
-            # Meta Ads Pipeline
-            self.pipelines["meta_ads"] = MetaAdsPipeline()
-
-            # Google Ads Pipeline
-            self.pipelines["google_ads"] = GoogleAdsPipeline()
-
-            # Google Sheets Pipeline - requires configuration
+        for name, factory in pipeline_factories:
             try:
-                self.pipelines["google_sheets"] = GoogleSheetsPipeline(
-                    sheet_id="",  # Will be set via environment or config
-                )
-            except ValueError:
-                self.logger.debug(
-                    "Google Sheets pipeline not configured, skipping"
+                self.pipelines[name] = factory()
+            except Exception as e:
+                self.logger.warning(
+                    f"Pipeline '{name}' failed to initialize: {e}"
                 )
 
-            # Snapshot Pipeline
-            self.pipelines["snapshot"] = SnapshotPipeline()
-
-            self.logger.info(
-                f"Initialized {len(self.pipelines)} pipelines"
-            )
-
-        except Exception as e:
-            self.logger.warning(f"Error initializing pipelines: {str(e)}")
+        self.logger.info(
+            f"Initialized {len(self.pipelines)}/{len(pipeline_factories)} pipelines"
+        )
 
     async def run_all_pipelines(self) -> Dict[str, Any]:
         """
