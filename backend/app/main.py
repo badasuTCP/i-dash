@@ -49,33 +49,33 @@ async def _initialize_database() -> None:
 
 
 async def _create_default_admin() -> None:
-    """Create default admin user if none exists."""
+    """Ensure the primary admin user exists."""
     try:
         async with async_session_maker() as session:
-            # Check if any admin exists
-            stmt = select(User).where(User.role == UserRole.ADMIN)
+            # Check if Daniel's account exists
+            stmt = select(User).where(User.email == "daniel@theconcreteprotector.com")
             result = await session.execute(stmt)
-            admin_exists = result.scalar_one_or_none() is not None
+            daniel_exists = result.scalar_one_or_none() is not None
 
-            if not admin_exists:
-                # Create default admin
-                default_admin = User(
-                    email="admin@idash.local",
-                    full_name="Administrator",
-                    hashed_password=hash_password("ChangeMe123!"),
+            if not daniel_exists:
+                # Create primary admin — Daniel Badasu (super admin)
+                admin_user = User(
+                    email="daniel@theconcreteprotector.com",
+                    full_name="Daniel Badasu",
+                    hashed_password=hash_password("IDash2026!"),
                     role=UserRole.ADMIN,
                     department=UserDepartment.ALL,
                     is_active=True,
                 )
-                session.add(default_admin)
+                session.add(admin_user)
                 await session.commit()
 
                 logger.info(
-                    "Created default admin user (email: admin@idash.local, "
-                    "password: ChangeMe123!). Please change this immediately!"
+                    "Created admin user (email: daniel@theconcreteprotector.com). "
+                    "Please change password after first login."
                 )
             else:
-                logger.info("Admin user already exists")
+                logger.info("Admin user daniel@theconcreteprotector.com already exists")
 
     except Exception as e:
         logger.error(f"Error creating default admin: {str(e)}")
