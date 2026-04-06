@@ -8,10 +8,12 @@ import { useTheme } from '../context/ThemeContext';
 import ScoreCard from '../components/scorecards/ScoreCard';
 import ChartCard from '../components/charts/ChartCard';
 import DateRangePicker from '../components/common/DateRangePicker';
-import { TrendingUp, DollarSign, Users, Target, BarChart3, Activity } from 'lucide-react';
+import { TrendingUp, DollarSign, Users, Target, BarChart3, Activity, Filter, AlertCircle } from 'lucide-react';
+import { useDashboardDateFilter } from '../hooks/useDashboardDateFilter';
 
 const ExecutiveDashboard = () => {
   const { isDark } = useTheme();
+  const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
   const scorecards = [
     { label: 'Combined Total Revenue', value: 8480000, change: 14.2, color: 'blue', format: 'currency', sparkData: [6200000, 6800000, 7100000, 7500000, 7900000, 8200000, 8480000] },
@@ -71,6 +73,11 @@ const ExecutiveDashboard = () => {
 
   const DIVISION_COLORS = ['#3B82F6', '#10B981', '#F59E0B'];
 
+  // Filtered datasets
+  const rbyq    = filterData(revenueByQuarter, 'quarter');
+  const yoy     = filterData(yoySales,         'month');
+  const noDataMsg = rbyq.noDataForPeriod ? rbyq.fallbackMessage : null;
+
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
   const textSecondary = isDark ? 'text-slate-400' : 'text-slate-600';
@@ -92,8 +99,26 @@ const ExecutiveDashboard = () => {
             <h1 className={`text-3xl font-bold mb-1 ${textPrimary}`}>Executive Dashboard</h1>
             <p className={textSecondary}>Combined performance across all divisions</p>
           </div>
-          <DateRangePicker onApply={() => {}} />
+          <div className="flex items-center gap-2">
+            {isFiltered && (
+              <motion.button onClick={clearFilter}
+                initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 hover:bg-indigo-500/25 transition-colors"
+              >
+                <Filter size={10} /> Filtered ✕
+              </motion.button>
+            )}
+            <DateRangePicker onApply={handleDateChange} />
+          </div>
         </motion.div>
+
+        {noDataMsg && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-3 rounded-lg flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
+            <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
+            <span>{noDataMsg}</span>
+          </motion.div>
+        )}
 
         {/* Scorecards */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
@@ -179,7 +204,7 @@ const ExecutiveDashboard = () => {
             className={`rounded-xl p-6 ${cardBg}`}>
             <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Revenue by Quarter & Division</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={revenueByQuarter}>
+              <BarChart data={rbyq.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
                 <XAxis dataKey="quarter" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tick={{ fontSize: 12 }} />
                 <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tick={{ fontSize: 12 }} tickFormatter={v => `$${(v/1000000).toFixed(1)}M`} />
@@ -196,7 +221,7 @@ const ExecutiveDashboard = () => {
             className={`rounded-xl p-6 ${cardBg}`}>
             <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>YOY Sales Comparison</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={yoySales}>
+              <ComposedChart data={yoy.data}>
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
                 <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
                 <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />

@@ -49,11 +49,12 @@ const divisions = [
 ];
 
 const adminLinks = [
-  { to: '/dashboard/pipelines', label: 'Data Pipelines', roles: ['data-analyst'] },
-  { to: '/dashboard/admin-controls', label: 'Admin Controls', roles: ['data-analyst'] },
-  { to: '/dashboard/ai', label: 'AI Insights', roles: ['executive', 'data-analyst'] },
-  { to: '/dashboard/accounts', label: 'Account Management', roles: ['data-analyst'] },
-  { to: '/settings', label: 'Settings', roles: ['data-analyst'] },
+  { to: '/dashboard/pipelines',        label: 'Data Pipelines',      roles: ['data-analyst'] },
+  { to: '/dashboard/data-intelligence',label: 'Data Intelligence',   roles: ['data-analyst'] },
+  { to: '/dashboard/admin-controls',   label: 'Admin Controls',      roles: ['data-analyst'] },
+  { to: '/dashboard/ai',               label: 'AI Insights',         roles: ['executive', 'data-analyst'] },
+  { to: '/dashboard/accounts',         label: 'Account Management',  roles: ['data-analyst'] },
+  { to: '/settings',                   label: 'Settings',            roles: ['data-analyst'] },
 ];
 
 const Sidebar = () => {

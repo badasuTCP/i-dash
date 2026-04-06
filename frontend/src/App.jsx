@@ -34,6 +34,7 @@ import PipelinesPage from './pages/PipelinesPage';
 import AccountManagement from './pages/AccountManagement';
 import SettingsPage from './pages/SettingsPage';
 import AdminControls from './pages/AdminControls';
+import DataIntelligence from './pages/DataIntelligence';
 import LoginPage from './components/auth/LoginPage';
 
 // Context
@@ -86,6 +87,7 @@ const AppContent = () => {
       <Route path="/dashboard/accounts" element={<ProtectedPageRoute requiredRole="data-analyst"><AccountManagement /></ProtectedPageRoute>} />
       <Route path="/settings" element={<ProtectedPageRoute requiredRole="data-analyst"><SettingsPage /></ProtectedPageRoute>} />
       <Route path="/dashboard/admin-controls" element={<ProtectedPageRoute requiredRole="data-analyst"><AdminControls /></ProtectedPageRoute>} />
+      <Route path="/dashboard/data-intelligence" element={<ProtectedPageRoute requiredRole="data-analyst"><DataIntelligence /></ProtectedPageRoute>} />
 
       {/* AI Insights - Both roles */}
       <Route path="/dashboard/ai" element={<ProtectedPageRoute><ExecutiveDashboard /></ProtectedPageRoute>} />

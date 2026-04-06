@@ -5,9 +5,11 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart,
   AreaChart, Area,
 } from 'recharts';
+import { Filter } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import DateRangePicker from '../../components/common/DateRangePicker';
+import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 
 // ── Retail Channels ────────────────────────────────────────────
 const CHANNELS = [
@@ -80,6 +82,7 @@ const retailData = {
 
 const SaniTredRetail = () => {
   const { isDark } = useTheme();
+  const { handleDateChange, isFiltered, clearFilter } = useDashboardDateFilter();
   const [activeView, setActiveView] = useState('overview');
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
@@ -103,7 +106,17 @@ const SaniTredRetail = () => {
             <h1 className={`text-3xl font-bold mb-1 ${textPrimary}`}>Sani-Tred Retail Breakdown</h1>
             <p className={textSecondary}>Channel performance, product insights, and regional analysis</p>
           </div>
-          <DateRangePicker onApply={() => {}} />
+          <div className="flex items-center gap-2">
+            {isFiltered && (
+              <motion.button onClick={clearFilter}
+                initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 hover:bg-indigo-500/25 transition-colors"
+              >
+                <Filter size={10} /> Filtered ✕
+              </motion.button>
+            )}
+            <DateRangePicker onApply={handleDateChange} />
+          </div>
         </motion.div>
 
         {/* View Tabs */}
