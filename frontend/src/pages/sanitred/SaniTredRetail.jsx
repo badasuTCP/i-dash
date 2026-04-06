@@ -10,6 +10,7 @@ import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
+import PageInsight from '../../components/common/PageInsight';
 
 // ── Retail Channels ────────────────────────────────────────────
 const CHANNELS = [
@@ -118,6 +119,13 @@ const SaniTredRetail = () => {
             <DateRangePicker onApply={handleDateChange} />
           </div>
         </motion.div>
+
+        {/* Page Insights */}
+        <PageInsight insights={[
+          'Direct/Website is top channel at 48% revenue share — own-channel strategy is working',
+          'Amazon fastest-growing at +22.4% — Basement Waterproof Kit leads Amazon SKUs',
+          'NPS of 72 and 4.6 review score signal strong brand loyalty — leverage for upsell',
+        ]} />
 
         {/* View Tabs */}
         <div className="flex gap-2 mb-8">

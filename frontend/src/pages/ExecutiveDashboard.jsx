@@ -10,6 +10,7 @@ import ChartCard from '../components/charts/ChartCard';
 import DateRangePicker from '../components/common/DateRangePicker';
 import { TrendingUp, DollarSign, Users, Target, BarChart3, Activity, Filter, AlertCircle } from 'lucide-react';
 import { useDashboardDateFilter } from '../hooks/useDashboardDateFilter';
+import PageInsight from '../components/common/PageInsight';
 
 const ExecutiveDashboard = () => {
   const { isDark } = useTheme();
@@ -111,6 +112,13 @@ const ExecutiveDashboard = () => {
             <DateRangePicker onApply={handleDateChange} />
           </div>
         </motion.div>
+
+        {/* Page Insights */}
+        <PageInsight insights={[
+          'I-BOS is top revenue driver at $1.15M TD — up 18.2% QoQ across 13 contractors',
+          'Combined CPL at $106.88 — down 12.1% YoY · Meta + Google spend declining while leads grow',
+          'Sani-Tred Amazon channel fastest-growing at +22.4% — retail expansion opportunity',
+        ]} />
 
         {noDataMsg && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}

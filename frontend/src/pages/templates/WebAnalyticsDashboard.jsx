@@ -9,13 +9,25 @@ import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
+import PageInsight from '../../components/common/PageInsight';
 
-const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend }) => {
+const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights }) => {
   const { isDark } = useTheme();
   const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
   const vt        = filterData(visitorTrend, 'month');
   const noDataMsg = vt.noDataForPeriod ? vt.fallbackMessage : null;
+
+  // Resolve scorecards from metricsPerPeriod when filter active
+  const activePeriod = isFiltered && vt.data.length > 0 ? vt.data[0].month : null;
+  const periodMetrics = activePeriod && metricsPerPeriod ? metricsPerPeriod[activePeriod] : null;
+  const resolvedScorecards = periodMetrics
+    ? scorecards.map((kpi) =>
+        kpi.metricKey !== undefined && periodMetrics[kpi.metricKey] !== undefined
+          ? { ...kpi, value: periodMetrics[kpi.metricKey] }
+          : kpi
+      )
+    : scorecards;
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
@@ -52,6 +64,9 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
           </div>
         </motion.div>
 
+        {/* Page Insights */}
+        <PageInsight insights={pageInsights} />
+
         {noDataMsg && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
             className="mb-6 p-3 rounded-lg flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
@@ -63,7 +78,7 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
         {/* Scorecards */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {scorecards.map((kpi, idx) => (
+          {resolvedScorecards.map((kpi, idx) => (
             <ScoreCard key={idx} {...kpi} />
           ))}
         </motion.div>

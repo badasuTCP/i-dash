@@ -9,14 +9,26 @@ import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
+import PageInsight from '../../components/common/PageInsight';
 
-const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueData, salesByCategory, topProducts, quarterlyData }) => {
+const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueData, salesByCategory, topProducts, quarterlyData, metricsPerPeriod, pageInsights }) => {
   const { isDark } = useTheme();
   const { handleDateChange, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
   // Compute filtered datasets — each call returns { data, noDataForPeriod, fallbackMessage }
   const revFiltered = filterData(revenueData, 'month');
   const noDataMsg   = revFiltered.noDataForPeriod ? revFiltered.fallbackMessage : null;
+
+  // Resolve scorecards against metricsPerPeriod when a date filter is active
+  const activePeriod = isFiltered && revFiltered.data.length > 0 ? revFiltered.data[0].month : null;
+  const periodMetrics = activePeriod && metricsPerPeriod ? metricsPerPeriod[activePeriod] : null;
+  const resolvedScorecards = periodMetrics
+    ? scorecards.map((kpi) =>
+        kpi.metricKey !== undefined && periodMetrics[kpi.metricKey] !== undefined
+          ? { ...kpi, value: periodMetrics[kpi.metricKey] }
+          : kpi
+      )
+    : scorecards;
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
@@ -53,6 +65,9 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
           </div>
         </motion.div>
 
+        {/* Page Insights */}
+        <PageInsight insights={pageInsights} />
+
         {/* No-data-for-period banner */}
         {noDataMsg && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
@@ -65,7 +80,7 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
         {/* Scorecards */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {scorecards.map((kpi, idx) => (
+          {resolvedScorecards.map((kpi, idx) => (
             <ScoreCard key={idx} {...kpi} />
           ))}
         </motion.div>

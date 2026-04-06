@@ -11,6 +11,8 @@ import ScoreCard from '../../components/scorecards/ScoreCard';
 import DateRangePicker from '../../components/common/DateRangePicker';
 import { AlertTriangle, TrendingUp, TrendingDown, Award, Users, Globe, DollarSign, Filter, AlertCircle } from 'lucide-react';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
+import { useDashboardConfig } from '../../context/DashboardConfigContext';
+import PageInsight from '../../components/common/PageInsight';
 
 // ── REAL Contractor Data (from live Looker / GA4 / Google Sheets) ──────────
 const CONTRACTORS = [
@@ -335,6 +337,7 @@ const CustomTooltip = ({ active, payload, label, isDark }) => {
 // ── Main Component ──────────────────────────────────────────────
 const IBOSContractors = () => {
   const { isDark } = useTheme();
+  const { isContractorActive } = useDashboardConfig();
   const { handleDateChange, isFiltered, clearFilter } = useDashboardDateFilter();
   const [selectedContractor, setSelectedContractor] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
@@ -354,15 +357,21 @@ const IBOSContractors = () => {
     fontSize: 12,
   };
 
+  // Active contractors filtered by admin config (reactive to enable/disable)
+  const activeContractors = useMemo(
+    () => CONTRACTORS.filter((c) => isContractorActive(c.id)),
+    [isContractorActive]
+  );
+
   // Paid contractors only (for efficiency charts)
-  const paidContractors = CONTRACTORS.filter(c => c.spend > 0);
+  const paidContractors = activeContractors.filter(c => c.spend > 0);
 
   // Web-active contractors
-  const webContractors = CONTRACTORS.filter(c => c.visits > 0)
+  const webContractors = activeContractors.filter(c => c.visits > 0)
     .sort((a, b) => b.visits - a.visits);
 
   // Revenue contributors
-  const revenueContractors = CONTRACTORS.filter(c => c.revenue > 0)
+  const revenueContractors = activeContractors.filter(c => c.revenue > 0)
     .sort((a, b) => b.revenue - a.revenue);
 
   // Website breakdown for donut
@@ -381,11 +390,11 @@ const IBOSContractors = () => {
     color: c.color,
   }));
 
-  const selected = selectedContractor ? CONTRACTORS.find(c => c.id === selectedContractor) : null;
-  const dataFlags = CONTRACTORS.filter(c => c.dataFlag);
+  const selected = selectedContractor ? activeContractors.find(c => c.id === selectedContractor) : null;
+  const dataFlags = activeContractors.filter(c => c.dataFlag);
 
   const sortedContractors = useMemo(() => {
-    return [...CONTRACTORS].sort((a, b) => {
+    return [...activeContractors].sort((a, b) => {
       if (sortBy === 'revenue') return b.revenue - a.revenue;
       if (sortBy === 'leads') return b.leads - a.leads;
       if (sortBy === 'spend') return b.spend - a.spend;
@@ -399,11 +408,18 @@ const IBOSContractors = () => {
       }
       return 0;
     });
-  }, [sortBy]);
+  }, [sortBy, activeContractors]);
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        {/* ── Page Insights ── */}
+        <PageInsight insights={[
+          '5 contractors on paid media · 8 organic-only · Diamond has most organic leads (89)',
+          'Tailored (275 leads, $0 revenue) and TVS need CRM attribution audit',
+          'Eminence & PermaSurface highest rev/lead — organic model outperforms paid on ROI',
+        ]} />
 
         {/* ── Header ── */}
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
@@ -412,7 +428,7 @@ const IBOSContractors = () => {
             <div className="flex items-center gap-3 mb-1">
               <h1 className={`text-3xl font-bold ${textPrimary}`}>I-BOS Contractor Breakdown</h1>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                {CONTRACTORS.length} Contractors
+                {activeContractors.length} Contractors
               </span>
             </div>
             <p className={textSecondary}>Marketing spend, web analytics, lead performance & revenue contribution per contractor</p>
@@ -481,7 +497,7 @@ const IBOSContractors = () => {
           >
             All Contractors
           </button>
-          {CONTRACTORS.map((c) => (
+          {activeContractors.map((c) => (
             <button key={c.id} onClick={() => { setSelectedContractor(c.id); setActiveTab('overview'); }}
               className={`px-3 py-2 rounded-xl text-xs font-bold transition-all duration-200 relative ${
                 selectedContractor === c.id
@@ -761,13 +777,13 @@ const IBOSContractors = () => {
                 <h3 className={`text-base font-bold mb-1 ${textPrimary}`}>Revenue per Lead by Contractor</h3>
                 <p className={`text-xs mb-4 ${textSecondary}`}>How much revenue is attributed per lead generated. Organic powerhouses (Eminence, PermaSurface) standout significantly.</p>
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={CONTRACTORS.filter(c => c.revenuePerLead > 0).sort((a,b) => b.revenuePerLead - a.revenuePerLead)}>
+                  <BarChart data={activeContractors.filter(c => c.revenuePerLead > 0).sort((a,b) => b.revenuePerLead - a.revenuePerLead)}>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.5)'} />
                     <XAxis dataKey="shortName" stroke={isDark ? '#475569' : '#94a3b8'} tick={{ fontSize: 11 }} />
                     <YAxis stroke={isDark ? '#475569' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} tick={{ fontSize: 11 }} />
                     <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${v.toLocaleString()}`, 'Revenue per Lead']} />
                     <Bar dataKey="revenuePerLead" radius={[6, 6, 0, 0]}>
-                      {CONTRACTORS.filter(c => c.revenuePerLead > 0).sort((a,b) => b.revenuePerLead - a.revenuePerLead).map((c) => (
+                      {activeContractors.filter(c => c.revenuePerLead > 0).sort((a,b) => b.revenuePerLead - a.revenuePerLead).map((c) => (
                         <Cell key={c.id} fill={c.color} />
                       ))}
                     </Bar>

@@ -10,11 +10,11 @@ export const ALL_CONTRACTORS = [
   { id: 'eminence',   name: 'Eminence',                     division: 'i-bos', active: true },
   { id: 'permasurface',name:'PermaSurface',                  division: 'i-bos', active: true },
   { id: 'diamond',    name: 'Diamond Topcoat',               division: 'i-bos', active: true },
-  { id: 'floor-warriors', name: 'Floor Warriors',           division: 'i-bos', active: true },
-  { id: 'graber',     name: 'Graber Design',                 division: 'i-bos', active: true },
-  { id: 'dec-idaho',  name: 'Decorative Concrete Idaho',    division: 'i-bos', active: true },
-  { id: 'reeves',     name: 'Reeves Solutions',              division: 'i-bos', active: true },
-  { id: 'elite-pool', name: 'Elite Pool Coatings',           division: 'i-bos', active: true },
+  { id: 'floorwarriors', name: 'Floor Warriors',            division: 'i-bos', active: true },
+  { id: 'graber',     name: 'Graber Design Coatings',        division: 'i-bos', active: true },
+  { id: 'decorative', name: 'Decorative Concrete Idaho',     division: 'i-bos', active: true },
+  { id: 'reeves',     name: 'Reeves Concrete Solutions',     division: 'i-bos', active: true },
+  { id: 'elitepool',  name: 'Elite Pool Coatings',           division: 'i-bos', active: true },
 ];
 
 const defaultConfig = {
