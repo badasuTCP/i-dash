@@ -91,7 +91,7 @@ export const authAPI = {
   logout: () => apiClient.post('/auth/logout'),
   refreshToken: (refreshToken) =>
     apiClient.post('/auth/refresh', { refresh_token: refreshToken }),
-  me: () => apiClient.get('/users/me'),
+  me: () => apiClient.get('/auth/me'),
 };
 
 // Dashboard endpoints
