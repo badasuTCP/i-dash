@@ -43,11 +43,25 @@ export const ROLE_PERMISSIONS = {
   },
 };
 
+const STORAGE_KEY_USER  = 'idash_user';
+const STORAGE_KEY_TOKEN = 'idash_token';
+
+function loadFromStorage() {
+  try {
+    const storedToken = localStorage.getItem(STORAGE_KEY_TOKEN);
+    const storedUser  = JSON.parse(localStorage.getItem(STORAGE_KEY_USER) || 'null');
+    return { storedToken, storedUser };
+  } catch {
+    return { storedToken: null, storedUser: null };
+  }
+}
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
+  const { storedToken, storedUser } = loadFromStorage();
+  const [user,  setUser]  = useState(storedUser);
+  const [token, setToken] = useState(storedToken);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error,   setError]   = useState(null);
 
   const login = useCallback(async (email, password) => {
     setLoading(true);
@@ -70,12 +84,18 @@ export const AuthProvider = ({ children }) => {
           department: 'executive',
           is_active: true,
         };
-        setToken('demo-token-exec');
+        const t = 'demo-token-exec';
+        localStorage.setItem(STORAGE_KEY_TOKEN, t);
+        localStorage.setItem(STORAGE_KEY_USER,  JSON.stringify(fallbackUser));
+        setToken(t);
         setUser(fallbackUser);
         return { success: true };
       }
 
-      setToken(`demo-token-${account.role}`);
+      const t = `demo-token-${account.role}`;
+      localStorage.setItem(STORAGE_KEY_TOKEN, t);
+      localStorage.setItem(STORAGE_KEY_USER,  JSON.stringify(account));
+      setToken(t);
       setUser(account);
       return { success: true };
     } catch (err) {
@@ -102,7 +122,10 @@ export const AuthProvider = ({ children }) => {
         department: 'executive',
         is_active: true,
       };
-      setToken('demo-token-exec');
+      const t = 'demo-token-exec';
+      localStorage.setItem(STORAGE_KEY_TOKEN, t);
+      localStorage.setItem(STORAGE_KEY_USER,  JSON.stringify(newUser));
+      setToken(t);
       setUser(newUser);
       return { success: true };
     } catch (err) {
@@ -115,6 +138,8 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const logout = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY_TOKEN);
+    localStorage.removeItem(STORAGE_KEY_USER);
     setUser(null);
     setToken(null);
     setError(null);
