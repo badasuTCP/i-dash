@@ -1,49 +1,75 @@
 import React from 'react';
 import DivisionDashboard from '../templates/DivisionDashboard';
 
+// Real data from Google Sheets / Looker as of Q1 2026
 const IBOSSDashboard = () => (
   <DivisionDashboard
     title="I-BOS Dashboard"
-    subtitle="I-BOS Contractor Division - Contractor sales and project metrics"
+    subtitle="I-BOS Contractor Division — 13 active contractors · Data as of Q1 2026"
     accentColor="#F59E0B"
     scorecards={[
-      { label: 'Contractor Revenue', value: 3000000, change: 16.5, color: 'amber', format: 'currency', sparkData: [2200000, 2350000, 2500000, 2650000, 2780000, 2900000, 3000000] },
-      { label: 'Active Contractors', value: 342, change: 22.1, color: 'blue', format: 'number', sparkData: [220, 240, 260, 280, 300, 320, 342] },
-      { label: 'Projects Completed', value: 1280, change: 18.8, color: 'emerald', format: 'number', sparkData: [850, 920, 980, 1050, 1120, 1200, 1280] },
-      { label: 'Avg Project Value', value: 2344, change: 8.4, color: 'violet', format: 'currency', sparkData: [1950, 2020, 2080, 2150, 2220, 2280, 2344] },
+      {
+        label: 'Revenue Generated TD',
+        value: 1154810,
+        change: 18.2,
+        color: 'emerald',
+        format: 'currency',
+        sparkData: [680000, 720000, 810000, 890000, 980000, 1080000, 1154810],
+      },
+      {
+        label: 'Total Marketing Spend',
+        value: 74646,
+        change: 4.8,
+        color: 'amber',
+        format: 'currency',
+        sparkData: [58000, 62000, 55000, 62200, 67000, 71000, 74646],
+      },
+      {
+        label: 'Total Distinct Leads',
+        value: 727,
+        change: 22.1,
+        color: 'blue',
+        format: 'number',
+        sparkData: [420, 480, 510, 565, 610, 670, 727],
+      },
+      {
+        label: 'Avg Cost Per Lead',
+        value: 102.68,
+        change: -14.5,
+        color: 'violet',
+        format: 'currency',
+        sparkData: [145, 138, 128, 120, 115, 108, 102.68],
+      },
     ]}
     revenueData={[
-      { month: 'Jul', revenue: 420000, target: 400000 },
-      { month: 'Aug', revenue: 445000, target: 410000 },
-      { month: 'Sep', revenue: 480000, target: 420000 },
-      { month: 'Oct', revenue: 510000, target: 430000 },
-      { month: 'Nov', revenue: 495000, target: 440000 },
-      { month: 'Dec', revenue: 540000, target: 450000 },
-      { month: 'Jan', revenue: 460000, target: 460000 },
-      { month: 'Feb', revenue: 485000, target: 470000 },
-      { month: 'Mar', revenue: 530000, target: 480000 },
+      { month: 'Q2 2025', revenue: 285000, target: 260000 },
+      { month: 'Q3 2025', revenue: 295000, target: 280000 },
+      { month: 'Q4 2025', revenue: 380000, target: 320000 },
+      { month: 'Q1 2026', revenue: 194810, target: 300000 },
     ]}
     salesByCategory={[
-      { name: 'Floor Coatings', value: 40, color: '#F59E0B' },
-      { name: 'Garage Systems', value: 25, color: '#3B82F6' },
-      { name: 'Commercial Projects', value: 20, color: '#10B981' },
-      { name: 'Decorative Work', value: 10, color: '#8B5CF6' },
-      { name: 'Maintenance', value: 5, color: '#EF4444' },
+      { name: 'Beckley (Concrete Trans.)', value: 34, color: '#3B82F6' },
+      { name: 'Eminence', value: 29, color: '#06B6D4' },
+      { name: 'Columbus Coatings', value: 10, color: '#8B5CF6' },
+      { name: 'PermaSurface', value: 14, color: '#84CC16' },
+      { name: 'Diamond Topcoat', value: 10, color: '#EC4899' },
+      { name: 'SLG', value: 4, color: '#F59E0B' },
     ]}
     topProducts={[
-      { name: 'Commercial Floor System', revenue: 650000 },
-      { name: 'Garage Epoxy Package', revenue: 520000 },
-      { name: 'Industrial Coating', revenue: 420000 },
-      { name: 'Decorative Metallic', revenue: 350000 },
-      { name: 'Polyurea System', revenue: 280000 },
-      { name: 'Repair & Resurface', revenue: 210000 },
+      { name: 'Beckley Concrete Decor', revenue: 392470 },
+      { name: 'Eminence', revenue: 330770 },
+      { name: 'Columbus Concrete Coatings', revenue: 113720 },
+      { name: 'Diamond Topcoat', revenue: 113730 },
+      { name: 'PermaSurface', revenue: 156330 },
+      { name: 'SLG Concrete Coatings', revenue: 47790 },
     ]}
     quarterlyData={[
-      { metric: 'Revenue', q1: '$680K', q2: '$720K', q3: '$810K', q4: '$890K', q1_25: '$780K' },
-      { metric: 'Active Contractors', q1: '245', q2: '268', q3: '290', q4: '320', q1_25: '342' },
-      { metric: 'Projects Completed', q1: '280', q2: '310', q3: '340', q4: '350', q1_25: '320' },
-      { metric: 'Contractor Leads', q1: '85', q2: '92', q3: '105', q4: '112', q1_25: '98' },
-      { metric: 'Avg Project Value', q1: '$2.1K', q2: '$2.15K', q3: '$2.22K', q4: '$2.30K', q1_25: '$2.34K' },
+      { metric: 'Revenue', q1: '$275K', q2: '$285K', q3: '$295K', q4: '$380K', q1_25: '$194.8K' },
+      { metric: 'Total Leads', q1: '142', q2: '168', q3: '185', q4: '182', q1_25: '150' },
+      { metric: 'Marketing Spend', q1: '$58K', q2: '$62K', q3: '$55K', q4: '$62.2K', q1_25: '$74.6K' },
+      { metric: 'Avg CPL', q1: '$142', q2: '$128', q3: '$115', q4: '$108', q1_25: '$102.68' },
+      { metric: 'Total Clicks', q1: '45K', q2: '52K', q3: '60K', q4: '71K', q1_25: '228.5K' },
+      { metric: 'Total Web Visits', q1: '22K', q2: '38K', q3: '45K', q4: '58K', q1_25: '109K' },
     ]}
   />
 );

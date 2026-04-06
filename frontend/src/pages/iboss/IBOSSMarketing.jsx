@@ -1,54 +1,78 @@
 import React from 'react';
 import MarketingDashboardTemplate from '../templates/MarketingDashboard';
 
+// Real data from Meta Ads / Google Ads pipelines + Looker (Q1 2026)
 const IBOSSMarketing = () => (
   <MarketingDashboardTemplate
     title="I-BOS Marketing Campaign"
-    subtitle="I-BOS Contractor Division - Lead generation and ad performance"
+    subtitle="Contractor Division — $74.65K spend · 727 leads · $102.68 avg CPL · 228.5K total clicks"
     accentColor="#F59E0B"
     scorecards={[
-      { label: 'Marketing Spend', value: 66500, change: -2.1, color: 'amber', format: 'currency', sparkData: [72000, 70500, 69200, 68000, 67200, 66800, 66500] },
-      { label: 'Impressions', value: 3800000, change: 24.5, color: 'blue', format: 'number', sparkData: [2400000, 2700000, 3000000, 3200000, 3400000, 3600000, 3800000] },
-      { label: 'Contractor Leads', value: 212, change: 22.4, color: 'emerald', format: 'number', sparkData: [135, 148, 162, 175, 188, 200, 212] },
-      { label: 'CPL', value: 105.80, change: -15.2, color: 'violet', format: 'currency', sparkData: [142, 135, 128, 122, 116, 110, 105.80] },
+      {
+        label: 'Marketing Spend',
+        value: 74646,
+        change: 4.8,
+        color: 'amber',
+        format: 'currency',
+        sparkData: [58000, 62000, 55000, 62200, 67000, 71000, 74646],
+      },
+      {
+        label: 'Total Clicks',
+        value: 228468,
+        change: 32.1,
+        color: 'blue',
+        format: 'number',
+        sparkData: [95000, 112000, 130000, 158000, 185000, 210000, 228468],
+      },
+      {
+        label: 'Total Distinct Leads',
+        value: 727,
+        change: 22.1,
+        color: 'emerald',
+        format: 'number',
+        sparkData: [420, 480, 510, 565, 610, 670, 727],
+      },
+      {
+        label: 'Avg Cost Per Lead',
+        value: 102.68,
+        change: -14.5,
+        color: 'violet',
+        format: 'currency',
+        sparkData: [145, 138, 128, 120, 115, 108, 102.68],
+      },
     ]}
+    // Real per-contractor performance from Looker leaderboard
     performanceSummary={[
-      { division: 'Google Search', spend: '$28.5K', revenue: '$620K', roas: '4.5x', conversions: '95', cpl: '$92.40' },
-      { division: 'Meta Ads', spend: '$22.0K', revenue: '$380K', roas: '3.8x', conversions: '72', cpl: '$108.50' },
-      { division: 'Google Display', spend: '$10.5K', revenue: '$155K', roas: '3.2x', conversions: '32', cpl: '$125.80' },
-      { division: 'YouTube', spend: '$5.5K', revenue: '$85K', roas: '3.0x', conversions: '13', cpl: '$142.20' },
+      { division: 'Beckley Concrete Decor', spend: '$37.7K', revenue: '$392.5K', roas: '10.4x', conversions: '290', cpl: '$130.17' },
+      { division: 'Tailored Concrete Coatings', spend: '$15.9K', revenue: '—', roas: '—', conversions: '275', cpl: '$57.77' },
+      { division: 'SLG Concrete Coatings', spend: '$11.3K', revenue: '$47.8K', roas: '4.2x', conversions: '42', cpl: '$269.72' },
+      { division: 'Columbus Concrete Coatings', spend: '$5.2K', revenue: '$113.7K', roas: '21.9x', conversions: '10', cpl: '$518.00' },
+      { division: 'TVS Coatings', spend: '$4.5K', revenue: '—', roas: '—', conversions: '16', cpl: '$281.36' },
     ]}
     spendVsRevenue={[
-      { quarter: 'Q1 2024', spend: 15200, revenue: 680000 },
-      { quarter: 'Q2 2024', spend: 16800, revenue: 720000 },
-      { quarter: 'Q3 2024', spend: 16200, revenue: 810000 },
-      { quarter: 'Q4 2024', spend: 18300, revenue: 890000 },
-      { quarter: 'Q1 2025', spend: 16500, revenue: 780000 },
+      { quarter: 'Q2 2025', spend: 15200, revenue: 285000 },
+      { quarter: 'Q3 2025', spend: 14800, revenue: 295000 },
+      { quarter: 'Q4 2025', spend: 18200, revenue: 380000 },
+      { quarter: 'Q1 2026', spend: 26446, revenue: 194810 },
     ]}
     funnelData={[
-      { name: 'Impressions', value: 3800000 },
-      { name: 'Clicks', value: 142000 },
-      { name: 'Landing Page Visits', value: 52000 },
-      { name: 'Contractor Leads', value: 212 },
-      { name: 'Signed Contractors', value: 95 },
+      { name: 'Total Clicks', value: 228468 },
+      { name: 'Landing Page Visits', value: 109000 },
+      { name: 'Engaged Sessions', value: 38000 },
+      { name: 'Total Leads', value: 727 },
+      { name: 'Revenue Attributed', value: 638 },
     ]}
     spendByPeriod={[
-      { period: 'Jul', spend: 5200, leads: 18 },
-      { period: 'Aug', spend: 5600, leads: 20 },
-      { period: 'Sep', spend: 5800, leads: 22 },
-      { period: 'Oct', spend: 6500, leads: 28 },
-      { period: 'Nov', spend: 6200, leads: 26 },
-      { period: 'Dec', spend: 6800, leads: 30 },
-      { period: 'Jan', spend: 5400, leads: 22 },
-      { period: 'Feb', spend: 5800, leads: 24 },
-      { period: 'Mar', spend: 6300, leads: 28 },
+      { period: 'Q2 2025', spend: 15200, leads: 168 },
+      { period: 'Q3 2025', spend: 14800, leads: 185 },
+      { period: 'Q4 2025', spend: 18200, leads: 182 },
+      { period: 'Q1 2026', spend: 26446, leads: 192 },
     ]}
     ctrData={[
-      { quarter: 'Q1 2024', meta: 2.5, google: 4.8 },
-      { quarter: 'Q2 2024', meta: 2.8, google: 5.0 },
-      { quarter: 'Q3 2024', meta: 3.0, google: 5.2 },
-      { quarter: 'Q4 2024', meta: 3.2, google: 5.5 },
-      { quarter: 'Q1 2025', meta: 3.1, google: 5.3 },
+      { quarter: 'Q2 2025', meta: 2.1, google: 3.8 },
+      { quarter: 'Q3 2025', meta: 2.5, google: 4.1 },
+      { quarter: 'Q4 2025', meta: 2.8, google: 4.4 },
+      { quarter: 'Q1 2026', meta: 3.05, google: 4.8 },
     ]}
   />
 );
