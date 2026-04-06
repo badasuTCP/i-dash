@@ -5,9 +5,9 @@ This module provides centralized configuration using Pydantic settings,
 supporting environment variable loading with proper validation.
 """
 
-from typing import List
+from typing import List, Union
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -40,13 +40,23 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 hours
 
     # CORS configuration
-    CORS_ORIGINS: List[str] = Field(
+    CORS_ORIGINS: Union[str, List[str]] = Field(
         default=[
             "http://localhost:3000",
             "http://localhost:8000",
+            "https://strong-vitality-production-371a.up.railway.app",
+            "https://dash.theconcreteprotector.com",
         ],
         description="Allowed origins for CORS",
     )
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """Accept both comma-separated string and list."""
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
 
     # HubSpot API configuration
     HUBSPOT_API_KEY: str = Field(

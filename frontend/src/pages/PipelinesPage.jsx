@@ -88,7 +88,9 @@ const PipelinesPage = () => {
   const [runAllResult, setRunAllResult]   = useState(null);
   const [lastFetch, setLastFetch]     = useState(null);
   const [apiConnected, setApiConnected] = useState(null); // null = unknown, true, false
+  const [countdown, setCountdown] = useState(30);
   const pollingRef = useRef(null);
+  const countdownRef = useRef(null);
 
   // ── Frequencies (local UI state, can later persist to backend) ───────────────
   const [frequencies, setFrequencies] = useState({
@@ -134,11 +136,21 @@ const PipelinesPage = () => {
     }
   }, []);
 
-  // Auto-refresh every 30 seconds
+  // Auto-refresh every 30 seconds with countdown
   useEffect(() => {
     fetchStatus();
-    pollingRef.current = setInterval(() => fetchStatus(true), 30000);
-    return () => clearInterval(pollingRef.current);
+    setCountdown(30);
+    pollingRef.current = setInterval(() => {
+      fetchStatus(true);
+      setCountdown(30);
+    }, 30000);
+    countdownRef.current = setInterval(() => {
+      setCountdown((prev) => (prev > 0 ? prev - 1 : 30));
+    }, 1000);
+    return () => {
+      clearInterval(pollingRef.current);
+      clearInterval(countdownRef.current);
+    };
   }, [fetchStatus]);
 
   // ── Run a single pipeline ────────────────────────────────────────────────────
@@ -244,21 +256,26 @@ const PipelinesPage = () => {
                 {apiConnected === true ? 'Backend Connected' :
                  apiConnected === false ? 'Backend Offline' : 'Connecting...'}
               </div>
-              {/* Last fetch */}
-              {lastFetch && (
-                <span className={`text-xs ${textSec}`}>
-                  Updated {relativeTime(lastFetch.toISOString())}
+              {/* Auto-refresh indicator + manual refresh */}
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border ${isDark ? 'border-slate-600/40 bg-slate-800/40' : 'border-slate-200 bg-slate-50'}`}>
+                {lastFetch && (
+                  <span className={textSec}>
+                    Updated {relativeTime(lastFetch.toISOString())}
+                  </span>
+                )}
+                <span className={`${textSec} opacity-60`}>·</span>
+                <span className={`tabular-nums ${textSec}`}>
+                  {countdown}s
                 </span>
-              )}
-              {/* Refresh */}
-              <button
-                onClick={() => fetchStatus()}
-                disabled={loadingAll}
-                className="p-2 rounded-lg border border-slate-600/40 hover:border-indigo-500/60 transition-colors"
-                title="Refresh status"
-              >
-                <RefreshCw size={15} className={loadingAll ? 'animate-spin text-indigo-400' : textSec} />
-              </button>
+                <button
+                  onClick={() => { fetchStatus(); setCountdown(30); }}
+                  disabled={loadingAll}
+                  className="p-1 rounded hover:bg-indigo-500/20 transition-colors"
+                  title="Refresh now"
+                >
+                  <RefreshCw size={13} className={loadingAll ? 'animate-spin text-indigo-400' : textSec} />
+                </button>
+              </div>
               {/* Run All */}
               <button
                 onClick={handleRunAll}

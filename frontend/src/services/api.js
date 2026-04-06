@@ -1,6 +1,20 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+// Auto-detect production backend URL when running on Railway
+const resolveApiUrl = () => {
+  // 1. Explicit env var always wins
+  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL !== 'http://localhost:8000/api') {
+    return import.meta.env.VITE_API_URL;
+  }
+  // 2. If running on Railway (*.up.railway.app), use the production backend
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.up.railway.app')) {
+    return 'https://i-dash-production.up.railway.app/api';
+  }
+  // 3. Fallback for local dev
+  return 'http://localhost:8000/api';
+};
+
+const API_BASE_URL = resolveApiUrl();
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
