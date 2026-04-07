@@ -63,18 +63,33 @@ class GoogleAdsPipeline(BasePipeline):
         self.end_date = end_date
         self.campaign_ids = campaign_ids
 
-        # Validate configuration
-        required_fields = [
+        # Validate configuration — OAuth fields are always required;
+        # at least one customer ID must be set (legacy or per-division)
+        required_oauth = [
             "GOOGLE_ADS_DEVELOPER_TOKEN",
             "GOOGLE_ADS_CLIENT_ID",
             "GOOGLE_ADS_CLIENT_SECRET",
             "GOOGLE_ADS_REFRESH_TOKEN",
-            "GOOGLE_ADS_CUSTOMER_ID",
         ]
-
-        for field in required_fields:
+        for field in required_oauth:
             if not getattr(settings, field):
                 raise ValueError(f"{field} must be configured")
+
+        # At least one customer ID must exist
+        has_any_cid = any(
+            getattr(settings, f, "")
+            for f in (
+                "GOOGLE_ADS_CUSTOMER_ID",
+                "GOOGLE_ADS_CUSTOMER_ID_SANITRED",
+                "GOOGLE_ADS_CUSTOMER_ID_IBOS",
+                "GOOGLE_ADS_CUSTOMER_ID_CP",
+            )
+        )
+        if not has_any_cid:
+            raise ValueError(
+                "At least one Google Ads customer ID must be configured "
+                "(GOOGLE_ADS_CUSTOMER_ID or per-division variants)"
+            )
 
         # MCC (manager) login_customer_id — required when querying
         # sub-accounts under a manager account
