@@ -62,6 +62,11 @@ async def get_hubspot_owners(force_refresh: bool = False) -> Dict[str, Dict[str,
         return owners_map
 
     except Exception as exc:
+        # Detect HubSpot 403 (missing scope) and re-raise so callers can surface it
+        status_code = getattr(exc, "status", None) or getattr(exc, "status_code", None)
+        if status_code == 403:
+            logger.error("HubSpot 403 Forbidden — missing scope (likely crm.objects.owners.read): %s", exc)
+            raise  # let the caller handle 403 specifically
         logger.error("Failed to fetch HubSpot owners: %s", exc)
         return _owner_cache or {}
 

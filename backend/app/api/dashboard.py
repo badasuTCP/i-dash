@@ -637,7 +637,17 @@ async def get_sales_intelligence(
     start_date, end_date = _get_date_range(date_from, date_to)
 
     # ── 1. Pre-load HubSpot owner map ──────────────────────────────────
-    owners = await get_hubspot_owners()
+    try:
+        owners = await get_hubspot_owners()
+    except Exception as exc:
+        hs_status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
+        if hs_status == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="HubSpot returned 403 Forbidden — the private app is missing the crm.objects.owners.read scope",
+            )
+        logger.warning("HubSpot owner fetch failed (non-403): %s", exc)
+        owners = {}
 
     # ── 2. Daily time-series from HubSpotMetric (date-aggregate) ───────
     daily_stmt = (
@@ -894,7 +904,14 @@ async def get_sales_intelligence(
         ]
 
     except Exception as exc:
-        logger.warning("Live HubSpot owner fetch failed, returning DB-only data: %s", exc)
+        # Surface HubSpot 403 to the frontend so the scope-hint banner appears
+        hs_status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
+        if hs_status == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="HubSpot returned 403 Forbidden — the private app is missing required scopes (crm.objects.owners.read, crm.objects.deals.read)",
+            )
+        logger.warning("Live HubSpot data fetch failed, returning DB-only data: %s", exc)
 
     logger.info("User %s retrieved sales intelligence (%d reps)", current_user.id, len(reps_data))
 

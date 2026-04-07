@@ -326,7 +326,7 @@ const SalesIntelligence = () => {
   }
 
   if (error && !apiData) {
-    const is403 = error.toLowerCase().includes('403') || error.toLowerCase().includes('forbidden');
+    const is403 = error.toLowerCase().includes('403') || error.toLowerCase().includes('forbidden') || error.toLowerCase().includes('scope');
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
