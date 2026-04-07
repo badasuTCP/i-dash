@@ -54,16 +54,6 @@ export const brands = [
     accentBg: 'bg-blue-400',
     accentText: 'text-blue-400',
   },
-  {
-    id: 'dckn',
-    shortName: 'DC',
-    pillLabel: 'DCKN',
-    fullName: 'DCKN Lead Gen',
-    accent: '#A78BFA',       // violet
-    accentRing: 'ring-violet-400/40',
-    accentBg: 'bg-violet-400',
-    accentText: 'text-violet-400',
-  },
 ];
 
 // ────────────────────────────────────────────────────────────────
@@ -86,9 +76,6 @@ export const brandPages = {
     { to: '/dashboard/ibos/web-analytics',  label: 'Web Analytics',        icon: Globe },
     { to: '/dashboard/ibos/marketing',      label: 'Marketing Campaign',   icon: Megaphone },
     { to: '/dashboard/ibos/contractors',    label: 'Contractor Breakdown', icon: HardHat },
-  ],
-  dckn: [
-    { to: '/dashboard/dckn/web-analytics',  label: 'Web Analytics',        icon: Globe },
   ],
 };
 

@@ -16,7 +16,6 @@ export const Header = () => {
 
   const getPageInfo = () => {
     const path = location.pathname.toLowerCase();
-    if (path.includes('/dckn/web-analytics')) return { title: 'DCKN Lead Gen — Web Analytics', badge: 'Lead Gen' };
     if (path.includes('/ibos/web-analytics')) return { title: 'I-BOS Web Analytics', badge: 'Contractor' };
     if (path.includes('/ibos/marketing')) return { title: 'I-BOS Marketing', badge: 'Contractor' };
     if (path.includes('/ibos')) return { title: 'I-BOS Dashboard', badge: 'Contractor' };

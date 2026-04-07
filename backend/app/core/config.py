@@ -146,7 +146,11 @@ class Settings(BaseSettings):
         description="Meta Ads account ID for I-BOS campaigns",
     )
 
-    # Google Ads - per division (optional customer IDs)
+    # Google Ads - Manager (MCC) account + per-division customer IDs
+    GOOGLE_ADS_MANAGER_CUSTOMER_ID: str = Field(
+        default="",
+        description="Google Ads MCC (manager) customer ID for login_customer_id",
+    )
     GOOGLE_ADS_CUSTOMER_ID_CP: str = Field(
         default="",
         description="Google Ads customer ID for CP campaigns",
@@ -157,7 +161,7 @@ class Settings(BaseSettings):
     )
     GOOGLE_ADS_CUSTOMER_ID_IBOS: str = Field(
         default="",
-        description="Google Ads customer ID for I-BOS campaigns",
+        description="Google Ads customer ID for I-BOS campaigns (comma-separated for multiple)",
     )
 
     # Google Sheets configuration

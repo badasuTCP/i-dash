@@ -13,7 +13,11 @@ Account → Division mapping (source of truth):
     178431870  → cp           (CP eStore)
     108635203  → cp           (CP Websites — 13 properties)
     174590625  → ibos         (I-BOS contractor websites — 16 properties)
-    175160117  → dckn         (DCKN Lead Gen — 48 properties)
+    175160117  → ibos         (DCKN Lead Gen — 48 properties, managed under I-BOS)
+
+DCKN is NOT a top-level brand.  All properties from Account 175160117
+are mapped to the ``ibos`` division and appear in Contractor Management
+as Pending/Inactive for admin approval.
 
 Usage:
     properties = await discover_all_ga4_properties()
@@ -37,8 +41,11 @@ ACCOUNT_DIVISION_MAP: Dict[str, str] = {
     "178431870": "cp",         # CP eStore
     "108635203": "cp",         # CP Websites (13 properties)
     "174590625": "ibos",       # I-BOS (16 contractor websites)
-    "175160117": "dckn",       # DCKN Lead Gen (48 properties)
+    "175160117": "ibos",       # DCKN Lead Gen (48 properties — managed under I-BOS)
 }
+
+# Accounts whose properties auto-create contractor records as pending_admin
+CONTRACTOR_ACCOUNT_IDS = {"174590625", "175160117"}
 
 # Accounts we explicitly iterate (order preserved for logging)
 TARGET_ACCOUNT_IDS = list(ACCOUNT_DIVISION_MAP.keys())
@@ -206,15 +213,17 @@ async def persist_discovered_properties(db) -> Dict[str, Any]:
                 updated += 1
         else:
             # New property — determine initial status
+            acct_id = prop["account_id"]
             division = prop["division"]
-            # DCKN and new I-BOS properties start as pending_admin
-            is_pending = division in ("dckn",)
-            initial_enabled = division in ("cp", "sanitred")
-            initial_status = "pending_admin" if is_pending else "active"
 
-            # Generate a contractor slug for I-BOS and DCKN properties
+            # Properties from contractor accounts (I-BOS + DCKN) start pending
+            is_contractor_acct = acct_id in CONTRACTOR_ACCOUNT_IDS
+            initial_enabled = division in ("cp", "sanitred") and not is_contractor_acct
+            initial_status = "pending_admin" if is_contractor_acct else "active"
+
+            # Generate a contractor slug for all I-BOS division properties
             contractor_slug = None
-            if division in ("ibos", "dckn"):
+            if division == "ibos":
                 contractor_slug = _make_contractor_slug(prop["display_name"], prop["property_id"])
 
             ga4_prop = GA4Property(
@@ -232,8 +241,8 @@ async def persist_discovered_properties(db) -> Dict[str, Any]:
             db.add(ga4_prop)
             inserted += 1
 
-            # Auto-create contractor record for DCKN properties
-            if division == "dckn" and contractor_slug:
+            # Auto-create contractor record for contractor-account properties
+            if is_contractor_acct and contractor_slug:
                 existing_contractor = await db.execute(
                     select(Contractor).where(Contractor.id == contractor_slug)
                 )
@@ -241,15 +250,15 @@ async def persist_discovered_properties(db) -> Dict[str, Any]:
                     db.add(Contractor(
                         id=contractor_slug,
                         name=prop["display_name"],
-                        division="dckn",
+                        division="ibos",
                         active=False,
                         status="pending_admin",
                         updated_at=now,
                     ))
                     contractors_created += 1
                     logger.info(
-                        "Auto-created DCKN contractor '%s' for GA4 property %s",
-                        contractor_slug, prop["property_id"],
+                        "Auto-created contractor '%s' for GA4 property %s (account %s)",
+                        contractor_slug, prop["property_id"], acct_id,
                     )
 
     await db.commit()

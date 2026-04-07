@@ -1115,7 +1115,7 @@ async def _resolve_ga4_property(division: str, db=None, property_id_override: st
 async def get_web_analytics(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    division: str = Query("cp", description="Division slug: cp, sanitred, ibos, dckn"),
+    division: str = Query("cp", description="Division slug: cp, sanitred, ibos"),
     date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
     granularity: str = Query("auto", description="Granularity: daily, monthly, auto"),
@@ -1361,7 +1361,7 @@ async def get_ga4_discovery_status(
 async def list_ga4_properties(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    division: str = Query("ibos", description="Division slug: cp, sanitred, ibos, dckn"),
+    division: str = Query("ibos", description="Division slug: cp, sanitred, ibos"),
     include_disabled: bool = Query(False, description="Include disabled properties"),
 ) -> dict:
     """

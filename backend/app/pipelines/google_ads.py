@@ -76,23 +76,62 @@ class GoogleAdsPipeline(BasePipeline):
             if not getattr(settings, field):
                 raise ValueError(f"{field} must be configured")
 
-        self.client = GoogleAdsClient.load_from_dict(
-            {
-                "developer_token": settings.GOOGLE_ADS_DEVELOPER_TOKEN,
-                "client_id": settings.GOOGLE_ADS_CLIENT_ID,
-                "client_secret": settings.GOOGLE_ADS_CLIENT_SECRET,
-                "refresh_token": settings.GOOGLE_ADS_REFRESH_TOKEN,
-                "use_proto_plus": True,
-            }
-        )
+        # MCC (manager) login_customer_id — required when querying
+        # sub-accounts under a manager account
+        client_config = {
+            "developer_token": settings.GOOGLE_ADS_DEVELOPER_TOKEN,
+            "client_id": settings.GOOGLE_ADS_CLIENT_ID,
+            "client_secret": settings.GOOGLE_ADS_CLIENT_SECRET,
+            "refresh_token": settings.GOOGLE_ADS_REFRESH_TOKEN,
+            "use_proto_plus": True,
+        }
+        manager_id = getattr(settings, "GOOGLE_ADS_MANAGER_CUSTOMER_ID", "")
+        if manager_id:
+            client_config["login_customer_id"] = manager_id.replace("-", "")
 
-        self.customer_id = settings.GOOGLE_ADS_CUSTOMER_ID.replace("-", "")
+        self.client = GoogleAdsClient.load_from_dict(client_config)
+
+        # Build the list of customer IDs to iterate
+        self.customer_ids = self._build_customer_id_list()
+        # Legacy single customer_id (first in list)
+        self.customer_id = self.customer_ids[0] if self.customer_ids else settings.GOOGLE_ADS_CUSTOMER_ID.replace("-", "")
+
+    def _build_customer_id_list(self) -> List[str]:
+        """
+        Build a deduplicated list of Google Ads customer IDs from config.
+
+        Sources (in order):
+            1. GOOGLE_ADS_CUSTOMER_ID_SANITRED
+            2. GOOGLE_ADS_CUSTOMER_ID_IBOS (comma-separated for multiple)
+            3. GOOGLE_ADS_CUSTOMER_ID (legacy fallback)
+        """
+        ids: List[str] = []
+
+        for field in (
+            "GOOGLE_ADS_CUSTOMER_ID_SANITRED",
+            "GOOGLE_ADS_CUSTOMER_ID_IBOS",
+            "GOOGLE_ADS_CUSTOMER_ID_CP",
+        ):
+            val = getattr(settings, field, "")
+            if val:
+                for cid in val.split(","):
+                    cid = cid.strip().replace("-", "")
+                    if cid and cid not in ids:
+                        ids.append(cid)
+
+        # Legacy fallback
+        legacy = settings.GOOGLE_ADS_CUSTOMER_ID.replace("-", "")
+        if legacy and legacy not in ids:
+            ids.append(legacy)
+
+        return ids
 
     async def extract(self) -> Dict[str, Any]:
         """
         Extract metrics from Google Ads API using GAQL queries.
 
-        Retrieves campaign and ad group level data with filters and metrics.
+        Iterates over all configured customer IDs (Sani-Tred, I-BOS, etc.)
+        and aggregates campaign/ad group level data.
 
         Returns:
             Dictionary with campaign and ad group data:
@@ -101,25 +140,33 @@ class GoogleAdsPipeline(BasePipeline):
         try:
             self.logger.info(
                 f"Extracting Google Ads data from {self.start_date} "
-                f"to {self.end_date}"
+                f"to {self.end_date} for {len(self.customer_ids)} customer(s): "
+                f"{', '.join(self.customer_ids)}"
             )
 
-            campaigns_data = await self._get_campaigns_by_adgroup()
-            self.logger.debug(
-                f"Fetched {len(campaigns_data)} campaign/ad group records"
-            )
+            all_campaigns: List[Dict[str, Any]] = []
+            for cid in self.customer_ids:
+                try:
+                    data = await self._get_campaigns_by_adgroup(customer_id=cid)
+                    self.logger.info(
+                        f"Customer {cid}: fetched {len(data)} ad group records"
+                    )
+                    all_campaigns.extend(data)
+                except GoogleAdsException as e:
+                    self.logger.warning(f"Google Ads error for customer {cid}: {e}")
+                except Exception as e:
+                    self.logger.warning(f"Error fetching customer {cid}: {e}")
 
-            return {"campaigns": campaigns_data}
+            self.logger.info(f"Total Google Ads records across all customers: {len(all_campaigns)}")
+            return {"campaigns": all_campaigns}
 
-        except GoogleAdsException as e:
-            self.logger.error(f"Google Ads API error: {str(e)}")
-            raise
         except Exception as e:
             self.logger.error(f"Error extracting Google Ads data: {str(e)}")
             raise
 
-    async def _get_campaigns_by_adgroup(self) -> List[Dict[str, Any]]:
+    async def _get_campaigns_by_adgroup(self, customer_id: str = None) -> List[Dict[str, Any]]:
         """Fetch campaign and ad group metrics using GAQL."""
+        cid = customer_id or self.customer_id
         campaigns = []
 
         try:
@@ -149,7 +196,7 @@ class GoogleAdsPipeline(BasePipeline):
             # Add campaign filter if specified
             if self.campaign_ids:
                 campaign_filter = ", ".join(
-                    f'"{cid}"' for cid in self.campaign_ids
+                    f'"{c}"' for c in self.campaign_ids
                 )
                 query += f" AND campaign.id IN ({campaign_filter})"
 
@@ -157,7 +204,7 @@ class GoogleAdsPipeline(BasePipeline):
 
             # Execute query
             search_request = {
-                "customer_id": self.customer_id,
+                "customer_id": cid,
                 "query": query,
             }
 

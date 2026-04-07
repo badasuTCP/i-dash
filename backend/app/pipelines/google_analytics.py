@@ -133,7 +133,7 @@ class GoogleAnalyticsPipeline(BasePipeline):
             async with async_session_maker() as db:
                 from app.services.ga4_discovery import get_properties_for_division
                 enabled_props = []
-                for div in ("cp", "sanitred", "ibos", "dckn"):
+                for div in ("cp", "sanitred", "ibos"):
                     div_props = await get_properties_for_division(db, div, enabled_only=True)
                     enabled_props.extend(div_props)
 
