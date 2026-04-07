@@ -45,24 +45,16 @@ async def get_hubspot_owners(force_refresh: bool = False) -> Dict[str, Dict[str,
         client = Client(access_token=settings.HUBSPOT_API_KEY)
         owners_map: Dict[str, Dict[str, Any]] = {}
 
-        # Paginate through all owners
-        page = client.crm.owners.get_page(limit=100)
-        while page:
-            for owner in page.results or []:
-                oid = str(owner.id)
-                owners_map[oid] = {
-                    "id": oid,
-                    "first": owner.first_name or "",
-                    "last": owner.last_name or "",
-                    "email": owner.email or "",
-                }
-            if page.paging and page.paging.next:
-                page = client.crm.owners.get_page(
-                    limit=100,
-                    after=page.paging.next.after,
-                )
-            else:
-                break
+        # get_all() auto-paginates through /crm/v3/owners/
+        all_owners = client.crm.owners.get_all()
+        for owner in all_owners:
+            oid = str(owner.id)
+            owners_map[oid] = {
+                "id": oid,
+                "first": owner.first_name or "",
+                "last": owner.last_name or "",
+                "email": owner.email or "",
+            }
 
         _owner_cache = owners_map
         _cache_ts = time.time()
