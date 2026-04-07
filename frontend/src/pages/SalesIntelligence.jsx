@@ -1,16 +1,19 @@
 /**
  * Sales Intelligence Dashboard — "Beyond-Looker" HubSpot CRM Visualizations
  *
- * High-velocity, 2026-standard sales analytics featuring:
+ * All data is live from the backend's /dashboard/hubspot/sales-intelligence
+ * endpoint which maps HubSpot owner IDs to real rep names (Kathy, Tony, Brent…).
+ *
+ * Features:
  *  1. Activity-to-Deal Correlation (dual-axis)
  *  2. Gamified Rep Leaderboard (win rate + avg days to close)
  *  3. Stalled Deal Heatmap (72hr no-touch warning)
- *  4. Pipeline Waterfall (Starting -> +New -> +Upsell -> -Lost -> Ending)
- *  5. Deals Won vs Forecast (animated gauge)
+ *  4. Pipeline Waterfall (Starting -> +New -> -Won -> -Lost -> Ending)
+ *  5. Quota Attainment Gauge (animated circular progress)
  *  6. Rep Activity Radar (effort balance spider chart)
  *
  * Drill-down: clicking a rep filters ALL charts to that rep's data.
- * Insight snippets auto-generate based on data anomalies.
+ * No demo-data fallback — shows "Syncing HubSpot Owners…" loading state.
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -23,62 +26,10 @@ import {
 import {
   TrendingUp, Users, Target, AlertTriangle, Zap, Award, Clock,
   Activity, Phone, Mail, Calendar, Filter, X, ChevronRight,
-  ArrowUpRight, ArrowDownRight, Flame, Eye,
+  ArrowUpRight, ArrowDownRight, Flame, Eye, Loader2, RefreshCw,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { dashboardAPI } from '../services/api';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DEMO DATA — rich rep-level + deal-level data for the full dashboard
-// Consumed by all charts. Live API overlays when available.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const REP_DATA = [
-  { id: 'rep1', name: 'Marcus Rivera',  avatar: 'MR', deals_won: 14, deals_lost: 3,  revenue: 287000, avg_days: 18, calls: 142, emails: 310, meetings: 38, prospecting: 85, closing: 92, nurturing: 70, quota: 300000 },
-  { id: 'rep2', name: 'Sarah Chen',     avatar: 'SC', deals_won: 19, deals_lost: 2,  revenue: 412000, avg_days: 14, calls: 98,  emails: 420, meetings: 52, prospecting: 72, closing: 95, nurturing: 88, quota: 400000 },
-  { id: 'rep3', name: 'Jake Thompson',  avatar: 'JT', deals_won: 11, deals_lost: 5,  revenue: 198000, avg_days: 24, calls: 178, emails: 195, meetings: 22, prospecting: 90, closing: 65, nurturing: 55, quota: 250000 },
-  { id: 'rep4', name: 'Priya Patel',    avatar: 'PP', deals_won: 16, deals_lost: 4,  revenue: 345000, avg_days: 16, calls: 120, emails: 380, meetings: 45, prospecting: 78, closing: 88, nurturing: 82, quota: 350000 },
-  { id: 'rep5', name: 'David Kim',      avatar: 'DK', deals_won: 8,  deals_lost: 6,  revenue: 156000, avg_days: 28, calls: 200, emails: 150, meetings: 18, prospecting: 95, closing: 55, nurturing: 45, quota: 200000 },
-  { id: 'rep6', name: 'Emma Wilson',    avatar: 'EW', deals_won: 22, deals_lost: 1,  revenue: 520000, avg_days: 12, calls: 85,  emails: 490, meetings: 60, prospecting: 65, closing: 98, nurturing: 95, quota: 500000 },
-];
-
-const DAILY_ACTIVITY = Array.from({ length: 30 }, (_, i) => {
-  const d = new Date(2026, 2, 7 + i); // Mar 7 - Apr 5
-  const base = 15 + Math.floor(Math.random() * 25);
-  const spike = i === 10 || i === 22 ? 20 : 0; // activity spikes
-  return {
-    date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    dateObj: d,
-    activities: base + spike,
-    calls: Math.floor((base + spike) * 0.3),
-    emails: Math.floor((base + spike) * 0.45),
-    meetings: Math.floor((base + spike) * 0.25),
-    // Deals lag activities by ~14 days
-    deals_won: i > 14 ? Math.floor(1 + Math.random() * 4 + (i === 24 ? 5 : 0)) : Math.floor(Math.random() * 2),
-    revenue_created: (i > 14 ? 15000 + Math.random() * 40000 : 5000 + Math.random() * 10000),
-    pipeline_value: 80000 + Math.random() * 120000,
-  };
-});
-
-const STALLED_DEALS = [
-  { id: 'D-1042', name: 'Apex Building Supply', value: 45000, rep: 'Jake Thompson',  stage: 'Proposal', days_stalled: 5, last_touch: 'Email' },
-  { id: 'D-1038', name: 'Summit Contractors',   value: 78000, rep: 'David Kim',      stage: 'Negotiation', days_stalled: 4, last_touch: 'Call' },
-  { id: 'D-1051', name: 'Midwest Flooring Co',  value: 32000, rep: 'Jake Thompson',  stage: 'Discovery', days_stalled: 7, last_touch: 'Meeting' },
-  { id: 'D-1033', name: 'Pacific Coatings Ltd', value: 120000, rep: 'David Kim',     stage: 'Proposal', days_stalled: 3, last_touch: 'Email' },
-  { id: 'D-1047', name: 'Great Lakes Concrete', value: 56000, rep: 'Marcus Rivera',  stage: 'Negotiation', days_stalled: 4, last_touch: 'Call' },
-  { id: 'D-1055', name: 'Desert Sun Surfaces',  value: 28000, rep: 'Priya Patel',    stage: 'Discovery', days_stalled: 3, last_touch: 'Email' },
-  { id: 'D-1060', name: 'Rocky Mountain Pool',  value: 92000, rep: 'David Kim',      stage: 'Proposal', days_stalled: 6, last_touch: 'Meeting' },
-  { id: 'D-1029', name: 'Bayshore Industries',  value: 41000, rep: 'Jake Thompson',  stage: 'Negotiation', days_stalled: 8, last_touch: 'Call' },
-];
-
-const PIPELINE_WATERFALL = [
-  { name: 'Starting\nPipeline', value: 1420000, fill: '#6366F1' },
-  { name: 'New Deals\n(+)', value: 380000, fill: '#22D3EE' },
-  { name: 'Value\nIncreased (+)', value: 145000, fill: '#34D399' },
-  { name: 'Deals\nLost (-)', value: -210000, fill: '#F43F5E' },
-  { name: 'Deals\nWon (-)', value: -520000, fill: '#F59E0B' },
-  { name: 'Ending\nPipeline', value: 1215000, fill: '#8B5CF6' },
-];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COLOR SYSTEM — neon accents for dark mode
@@ -129,10 +80,49 @@ const SalesToolTip = ({ active, payload, label, isDark }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SYNCING OVERLAY — shown while HubSpot owner data is loading
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SyncingOverlay = ({ isDark }) => {
+  const textPri = isDark ? 'text-white' : 'text-slate-900';
+  const textSec = isDark ? 'text-slate-400' : 'text-slate-500';
+  return (
+    <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6">
+      <motion.div
+        animate={{ rotate: 360 }}
+        transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+      >
+        <RefreshCw size={48} className="text-cyan-500" />
+      </motion.div>
+      <div className="text-center">
+        <h2 className={`text-xl font-bold mb-2 ${textPri}`}>Syncing HubSpot Owners...</h2>
+        <p className={`text-sm ${textSec}`}>
+          Mapping deal owners, activities, and pipeline data from your CRM.
+        </p>
+        <p className={`text-xs mt-2 ${textSec}`}>
+          This typically takes 5–10 seconds.
+        </p>
+      </div>
+      {/* Skeleton shimmer cards */}
+      <div className="w-full max-w-4xl grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 px-8">
+        {[1,2,3,4].map(i => (
+          <div key={i} className={`rounded-2xl border p-5 ${isDark ? 'bg-[#1a1d2e]/60 border-slate-700/30' : 'bg-white border-slate-200/60'}`}>
+            <div className={`h-4 w-16 rounded ${isDark ? 'bg-slate-700/50' : 'bg-slate-200'} animate-pulse mb-3`} />
+            <div className={`h-8 w-24 rounded ${isDark ? 'bg-slate-700/50' : 'bg-slate-200'} animate-pulse mb-2`} />
+            <div className={`h-3 w-20 rounded ${isDark ? 'bg-slate-700/50' : 'bg-slate-200'} animate-pulse`} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // INSIGHT SNIPPET GENERATOR
 // ─────────────────────────────────────────────────────────────────────────────
 
 function generateInsights(reps, stalledDeals, selectedRep) {
+  if (!reps.length) return [];
   const insights = [];
   const sorted = [...reps].sort((a, b) => b.revenue - a.revenue);
   const topRep = sorted[0];
@@ -140,7 +130,7 @@ function generateInsights(reps, stalledDeals, selectedRep) {
 
   // Fastest closer
   const fastest = [...reps].sort((a, b) => a.avg_days - b.avg_days)[0];
-  if (fastest.avg_days < avgDays * 0.8) {
+  if (fastest && fastest.avg_days > 0 && fastest.avg_days < avgDays * 0.8) {
     insights.push({
       icon: Zap,
       color: 'text-cyan-400',
@@ -149,11 +139,14 @@ function generateInsights(reps, stalledDeals, selectedRep) {
   }
 
   // Top performer
-  insights.push({
-    icon: Award,
-    color: 'text-amber-400',
-    text: `${topRep.name} leads with $${(topRep.revenue / 1000).toFixed(0)}K closed — ${Math.round(topRep.revenue / topRep.quota * 100)}% to quota`,
-  });
+  if (topRep) {
+    const quotaStr = topRep.quota > 0 ? ` — ${Math.round(topRep.revenue / topRep.quota * 100)}% to quota` : '';
+    insights.push({
+      icon: Award,
+      color: 'text-amber-400',
+      text: `${topRep.name} leads with $${(topRep.revenue / 1000).toFixed(0)}K closed${quotaStr}`,
+    });
+  }
 
   // Stalled deal warning
   const criticalStalled = stalledDeals.filter(d => d.days_stalled >= 5);
@@ -170,13 +163,15 @@ function generateInsights(reps, stalledDeals, selectedRep) {
   insights.push({
     icon: Activity,
     color: 'text-violet-400',
-    text: 'Activity spikes on Mar 17 correlate with a 3x deal-close rate 14 days later',
+    text: 'Activity spikes correlate with higher deal-close rates approximately 14 days later',
   });
 
   if (selectedRep) {
     const rep = reps.find(r => r.id === selectedRep);
     if (rep) {
-      const winRate = Math.round(rep.deals_won / (rep.deals_won + rep.deals_lost) * 100);
+      const winRate = rep.deals_won + rep.deals_lost > 0
+        ? Math.round(rep.deals_won / (rep.deals_won + rep.deals_lost) * 100)
+        : 0;
       insights.unshift({
         icon: Filter,
         color: 'text-indigo-400',
@@ -196,7 +191,8 @@ const SalesIntelligence = () => {
   const { isDark } = useTheme();
   const [selectedRep, setSelectedRep] = useState(null);
   const [apiData, setApiData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   // ── Theme tokens ──────────────────────────────────────────────────────────
   const cardBg    = isDark ? 'bg-[#1a1d2e]/80 border-slate-700/30' : 'bg-white border-slate-200/60';
@@ -208,101 +204,149 @@ const SalesIntelligence = () => {
   // ── Fetch live data ───────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-    const fetch = async () => {
+    const fetchData = async () => {
       setLoading(true);
+      setError(null);
       try {
         const { data } = await dashboardAPI.getSalesIntelligence();
-        if (!cancelled && data?.daily_series?.length) setApiData(data);
-      } catch { /* fallback to demo data */ }
-      finally { setLoading(false); }
+        if (!cancelled) setApiData(data);
+      } catch (err) {
+        if (!cancelled) setError(err?.response?.data?.detail || 'Failed to load sales data');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
-    fetch();
+    fetchData();
     return () => { cancelled = true; };
   }, []);
 
-  // ── Derived data ──────────────────────────────────────────────────────────
-  const reps = useMemo(() => {
-    if (selectedRep) return REP_DATA.filter(r => r.id === selectedRep);
-    return REP_DATA;
-  }, [selectedRep]);
+  // ── Derived data from API response ────────────────────────────────────────
+  const allReps = useMemo(() => apiData?.reps || [], [apiData]);
 
-  const allReps = REP_DATA; // always full list for leaderboard
+  const reps = useMemo(() => {
+    if (selectedRep) return allReps.filter(r => r.id === selectedRep);
+    return allReps;
+  }, [allReps, selectedRep]);
 
   const dailyData = useMemo(() => {
-    if (apiData?.daily_series?.length) return apiData.daily_series;
-    return DAILY_ACTIVITY;
+    const series = apiData?.daily_series || [];
+    return series.map(d => ({
+      ...d,
+      date: d.date ? new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : d.date,
+    }));
   }, [apiData]);
 
   const stalledDeals = useMemo(() => {
+    const deals = apiData?.stalled_deals || [];
     if (selectedRep) {
-      const repName = REP_DATA.find(r => r.id === selectedRep)?.name;
-      return STALLED_DEALS.filter(d => d.rep === repName);
+      const repName = allReps.find(r => r.id === selectedRep)?.name;
+      return deals.filter(d => d.rep === repName);
     }
-    return STALLED_DEALS;
-  }, [selectedRep]);
+    return deals;
+  }, [apiData, allReps, selectedRep]);
 
   const insights = useMemo(
-    () => generateInsights(REP_DATA, STALLED_DEALS, selectedRep),
-    [selectedRep]
+    () => generateInsights(allReps, apiData?.stalled_deals || [], selectedRep),
+    [allReps, apiData, selectedRep]
   );
 
   // ── Aggregates ────────────────────────────────────────────────────────────
-  const totalRevenue = reps.reduce((s, r) => s + r.revenue, 0);
-  const totalQuota   = reps.reduce((s, r) => s + r.quota, 0);
-  const totalWon     = reps.reduce((s, r) => s + r.deals_won, 0);
-  const totalLost    = reps.reduce((s, r) => s + r.deals_lost, 0);
+  const totalRevenue = reps.reduce((s, r) => s + (r.revenue || 0), 0);
+  const totalQuota   = reps.reduce((s, r) => s + (r.quota || 0), 0);
+  const totalWon     = reps.reduce((s, r) => s + (r.deals_won || 0), 0);
+  const totalLost    = reps.reduce((s, r) => s + (r.deals_lost || 0), 0);
   const winRate      = totalWon + totalLost > 0 ? Math.round(totalWon / (totalWon + totalLost) * 100) : 0;
   const quotaPct     = totalQuota > 0 ? Math.round(totalRevenue / totalQuota * 100) : 0;
-  const avgDaysClose = Math.round(reps.reduce((s, r) => s + r.avg_days, 0) / (reps.length || 1));
+  const avgDaysClose = reps.length > 0
+    ? Math.round(reps.reduce((s, r) => s + (r.avg_days || 0), 0) / reps.length)
+    : 0;
 
   // ── Leaderboard sort ──────────────────────────────────────────────────────
   const leaderboard = useMemo(() => {
     return [...allReps]
       .map(r => ({
         ...r,
-        winRate: Math.round(r.deals_won / (r.deals_won + r.deals_lost) * 100),
-        quotaPct: Math.round(r.revenue / r.quota * 100),
+        winRate: r.deals_won + r.deals_lost > 0
+          ? Math.round(r.deals_won / (r.deals_won + r.deals_lost) * 100) : 0,
+        quotaPct: r.quota > 0 ? Math.round(r.revenue / r.quota * 100) : 0,
       }))
       .sort((a, b) => b.winRate - a.winRate || a.avg_days - b.avg_days);
-  }, []);
+  }, [allReps]);
 
   // ── Radar data ────────────────────────────────────────────────────────────
   const radarData = useMemo(() => {
     const target = selectedRep
-      ? [REP_DATA.find(r => r.id === selectedRep)].filter(Boolean)
-      : REP_DATA;
+      ? allReps.filter(r => r.id === selectedRep)
+      : allReps;
     if (target.length === 0) return [];
 
-    const avg = (key) => Math.round(target.reduce((s, r) => s + r[key], 0) / target.length);
+    const avg = (key) => Math.round(target.reduce((s, r) => s + (r[key] || 0), 0) / target.length);
     return [
       { metric: 'Prospecting', value: avg('prospecting'), fullMark: 100 },
       { metric: 'Closing',     value: avg('closing'),     fullMark: 100 },
       { metric: 'Nurturing',   value: avg('nurturing'),   fullMark: 100 },
-      { metric: 'Calls',       value: Math.min(100, Math.round(avg('calls') / 2)), fullMark: 100 },
-      { metric: 'Emails',      value: Math.min(100, Math.round(avg('emails') / 5)), fullMark: 100 },
-      { metric: 'Meetings',    value: Math.min(100, Math.round(avg('meetings') * 1.5)), fullMark: 100 },
+      { metric: 'Calls',       value: Math.min(100, Math.round(avg('calls') / Math.max(1, allReps.length) * 2)), fullMark: 100 },
+      { metric: 'Emails',      value: Math.min(100, Math.round(avg('emails') / Math.max(1, allReps.length))), fullMark: 100 },
+      { metric: 'Meetings',    value: Math.min(100, Math.round(avg('meetings') / Math.max(1, allReps.length) * 3)), fullMark: 100 },
     ];
-  }, [selectedRep]);
+  }, [allReps, selectedRep]);
 
-  // ── Waterfall cumulative ──────────────────────────────────────────────────
+  // ── Waterfall from API ────────────────────────────────────────────────────
   const waterfallData = useMemo(() => {
+    const wf = apiData?.pipeline_waterfall || [];
+    if (!wf.length) return [];
     let cumulative = 0;
-    return PIPELINE_WATERFALL.map((item, i) => {
-      const isEndpoint = i === 0 || i === PIPELINE_WATERFALL.length - 1;
+    return wf.map((item, i) => {
+      const isEndpoint = i === 0 || i === wf.length - 1;
       const base = isEndpoint ? 0 : cumulative;
       if (i === 0) cumulative = item.value;
       else if (!isEndpoint) cumulative += item.value;
       else cumulative = item.value;
       return {
         ...item,
-        displayName: item.name.replace('\n', ' '),
+        displayName: item.name,
         base: isEndpoint ? 0 : (item.value >= 0 ? base : base + item.value),
         height: Math.abs(isEndpoint ? item.value : item.value),
       };
     });
-  }, []);
+  }, [apiData]);
 
   const clearFilter = useCallback(() => setSelectedRep(null), []);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // LOADING / ERROR STATE
+  // ─────────────────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <SyncingOverlay isDark={isDark} />
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (error && !apiData) {
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
+            <AlertTriangle size={48} className="text-amber-500" />
+            <h2 className={`text-xl font-bold ${textPri}`}>Unable to Load Sales Data</h2>
+            <p className={`text-sm ${textSec}`}>{error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-semibold hover:bg-cyan-700 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  const hasReps = allReps.length > 0;
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
@@ -329,63 +373,62 @@ const SalesIntelligence = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {apiData && (
-              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
-                LIVE API
-              </span>
-            )}
-            {!apiData && (
-              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/25">
-                DEMO DATA
-              </span>
-            )}
+            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+              apiData?.owners_synced
+                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                : 'bg-amber-500/15 text-amber-400 border border-amber-500/25'
+            }`}>
+              {apiData?.owners_synced ? 'LIVE API' : 'PARTIAL DATA'}
+            </span>
             {selectedRep && (
               <button
                 onClick={clearFilter}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
               >
                 <X size={12} />
-                Clear Filter: {REP_DATA.find(r => r.id === selectedRep)?.name}
+                Clear Filter: {allReps.find(r => r.id === selectedRep)?.name}
               </button>
             )}
           </div>
         </div>
 
         {/* ═══ INSIGHT SNIPPETS BANNER ═══ */}
-        <motion.div
-          layout
-          className={`rounded-2xl border p-5 mb-8 ${cardBg}`}
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Eye size={14} className="text-cyan-400" />
-            <span className="text-xs font-bold uppercase tracking-wider text-cyan-400">AI Insight Snippets</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <AnimatePresence mode="popLayout">
-              {insights.map((insight, i) => (
-                <motion.div
-                  key={insight.text}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ delay: i * 0.08 }}
-                  className={`flex items-start gap-2.5 text-sm ${textSec}`}
-                >
-                  <insight.icon size={14} className={`${insight.color} mt-0.5 flex-shrink-0`} />
-                  <span>{insight.text}</span>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-        </motion.div>
+        {insights.length > 0 && (
+          <motion.div
+            layout
+            className={`rounded-2xl border p-5 mb-8 ${cardBg}`}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Eye size={14} className="text-cyan-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-cyan-400">AI Insight Snippets</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <AnimatePresence mode="popLayout">
+                {insights.map((insight, i) => (
+                  <motion.div
+                    key={insight.text}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ delay: i * 0.08 }}
+                    className={`flex items-start gap-2.5 text-sm ${textSec}`}
+                  >
+                    <insight.icon size={14} className={`${insight.color} mt-0.5 flex-shrink-0`} />
+                    <span>{insight.text}</span>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
 
         {/* ═══ SCORECARDS ROW ═══ */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           {[
-            { label: 'Revenue Closed', value: `$${(totalRevenue / 1000).toFixed(0)}K`, sub: `${quotaPct}% to quota`, color: 'from-emerald-500 to-teal-600', icon: TrendingUp, trend: '+14.2%' },
-            { label: 'Win Rate', value: `${winRate}%`, sub: `${totalWon}W / ${totalLost}L`, color: 'from-cyan-500 to-blue-600', icon: Target, trend: '+3.1%' },
-            { label: 'Avg Days to Close', value: `${avgDaysClose}d`, sub: 'Team average', color: 'from-violet-500 to-purple-600', icon: Clock, trend: '-2.4d' },
-            { label: 'Stalled Deals', value: stalledDeals.length.toString(), sub: `$${(stalledDeals.reduce((s, d) => s + d.value, 0) / 1000).toFixed(0)}K at risk`, color: 'from-rose-500 to-red-600', icon: AlertTriangle, trend: stalledDeals.length > 5 ? 'Critical' : 'Watch' },
+            { label: 'Revenue Closed', value: `$${(totalRevenue / 1000).toFixed(0)}K`, sub: totalQuota > 0 ? `${quotaPct}% to quota` : `${totalWon} deals`, color: 'from-emerald-500 to-teal-600', icon: TrendingUp },
+            { label: 'Win Rate', value: `${winRate}%`, sub: `${totalWon}W / ${totalLost}L`, color: 'from-cyan-500 to-blue-600', icon: Target },
+            { label: 'Avg Days to Close', value: `${avgDaysClose}d`, sub: 'Team average', color: 'from-violet-500 to-purple-600', icon: Clock },
+            { label: 'Stalled Deals', value: stalledDeals.length.toString(), sub: `$${(stalledDeals.reduce((s, d) => s + (d.value || 0), 0) / 1000).toFixed(0)}K at risk`, color: 'from-rose-500 to-red-600', icon: AlertTriangle },
           ].map((card, i) => (
             <motion.div
               key={card.label}
@@ -395,14 +438,7 @@ const SalesIntelligence = () => {
               className={`rounded-2xl border p-5 ${cardBg} relative overflow-hidden`}
             >
               <div className={`absolute top-0 right-0 w-24 h-24 rounded-full bg-gradient-to-br ${card.color} opacity-[0.07] -translate-y-8 translate-x-8`} />
-              <div className="flex items-center justify-between mb-2">
-                <card.icon size={16} className={textSec} />
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                  card.trend?.startsWith('+') || card.trend?.startsWith('-') && card.label === 'Avg Days to Close'
-                    ? 'bg-emerald-500/15 text-emerald-400'
-                    : card.trend === 'Critical' ? 'bg-rose-500/15 text-rose-400' : 'bg-amber-500/15 text-amber-400'
-                }`}>{card.trend}</span>
-              </div>
+              <card.icon size={16} className={`${textSec} mb-2`} />
               <p className={`text-2xl font-bold ${textPri}`}>{card.value}</p>
               <p className={`text-xs mt-1 ${textSec}`}>{card.sub}</p>
               <p className={`text-[10px] mt-2 font-medium uppercase tracking-wider ${textSec}`}>{card.label}</p>
@@ -428,24 +464,30 @@ const SalesIntelligence = () => {
               <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-violet-500/15 text-violet-400' : 'bg-violet-100 text-violet-600'}`}>14-day lag</span>
             </div>
             <p className={`text-xs mb-4 ${textSec}`}>Do activity spikes today drive deal closings in 14 days?</p>
-            <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={dailyData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="actGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.activity} stopOpacity={0.35} />
-                    <stop offset="95%" stopColor={COLORS.activity} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
-                <XAxis dataKey="date" tick={{ fontSize: 10, fill: axisColor }} interval={4} />
-                <YAxis yAxisId="left" tick={{ fontSize: 10, fill: axisColor }} label={{ value: 'Activities', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: axisColor } }} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: axisColor }} label={{ value: 'Deals Won', angle: 90, position: 'insideRight', style: { fontSize: 10, fill: axisColor } }} />
-                <Tooltip content={<SalesToolTip isDark={isDark} />} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Area yAxisId="left" type="monotone" dataKey="activities" name="Activities" stroke={COLORS.activity} fill="url(#actGrad)" strokeWidth={2} />
-                <Line yAxisId="right" type="monotone" dataKey="deals_won" name="Deals Won" stroke={COLORS.won} strokeWidth={2.5} dot={{ r: 3, fill: COLORS.won }} activeDot={{ r: 5 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
+            {dailyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={dailyData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="actGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COLORS.activity} stopOpacity={0.35} />
+                      <stop offset="95%" stopColor={COLORS.activity} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: axisColor }} interval={4} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 10, fill: axisColor }} label={{ value: 'Activities', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: axisColor } }} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: axisColor }} label={{ value: 'Deals Won', angle: 90, position: 'insideRight', style: { fontSize: 10, fill: axisColor } }} />
+                  <Tooltip content={<SalesToolTip isDark={isDark} />} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Area yAxisId="left" type="monotone" dataKey="activities" name="Activities" stroke={COLORS.activity} fill="url(#actGrad)" strokeWidth={2} />
+                  <Line yAxisId="right" type="monotone" dataKey="deals_won" name="Deals Won" stroke={COLORS.won} strokeWidth={2.5} dot={{ r: 3, fill: COLORS.won }} activeDot={{ r: 5 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className={`h-[300px] flex items-center justify-center ${textSec}`}>
+                <p className="text-sm">No daily activity data available for this period.</p>
+              </div>
+            )}
           </motion.div>
 
           {/* ── Pipeline Waterfall ── */}
@@ -459,27 +501,31 @@ const SalesIntelligence = () => {
               <TrendingUp size={16} className="text-indigo-400" />
               <h3 className={`font-semibold ${textPri}`}>Pipeline Waterfall</h3>
             </div>
-            <p className={`text-xs mb-4 ${textSec}`}>Starting Pipeline &rarr; +New &rarr; +Upsell &rarr; -Lost &rarr; -Won &rarr; Ending</p>
-            <ResponsiveContainer width="100%" height={300}>
-              <ReBarChart data={waterfallData} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
-                <XAxis dataKey="displayName" tick={{ fontSize: 9, fill: axisColor }} interval={0} />
-                <YAxis tick={{ fontSize: 10, fill: axisColor }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
-                <Tooltip content={<SalesToolTip isDark={isDark} />} />
-                {/* Invisible base bar */}
-                <Bar dataKey="base" stackId="waterfall" fill="transparent" isAnimationActive={false} />
-                {/* Visible segment */}
-                <Bar dataKey="height" stackId="waterfall" name="Value" radius={[4, 4, 0, 0]} isAnimationActive={true} animationDuration={1200}>
-                  {waterfallData.map((entry, i) => (
-                    <Cell key={i} fill={entry.fill} />
-                  ))}
-                </Bar>
-              </ReBarChart>
-            </ResponsiveContainer>
+            <p className={`text-xs mb-4 ${textSec}`}>Starting Pipeline &rarr; +New &rarr; -Won &rarr; -Lost &rarr; Ending</p>
+            {waterfallData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <ReBarChart data={waterfallData} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                  <XAxis dataKey="displayName" tick={{ fontSize: 9, fill: axisColor }} interval={0} />
+                  <YAxis tick={{ fontSize: 10, fill: axisColor }} tickFormatter={v => `$${(v / 1000).toFixed(0)}K`} />
+                  <Tooltip content={<SalesToolTip isDark={isDark} />} />
+                  <Bar dataKey="base" stackId="waterfall" fill="transparent" isAnimationActive={false} />
+                  <Bar dataKey="height" stackId="waterfall" name="Value" radius={[4, 4, 0, 0]} isAnimationActive={true} animationDuration={1200}>
+                    {waterfallData.map((entry, i) => (
+                      <Cell key={i} fill={entry.fill} />
+                    ))}
+                  </Bar>
+                </ReBarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className={`h-[300px] flex items-center justify-center ${textSec}`}>
+                <p className="text-sm">Pipeline waterfall data syncing...</p>
+              </div>
+            )}
           </motion.div>
         </div>
 
-        {/* ═══ ROW 2: Rep Leaderboard + Deals vs Forecast Gauge ═══ */}
+        {/* ═══ ROW 2: Rep Leaderboard + Quota Gauge ═══ */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
 
           {/* ── Gamified Rep Leaderboard (2/3 width) ── */}
@@ -497,88 +543,98 @@ const SalesIntelligence = () => {
               <span className={`text-xs ${textSec}`}>Click a rep to filter all charts</span>
             </div>
 
-            <div className="space-y-2">
-              {leaderboard.map((rep, i) => {
-                const isSelected = selectedRep === rep.id;
-                const rank = i + 1;
-                return (
-                  <motion.button
-                    key={rep.id}
-                    whileHover={{ scale: 1.005 }}
-                    whileTap={{ scale: 0.995 }}
-                    onClick={() => setSelectedRep(isSelected ? null : rep.id)}
-                    className={`w-full flex items-center gap-4 p-3 rounded-xl transition-all text-left ${
-                      isSelected
-                        ? 'bg-indigo-600/20 border border-indigo-500/40 ring-1 ring-indigo-500/30'
-                        : isDark ? 'hover:bg-slate-800/60 border border-transparent' : 'hover:bg-slate-50 border border-transparent'
-                    }`}
-                  >
-                    {/* Rank */}
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${
-                      rank <= 3 ? 'text-white' : textSec
-                    }`} style={{ background: rank <= 3 ? RANK_COLORS[rank - 1] : 'transparent' }}>
-                      {rank <= 3 ? (
-                        <span>{rank === 1 ? '1st' : rank === 2 ? '2nd' : '3rd'}</span>
-                      ) : (
-                        <span>#{rank}</span>
+            {hasReps ? (
+              <div className="space-y-2">
+                {leaderboard.map((rep, i) => {
+                  const isSelected = selectedRep === rep.id;
+                  const rank = i + 1;
+                  return (
+                    <motion.button
+                      key={rep.id}
+                      whileHover={{ scale: 1.005 }}
+                      whileTap={{ scale: 0.995 }}
+                      onClick={() => setSelectedRep(isSelected ? null : rep.id)}
+                      className={`w-full flex items-center gap-4 p-3 rounded-xl transition-all text-left ${
+                        isSelected
+                          ? 'bg-indigo-600/20 border border-indigo-500/40 ring-1 ring-indigo-500/30'
+                          : isDark ? 'hover:bg-slate-800/60 border border-transparent' : 'hover:bg-slate-50 border border-transparent'
+                      }`}
+                    >
+                      {/* Rank */}
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold ${
+                        rank <= 3 ? 'text-white' : textSec
+                      }`} style={{ background: rank <= 3 ? RANK_COLORS[rank - 1] : 'transparent' }}>
+                        {rank <= 3 ? (
+                          <span>{rank === 1 ? '1st' : rank === 2 ? '2nd' : '3rd'}</span>
+                        ) : (
+                          <span>#{rank}</span>
+                        )}
+                      </div>
+
+                      {/* Avatar + Name */}
+                      <div className="flex items-center gap-3 min-w-[140px]">
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br ${
+                          rank === 1 ? 'from-amber-400 to-amber-600 text-white' : 'from-slate-600 to-slate-700 text-slate-200'
+                        }`}>
+                          {rep.avatar}
+                        </div>
+                        <div>
+                          <p className={`text-sm font-semibold ${textPri}`}>{rep.name}</p>
+                          <p className={`text-[10px] ${textSec}`}>{rep.deals_won}W / {rep.deals_lost}L</p>
+                        </div>
+                      </div>
+
+                      {/* Metrics */}
+                      <div className="flex-1 grid grid-cols-4 gap-2 text-center">
+                        <div>
+                          <p className="text-xs font-bold text-cyan-400">{rep.winRate}%</p>
+                          <p className={`text-[9px] ${textSec}`}>Win Rate</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-emerald-400">${(rep.revenue / 1000).toFixed(0)}K</p>
+                          <p className={`text-[9px] ${textSec}`}>Revenue</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-violet-400">{rep.avg_days}d</p>
+                          <p className={`text-[9px] ${textSec}`}>Avg Close</p>
+                        </div>
+                        <div>
+                          <p className={`text-xs font-bold ${rep.quotaPct >= 100 ? 'text-emerald-400' : rep.quotaPct >= 80 ? 'text-amber-400' : 'text-rose-400'}`}>
+                            {rep.quotaPct > 0 ? `${rep.quotaPct}%` : '—'}
+                          </p>
+                          <p className={`text-[9px] ${textSec}`}>To Quota</p>
+                        </div>
+                      </div>
+
+                      {/* Quota Progress Bar */}
+                      {rep.quotaPct > 0 && (
+                        <div className="w-24 hidden lg:block">
+                          <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.min(100, rep.quotaPct)}%` }}
+                              transition={{ duration: 1.2, delay: i * 0.1 }}
+                              className={`h-full rounded-full ${rep.quotaPct >= 100 ? 'bg-emerald-500' : rep.quotaPct >= 80 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                            />
+                          </div>
+                        </div>
                       )}
-                    </div>
 
-                    {/* Avatar + Name */}
-                    <div className="flex items-center gap-3 min-w-[140px]">
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold bg-gradient-to-br ${
-                        rank === 1 ? 'from-amber-400 to-amber-600 text-white' : 'from-slate-600 to-slate-700 text-slate-200'
-                      }`}>
-                        {rep.avatar}
-                      </div>
-                      <div>
-                        <p className={`text-sm font-semibold ${textPri}`}>{rep.name}</p>
-                        <p className={`text-[10px] ${textSec}`}>{rep.deals_won}W / {rep.deals_lost}L</p>
-                      </div>
-                    </div>
-
-                    {/* Metrics */}
-                    <div className="flex-1 grid grid-cols-4 gap-2 text-center">
-                      <div>
-                        <p className="text-xs font-bold text-cyan-400">{rep.winRate}%</p>
-                        <p className={`text-[9px] ${textSec}`}>Win Rate</p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-emerald-400">${(rep.revenue / 1000).toFixed(0)}K</p>
-                        <p className={`text-[9px] ${textSec}`}>Revenue</p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-violet-400">{rep.avg_days}d</p>
-                        <p className={`text-[9px] ${textSec}`}>Avg Close</p>
-                      </div>
-                      <div>
-                        <p className={`text-xs font-bold ${rep.quotaPct >= 100 ? 'text-emerald-400' : rep.quotaPct >= 80 ? 'text-amber-400' : 'text-rose-400'}`}>
-                          {rep.quotaPct}%
-                        </p>
-                        <p className={`text-[9px] ${textSec}`}>To Quota</p>
-                      </div>
-                    </div>
-
-                    {/* Quota Progress Bar */}
-                    <div className="w-24 hidden lg:block">
-                      <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${Math.min(100, rep.quotaPct)}%` }}
-                          transition={{ duration: 1.2, delay: i * 0.1 }}
-                          className={`h-full rounded-full ${rep.quotaPct >= 100 ? 'bg-emerald-500' : rep.quotaPct >= 80 ? 'bg-amber-500' : 'bg-rose-500'}`}
-                        />
-                      </div>
-                    </div>
-
-                    <ChevronRight size={14} className={textSec} />
-                  </motion.button>
-                );
-              })}
-            </div>
+                      <ChevronRight size={14} className={textSec} />
+                    </motion.button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className={`py-12 text-center ${textSec}`}>
+                <Users size={32} className="mx-auto mb-3 opacity-40" />
+                <p className="text-sm font-medium">No rep data available yet.</p>
+                <p className="text-xs mt-1">HubSpot owner mapping will populate this leaderboard.</p>
+              </div>
+            )}
           </motion.div>
 
-          {/* ── Deals Won vs Forecast Gauge ── */}
+          {/* ── Quota Attainment Gauge ── */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -594,24 +650,22 @@ const SalesIntelligence = () => {
             <div className="flex-1 flex items-center justify-center">
               <div className="relative w-48 h-48">
                 <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
-                  {/* Background ring */}
                   <circle cx="60" cy="60" r="50" fill="none" stroke={isDark ? 'rgba(51,65,85,0.4)' : 'rgba(203,213,225,0.5)'} strokeWidth="10" />
-                  {/* Progress ring */}
                   <motion.circle
                     cx="60" cy="60" r="50"
                     fill="none"
-                    stroke={quotaPct >= 100 ? COLORS.won : quotaPct >= 80 ? COLORS.forecast : COLORS.lost}
+                    stroke={quotaPct >= 100 ? COLORS.won : quotaPct >= 80 ? COLORS.forecast : winRate > 60 ? COLORS.won : COLORS.lost}
                     strokeWidth="10"
                     strokeLinecap="round"
-                    strokeDasharray={`${Math.min(100, quotaPct) * 3.14} 314`}
+                    strokeDasharray={`${Math.min(100, quotaPct || winRate) * 3.14} 314`}
                     initial={{ strokeDasharray: '0 314' }}
-                    animate={{ strokeDasharray: `${Math.min(100, quotaPct) * 3.14} 314` }}
+                    animate={{ strokeDasharray: `${Math.min(100, quotaPct || winRate) * 3.14} 314` }}
                     transition={{ duration: 1.8, ease: 'easeOut' }}
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className={`text-3xl font-bold ${textPri}`}>{quotaPct}%</span>
-                  <span className={`text-xs ${textSec}`}>of Quota</span>
+                  <span className={`text-3xl font-bold ${textPri}`}>{quotaPct > 0 ? `${quotaPct}%` : `${winRate}%`}</span>
+                  <span className={`text-xs ${textSec}`}>{quotaPct > 0 ? 'of Quota' : 'Win Rate'}</span>
                 </div>
               </div>
             </div>
@@ -621,14 +675,24 @@ const SalesIntelligence = () => {
                 <span className={textSec}>Closed Won</span>
                 <span className={`font-bold ${textPri}`}>${(totalRevenue / 1000).toFixed(0)}K</span>
               </div>
+              {totalQuota > 0 && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className={textSec}>Quota Target</span>
+                    <span className={`font-bold ${textPri}`}>${(totalQuota / 1000).toFixed(0)}K</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className={textSec}>Remaining</span>
+                    <span className={`font-bold ${totalRevenue >= totalQuota ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      {totalRevenue >= totalQuota ? 'Exceeded!' : `$${((totalQuota - totalRevenue) / 1000).toFixed(0)}K`}
+                    </span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between text-sm">
-                <span className={textSec}>Quota Target</span>
-                <span className={`font-bold ${textPri}`}>${(totalQuota / 1000).toFixed(0)}K</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className={textSec}>Remaining</span>
-                <span className={`font-bold ${totalRevenue >= totalQuota ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {totalRevenue >= totalQuota ? 'Exceeded!' : `$${((totalQuota - totalRevenue) / 1000).toFixed(0)}K`}
+                <span className={textSec}>Total Pipeline</span>
+                <span className={`font-bold ${textPri}`}>
+                  ${((apiData?.totals?.pipeline_value || 0) / 1000).toFixed(0)}K
                 </span>
               </div>
             </div>
@@ -656,41 +720,41 @@ const SalesIntelligence = () => {
             </div>
             <p className={`text-xs mb-4 ${textSec}`}>Deals without a rep touch-point (call/email/meeting) in 72+ hours</p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {stalledDeals.map((deal, i) => {
-                const heatColor = deal.days_stalled >= 7 ? COLORS.stalled7 : deal.days_stalled >= 5 ? COLORS.stalled5 : COLORS.stalled3;
-                return (
-                  <motion.div
-                    key={deal.id}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.3 + i * 0.05 }}
-                    className={`flex items-center gap-3 p-3 rounded-xl border ${isDark ? 'border-slate-700/40 bg-slate-800/30' : 'border-slate-200 bg-slate-50/50'}`}
-                    style={{ borderLeftWidth: 4, borderLeftColor: heatColor }}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className={`text-sm font-semibold truncate ${textPri}`}>{deal.name}</p>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isDark ? 'bg-slate-700/60' : 'bg-slate-200'} ${textSec}`}>
-                          {deal.stage}
-                        </span>
+            {stalledDeals.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {stalledDeals.map((deal, i) => {
+                  const heatColor = deal.days_stalled >= 7 ? COLORS.stalled7 : deal.days_stalled >= 5 ? COLORS.stalled5 : COLORS.stalled3;
+                  return (
+                    <motion.div
+                      key={deal.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.3 + i * 0.05 }}
+                      className={`flex items-center gap-3 p-3 rounded-xl border ${isDark ? 'border-slate-700/40 bg-slate-800/30' : 'border-slate-200 bg-slate-50/50'}`}
+                      style={{ borderLeftWidth: 4, borderLeftColor: heatColor }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className={`text-sm font-semibold truncate ${textPri}`}>{deal.name}</p>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${isDark ? 'bg-slate-700/60' : 'bg-slate-200'} ${textSec}`}>
+                            {deal.stage}
+                          </span>
+                        </div>
+                        <p className={`text-xs ${textSec}`}>{deal.rep} &middot; Last: {deal.last_touch}</p>
                       </div>
-                      <p className={`text-xs ${textSec}`}>{deal.rep} &middot; Last: {deal.last_touch}</p>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className={`text-sm font-bold ${textPri}`}>${(deal.value / 1000).toFixed(0)}K</p>
-                      <p className="text-xs font-bold" style={{ color: heatColor }}>
-                        {deal.days_stalled}d dark
-                      </p>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-
-            {stalledDeals.length === 0 && (
+                      <div className="text-right flex-shrink-0">
+                        <p className={`text-sm font-bold ${textPri}`}>${(deal.value / 1000).toFixed(0)}K</p>
+                        <p className="text-xs font-bold" style={{ color: heatColor }}>
+                          {deal.days_stalled}d dark
+                        </p>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            ) : (
               <div className={`text-center py-8 ${textSec}`}>
-                No stalled deals for this rep. All deals are active.
+                {selectedRep ? 'No stalled deals for this rep. All deals are active.' : 'No stalled deals detected. All deals are active.'}
               </div>
             )}
           </motion.div>
@@ -707,34 +771,40 @@ const SalesIntelligence = () => {
               <h3 className={`font-semibold ${textPri}`}>Rep Activity Balance</h3>
             </div>
             <p className={`text-xs mb-4 ${textSec}`}>
-              {selectedRep ? REP_DATA.find(r => r.id === selectedRep)?.name : 'Team Average'} — effort distribution
+              {selectedRep ? allReps.find(r => r.id === selectedRep)?.name : 'Team Average'} — effort distribution
             </p>
 
-            <ResponsiveContainer width="100%" height={280}>
-              <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
-                <PolarGrid stroke={gridColor} />
-                <PolarAngleAxis
-                  dataKey="metric"
-                  tick={{ fontSize: 10, fill: isDark ? 'rgba(148,163,184,0.7)' : 'rgba(100,116,139,0.8)' }}
-                />
-                <PolarRadiusAxis
-                  angle={30}
-                  domain={[0, 100]}
-                  tick={{ fontSize: 8, fill: axisColor }}
-                  axisLine={false}
-                />
-                <Radar
-                  name="Activity"
-                  dataKey="value"
-                  stroke={COLORS.won}
-                  fill={COLORS.won}
-                  fillOpacity={0.25}
-                  strokeWidth={2}
-                  isAnimationActive={true}
-                  animationDuration={1000}
-                />
-              </RadarChart>
-            </ResponsiveContainer>
+            {radarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
+                  <PolarGrid stroke={gridColor} />
+                  <PolarAngleAxis
+                    dataKey="metric"
+                    tick={{ fontSize: 10, fill: isDark ? 'rgba(148,163,184,0.7)' : 'rgba(100,116,139,0.8)' }}
+                  />
+                  <PolarRadiusAxis
+                    angle={30}
+                    domain={[0, 100]}
+                    tick={{ fontSize: 8, fill: axisColor }}
+                    axisLine={false}
+                  />
+                  <Radar
+                    name="Activity"
+                    dataKey="value"
+                    stroke={COLORS.won}
+                    fill={COLORS.won}
+                    fillOpacity={0.25}
+                    strokeWidth={2}
+                    isAnimationActive={true}
+                    animationDuration={1000}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className={`h-[280px] flex items-center justify-center ${textSec}`}>
+                <p className="text-sm">No activity data to display.</p>
+              </div>
+            )}
           </motion.div>
         </div>
 
@@ -746,12 +816,12 @@ const SalesIntelligence = () => {
           className="grid grid-cols-3 md:grid-cols-6 gap-3"
         >
           {[
-            { label: 'Total Calls', value: reps.reduce((s, r) => s + r.calls, 0), icon: Phone, color: 'text-blue-400', bg: 'from-blue-500/10 to-blue-600/5' },
-            { label: 'Emails Sent', value: reps.reduce((s, r) => s + r.emails, 0), icon: Mail, color: 'text-violet-400', bg: 'from-violet-500/10 to-violet-600/5' },
-            { label: 'Meetings', value: reps.reduce((s, r) => s + r.meetings, 0), icon: Calendar, color: 'text-cyan-400', bg: 'from-cyan-500/10 to-cyan-600/5' },
-            { label: 'Deals Won', value: totalWon, icon: Target, color: 'text-emerald-400', bg: 'from-emerald-500/10 to-emerald-600/5' },
-            { label: 'Deals Lost', value: totalLost, icon: X, color: 'text-rose-400', bg: 'from-rose-500/10 to-rose-600/5' },
-            { label: 'Contacts', value: reps.length * 18, icon: Users, color: 'text-amber-400', bg: 'from-amber-500/10 to-amber-600/5' },
+            { label: 'Total Calls', value: apiData?.totals?.tasks || reps.reduce((s, r) => s + (r.calls || 0), 0), icon: Phone, color: 'text-blue-400', bg: 'from-blue-500/10 to-blue-600/5' },
+            { label: 'Emails Sent', value: apiData?.totals?.emails || reps.reduce((s, r) => s + (r.emails || 0), 0), icon: Mail, color: 'text-violet-400', bg: 'from-violet-500/10 to-violet-600/5' },
+            { label: 'Meetings', value: apiData?.totals?.meetings || reps.reduce((s, r) => s + (r.meetings || 0), 0), icon: Calendar, color: 'text-cyan-400', bg: 'from-cyan-500/10 to-cyan-600/5' },
+            { label: 'Deals Won', value: apiData?.totals?.deals_won || totalWon, icon: Target, color: 'text-emerald-400', bg: 'from-emerald-500/10 to-emerald-600/5' },
+            { label: 'Deals Lost', value: apiData?.totals?.deals_lost || totalLost, icon: X, color: 'text-rose-400', bg: 'from-rose-500/10 to-rose-600/5' },
+            { label: 'Contacts', value: apiData?.totals?.contacts || 0, icon: Users, color: 'text-amber-400', bg: 'from-amber-500/10 to-amber-600/5' },
           ].map((item, i) => (
             <motion.div
               key={item.label}
@@ -761,7 +831,7 @@ const SalesIntelligence = () => {
               className={`rounded-xl border p-4 text-center ${cardBg} bg-gradient-to-b ${item.bg}`}
             >
               <item.icon size={18} className={`${item.color} mx-auto mb-2`} />
-              <p className={`text-xl font-bold ${textPri}`}>{item.value.toLocaleString()}</p>
+              <p className={`text-xl font-bold ${textPri}`}>{(item.value || 0).toLocaleString()}</p>
               <p className={`text-[10px] mt-1 ${textSec} uppercase tracking-wider`}>{item.label}</p>
             </motion.div>
           ))}

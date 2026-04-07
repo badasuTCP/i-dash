@@ -613,10 +613,18 @@ async def get_sales_intelligence(
     """
     Rich sales intelligence dataset for the Beyond-Looker dashboard.
 
-    Returns daily time-series, rep leaderboards, deal details,
-    pipeline waterfall, and activity breakdowns.  Designed for
-    high-interactivity charting on the frontend.
+    Returns daily time-series, owner-keyed rep leaderboards, stalled deals,
+    pipeline waterfall, and activity breakdowns — all mapped to real
+    HubSpot owner names via /crm/v3/owners/.
     """
+    from collections import defaultdict
+    from hubspot import Client as HubSpotClient
+    from app.services.hubspot_owners import (
+        get_hubspot_owners,
+        resolve_owner_name,
+        resolve_owner_avatar,
+    )
+
     # Admin-only for now (super-admin role)
     if current_user.role.value != "admin":
         raise HTTPException(
@@ -626,7 +634,10 @@ async def get_sales_intelligence(
 
     start_date, end_date = _get_date_range(date_from, date_to)
 
-    # ── Daily time-series from HubSpotMetric ────────────────────────
+    # ── 1. Pre-load HubSpot owner map ──────────────────────────────────
+    owners = await get_hubspot_owners()
+
+    # ── 2. Daily time-series from HubSpotMetric (date-aggregate) ───────
     daily_stmt = (
         select(HubSpotMetric)
         .where(and_(HubSpotMetric.date >= start_date, HubSpotMetric.date <= end_date))
@@ -651,7 +662,7 @@ async def get_sales_intelligence(
             "contacts_created": row.contacts_created or 0,
         })
 
-    # ── Aggregates for the period ────────────────────────────────────
+    # ── 3. Period aggregates ────────────────────────────────────────────
     agg_stmt = select(
         func.sum(HubSpotMetric.deals_created).label("deals_created"),
         func.sum(HubSpotMetric.deals_won).label("deals_won"),
@@ -678,13 +689,274 @@ async def get_sales_intelligence(
         "contacts": int(agg[8] or 0),
     }
 
-    logger.info(f"User {current_user.id} retrieved sales intelligence data")
+    # ── 4. Live deal-level + owner-level data from HubSpot API ──────────
+    reps_data = []
+    stalled_deals = []
+    pipeline_waterfall = []
+
+    try:
+        if not settings.HUBSPOT_API_KEY:
+            raise ValueError("HUBSPOT_API_KEY not configured")
+
+        hs = HubSpotClient(access_token=settings.HUBSPOT_API_KEY)
+
+        # Fetch all deals with owner info
+        all_deals = []
+        deal_page = hs.crm.deals.get_page(
+            limit=100,
+            properties=[
+                "dealname", "dealstage", "amount", "closedate",
+                "createdate", "hubspot_owner_id",
+                "notes_last_updated", "hs_lastmodifieddate",
+            ],
+        )
+        while deal_page:
+            all_deals.extend(deal_page.results or [])
+            if deal_page.paging and deal_page.paging.next:
+                deal_page = hs.crm.deals.get_page(
+                    limit=100,
+                    after=deal_page.paging.next.after,
+                    properties=[
+                        "dealname", "dealstage", "amount", "closedate",
+                        "createdate", "hubspot_owner_id",
+                        "notes_last_updated", "hs_lastmodifieddate",
+                    ],
+                )
+            else:
+                break
+
+        logger.info("Sales Intelligence: fetched %d deals from HubSpot", len(all_deals))
+
+        # Fetch meetings/emails/tasks with owner info for activity counts
+        activity_counts = defaultdict(lambda: {"calls": 0, "emails": 0, "meetings": 0})
+
+        # Meetings
+        try:
+            mtg_page = hs.crm.objects.meetings.get_page(
+                limit=100,
+                properties=["hs_timestamp", "hubspot_owner_id"],
+            )
+            while mtg_page:
+                for mtg in mtg_page.results or []:
+                    oid = (mtg.properties or {}).get("hubspot_owner_id")
+                    if oid:
+                        activity_counts[oid]["meetings"] += 1
+                if mtg_page.paging and mtg_page.paging.next:
+                    mtg_page = hs.crm.objects.meetings.get_page(
+                        limit=100,
+                        after=mtg_page.paging.next.after,
+                        properties=["hs_timestamp", "hubspot_owner_id"],
+                    )
+                else:
+                    break
+        except Exception as e:
+            logger.warning("Meetings fetch for SI skipped: %s", e)
+
+        # Emails
+        try:
+            email_page = hs.crm.objects.emails.get_page(
+                limit=100,
+                properties=["hs_timestamp", "hubspot_owner_id"],
+            )
+            while email_page:
+                for em in email_page.results or []:
+                    oid = (em.properties or {}).get("hubspot_owner_id")
+                    if oid:
+                        activity_counts[oid]["emails"] += 1
+                if email_page.paging and email_page.paging.next:
+                    email_page = hs.crm.objects.emails.get_page(
+                        limit=100,
+                        after=email_page.paging.next.after,
+                        properties=["hs_timestamp", "hubspot_owner_id"],
+                    )
+                else:
+                    break
+        except Exception as e:
+            logger.warning("Emails fetch for SI skipped: %s", e)
+
+        # Tasks (calls proxy)
+        try:
+            task_page = hs.crm.objects.tasks.get_page(
+                limit=100,
+                properties=["hs_task_status", "hs_timestamp", "hubspot_owner_id"],
+            )
+            while task_page:
+                for t in task_page.results or []:
+                    props = t.properties or {}
+                    oid = props.get("hubspot_owner_id")
+                    if oid and props.get("hs_task_status") == "completed":
+                        activity_counts[oid]["calls"] += 1
+                if task_page.paging and task_page.paging.next:
+                    task_page = hs.crm.objects.tasks.get_page(
+                        limit=100,
+                        after=task_page.paging.next.after,
+                        properties=["hs_task_status", "hs_timestamp", "hubspot_owner_id"],
+                    )
+                else:
+                    break
+        except Exception as e:
+            logger.warning("Tasks fetch for SI skipped: %s", e)
+
+        # ── Build per-owner rep profiles from deals ──────────────────────
+        rep_stats = defaultdict(lambda: {
+            "deals_won": 0, "deals_lost": 0, "deals_open": 0,
+            "revenue": 0.0, "pipeline_value": 0.0,
+            "total_close_days": 0, "close_count": 0,
+        })
+
+        now_ts = datetime.now(timezone.utc)
+        stage_labels = {
+            "appointmentscheduled": "Appointment",
+            "qualifiedtobuy": "Qualified",
+            "presentationscheduled": "Presentation",
+            "decisionmakerboughtin": "Decision Maker",
+            "contractsent": "Contract Sent",
+            "closedwon": "Closed Won",
+            "closedlost": "Closed Lost",
+        }
+
+        for deal in all_deals:
+            props = deal.properties or {}
+            owner_id = props.get("hubspot_owner_id")
+            if not owner_id:
+                continue
+
+            stage = props.get("dealstage", "")
+            amount = 0.0
+            try:
+                amount = float(props.get("amount") or 0)
+            except (ValueError, TypeError):
+                pass
+
+            if stage == "closedwon":
+                rep_stats[owner_id]["deals_won"] += 1
+                rep_stats[owner_id]["revenue"] += amount
+                # Calculate days to close
+                try:
+                    create_str = props.get("createdate", "")
+                    close_str = props.get("closedate", "")
+                    if create_str and close_str:
+                        create_dt = datetime.fromisoformat(create_str.replace("Z", "+00:00"))
+                        close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00"))
+                        days = (close_dt - create_dt).days
+                        if days >= 0:
+                            rep_stats[owner_id]["total_close_days"] += days
+                            rep_stats[owner_id]["close_count"] += 1
+                except Exception:
+                    pass
+            elif stage == "closedlost":
+                rep_stats[owner_id]["deals_lost"] += 1
+            else:
+                rep_stats[owner_id]["deals_open"] += 1
+                rep_stats[owner_id]["pipeline_value"] += amount
+
+                # Stalled deal detection (no update in 72+ hours)
+                try:
+                    last_mod = props.get("hs_lastmodifieddate") or props.get("notes_last_updated") or ""
+                    if last_mod:
+                        last_dt = datetime.fromisoformat(last_mod.replace("Z", "+00:00"))
+                        days_stalled = (now_ts - last_dt).days
+                        if days_stalled >= 3 and amount > 0:
+                            stalled_deals.append({
+                                "id": deal.id,
+                                "name": props.get("dealname", "Untitled Deal"),
+                                "value": amount,
+                                "rep": await resolve_owner_name(owner_id),
+                                "stage": stage_labels.get(stage, stage.replace("_", " ").title()),
+                                "days_stalled": days_stalled,
+                                "last_touch": "Activity",
+                            })
+                except Exception:
+                    pass
+
+        # Sort stalled deals by days descending, take top 12
+        stalled_deals.sort(key=lambda d: d["days_stalled"], reverse=True)
+        stalled_deals = stalled_deals[:12]
+
+        # ── Assemble reps_data list ──────────────────────────────────────
+        for owner_id, stats in rep_stats.items():
+            name = await resolve_owner_name(owner_id)
+            avatar = await resolve_owner_avatar(owner_id)
+            acts = activity_counts.get(owner_id, {"calls": 0, "emails": 0, "meetings": 0})
+            won = stats["deals_won"]
+            lost = stats["deals_lost"]
+            avg_days = (
+                round(stats["total_close_days"] / stats["close_count"])
+                if stats["close_count"] > 0 else 0
+            )
+            total_activities = acts["calls"] + acts["emails"] + acts["meetings"]
+
+            reps_data.append({
+                "id": owner_id,
+                "name": name,
+                "avatar": avatar,
+                "deals_won": won,
+                "deals_lost": lost,
+                "revenue": stats["revenue"],
+                "avg_days": avg_days,
+                "calls": acts["calls"],
+                "emails": acts["emails"],
+                "meetings": acts["meetings"],
+                "prospecting": min(100, round(acts["calls"] / max(total_activities, 1) * 200)),
+                "closing": min(100, round(won / max(won + lost, 1) * 100)),
+                "nurturing": min(100, round(acts["emails"] / max(total_activities, 1) * 200)),
+                "quota": 0,  # frontend can override or ignore
+                "pipeline_value": stats["pipeline_value"],
+            })
+
+        # Sort by revenue desc
+        reps_data.sort(key=lambda r: r["revenue"], reverse=True)
+
+        # ── Pipeline waterfall ───────────────────────────────────────────
+        total_pipeline = sum(s["pipeline_value"] for s in rep_stats.values())
+        total_new = sum(
+            float((d.properties or {}).get("amount") or 0)
+            for d in all_deals
+            if (d.properties or {}).get("dealstage") not in ("closedwon", "closedlost")
+            and _is_recent_deal(d, start_date)
+        )
+        total_won_val = sum(s["revenue"] for s in rep_stats.values())
+        total_lost_val = sum(
+            float((d.properties or {}).get("amount") or 0)
+            for d in all_deals
+            if (d.properties or {}).get("dealstage") == "closedlost"
+        )
+        starting = total_pipeline + total_won_val + total_lost_val - total_new
+        ending = total_pipeline
+
+        pipeline_waterfall = [
+            {"name": "Starting Pipeline", "value": starting, "fill": "#6366F1"},
+            {"name": "New Deals (+)", "value": total_new, "fill": "#22D3EE"},
+            {"name": "Deals Won (-)", "value": -total_won_val, "fill": "#F59E0B"},
+            {"name": "Deals Lost (-)", "value": -total_lost_val, "fill": "#F43F5E"},
+            {"name": "Ending Pipeline", "value": ending, "fill": "#8B5CF6"},
+        ]
+
+    except Exception as exc:
+        logger.warning("Live HubSpot owner fetch failed, returning DB-only data: %s", exc)
+
+    logger.info("User %s retrieved sales intelligence (%d reps)", current_user.id, len(reps_data))
 
     return {
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
         "daily_series": daily_series,
         "totals": totals,
+        "reps": reps_data,
+        "stalled_deals": stalled_deals,
+        "pipeline_waterfall": pipeline_waterfall,
+        "owners_synced": len(owners) > 0,
     }
+
+
+def _is_recent_deal(deal, start_date) -> bool:
+    """Check if deal was created on or after start_date."""
+    try:
+        cd = (deal.properties or {}).get("createdate", "")
+        if cd:
+            return datetime.fromisoformat(cd.replace("Z", "+00:00")).date() >= start_date
+    except Exception:
+        pass
+    return False
 
 
 @router.get(
