@@ -701,100 +701,59 @@ async def get_sales_intelligence(
 
         hs = HubSpotClient(access_token=settings.HUBSPOT_API_KEY)
 
-        # Fetch all deals with owner info
-        all_deals = []
-        deal_page = hs.crm.deals.get_page(
-            limit=100,
-            properties=[
-                "dealname", "dealstage", "amount", "closedate",
-                "createdate", "hubspot_owner_id",
-                "notes_last_updated", "hs_lastmodifieddate",
-            ],
-        )
-        while deal_page:
-            all_deals.extend(deal_page.results or [])
-            if deal_page.paging and deal_page.paging.next:
-                deal_page = hs.crm.deals.get_page(
-                    limit=100,
-                    after=deal_page.paging.next.after,
-                    properties=[
-                        "dealname", "dealstage", "amount", "closedate",
-                        "createdate", "hubspot_owner_id",
-                        "notes_last_updated", "hs_lastmodifieddate",
-                    ],
-                )
-            else:
-                break
-
+        # Fetch all deals with owner info (get_all auto-paginates)
+        deal_props = [
+            "dealname", "dealstage", "amount", "closedate",
+            "createdate", "hubspot_owner_id",
+            "notes_last_updated", "hs_lastmodifieddate",
+        ]
+        all_deals = hs.crm.deals.get_all(properties=deal_props)
         logger.info("Sales Intelligence: fetched %d deals from HubSpot", len(all_deals))
 
         # Fetch meetings/emails/tasks with owner info for activity counts
         activity_counts = defaultdict(lambda: {"calls": 0, "emails": 0, "meetings": 0})
 
-        # Meetings
-        try:
-            mtg_page = hs.crm.objects.meetings.get_page(
-                limit=100,
-                properties=["hs_timestamp", "hubspot_owner_id"],
-            )
-            while mtg_page:
-                for mtg in mtg_page.results or []:
-                    oid = (mtg.properties or {}).get("hubspot_owner_id")
-                    if oid:
-                        activity_counts[oid]["meetings"] += 1
-                if mtg_page.paging and mtg_page.paging.next:
-                    mtg_page = hs.crm.objects.meetings.get_page(
+        def _paginate(api, properties):
+            """Manual pagination via basic_api.get_page for engagement objects."""
+            results = []
+            page = api.basic_api.get_page(limit=100, properties=properties)
+            while page:
+                results.extend(page.results or [])
+                if page.paging and page.paging.next:
+                    page = api.basic_api.get_page(
                         limit=100,
-                        after=mtg_page.paging.next.after,
-                        properties=["hs_timestamp", "hubspot_owner_id"],
+                        after=page.paging.next.after,
+                        properties=properties,
                     )
                 else:
                     break
+            return results
+
+        # Meetings
+        try:
+            for mtg in _paginate(hs.crm.objects.meetings, ["hs_timestamp", "hubspot_owner_id"]):
+                oid = (mtg.properties or {}).get("hubspot_owner_id")
+                if oid:
+                    activity_counts[oid]["meetings"] += 1
         except Exception as e:
             logger.warning("Meetings fetch for SI skipped: %s", e)
 
         # Emails
         try:
-            email_page = hs.crm.objects.emails.get_page(
-                limit=100,
-                properties=["hs_timestamp", "hubspot_owner_id"],
-            )
-            while email_page:
-                for em in email_page.results or []:
-                    oid = (em.properties or {}).get("hubspot_owner_id")
-                    if oid:
-                        activity_counts[oid]["emails"] += 1
-                if email_page.paging and email_page.paging.next:
-                    email_page = hs.crm.objects.emails.get_page(
-                        limit=100,
-                        after=email_page.paging.next.after,
-                        properties=["hs_timestamp", "hubspot_owner_id"],
-                    )
-                else:
-                    break
+            for em in _paginate(hs.crm.objects.emails, ["hs_timestamp", "hubspot_owner_id"]):
+                oid = (em.properties or {}).get("hubspot_owner_id")
+                if oid:
+                    activity_counts[oid]["emails"] += 1
         except Exception as e:
             logger.warning("Emails fetch for SI skipped: %s", e)
 
         # Tasks (calls proxy)
         try:
-            task_page = hs.crm.objects.tasks.get_page(
-                limit=100,
-                properties=["hs_task_status", "hs_timestamp", "hubspot_owner_id"],
-            )
-            while task_page:
-                for t in task_page.results or []:
-                    props = t.properties or {}
-                    oid = props.get("hubspot_owner_id")
-                    if oid and props.get("hs_task_status") == "completed":
-                        activity_counts[oid]["calls"] += 1
-                if task_page.paging and task_page.paging.next:
-                    task_page = hs.crm.objects.tasks.get_page(
-                        limit=100,
-                        after=task_page.paging.next.after,
-                        properties=["hs_task_status", "hs_timestamp", "hubspot_owner_id"],
-                    )
-                else:
-                    break
+            for t in _paginate(hs.crm.objects.tasks, ["hs_task_status", "hs_timestamp", "hubspot_owner_id"]):
+                props = t.properties or {}
+                oid = props.get("hubspot_owner_id")
+                if oid and props.get("hs_task_status") == "completed":
+                    activity_counts[oid]["calls"] += 1
         except Exception as e:
             logger.warning("Tasks fetch for SI skipped: %s", e)
 
