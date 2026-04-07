@@ -131,6 +131,10 @@ export const dashboardAPI = {
     apiClient.get('/dashboard/custom', {
       params: { metric, date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), granularity },
     }),
+  getWebAnalytics: (division, startDate, endDate, granularity = 'auto') =>
+    apiClient.get('/dashboard/analytics/web', {
+      params: { division, date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), granularity },
+    }),
 };
 
 // Pipeline endpoints — matches /api/pipelines backend router

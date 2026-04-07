@@ -16,6 +16,7 @@ from app.core.database import async_session_maker
 from app.models.pipeline_log import PipelineLog, PipelineStatus
 from app.pipelines.base import BasePipeline
 from app.pipelines.google_ads import GoogleAdsPipeline
+from app.pipelines.google_analytics import GoogleAnalyticsPipeline
 from app.pipelines.google_sheets import GoogleSheetsPipeline
 from app.pipelines.hubspot import HubSpotPipeline
 from app.pipelines.meta_ads import MetaAdsPipeline, reconcile_meta_contractors
@@ -50,6 +51,7 @@ class PipelineService:
             ("hubspot", lambda: HubSpotPipeline()),
             ("meta_ads", lambda: MetaAdsPipeline()),
             ("google_ads", lambda: GoogleAdsPipeline()),
+            ("google_analytics", lambda: GoogleAnalyticsPipeline()),
             ("google_sheets", lambda: GoogleSheetsPipeline(sheet_id="")),
             ("snapshot", lambda: SnapshotPipeline()),
         ]
@@ -99,6 +101,7 @@ class PipelineService:
             "hubspot",
             "meta_ads",
             "google_ads",
+            "google_analytics",
             "google_sheets",
             "snapshot",
         ]

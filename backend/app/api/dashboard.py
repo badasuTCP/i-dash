@@ -18,6 +18,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.metrics import (
     DashboardSnapshot,
+    GA4Metric,
     GoogleAdMetric,
     HubSpotMetric,
     MetaAdMetric,
@@ -1040,4 +1041,308 @@ async def get_custom_metrics(
         "granularity": granularity,
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
         "data": data_points,
+    }
+
+
+# ── GA4 Web Analytics Endpoint ────────────────────────────────────────────────
+# Auto-discovery aware property resolver
+_ga4_mapping_cache: Optional[dict] = None
+_ga4_mapping_ts: float = 0
+
+
+async def _resolve_ga4_property(division: str) -> Optional[str]:
+    """
+    Resolve a division slug to a GA4 property ID.
+
+    Priority order:
+    1. Division-specific env var (GA4_PROPERTY_ID_CP, etc.)
+    2. Auto-discovery via listAccountSummaries + fuzzy name matching
+    3. Shared GA4_PROPERTY_ID fallback
+    """
+    global _ga4_mapping_cache, _ga4_mapping_ts
+    import time as _time
+
+    # Check env var first (fastest path)
+    env_map = {
+        "cp": settings.GA4_PROPERTY_ID_CP,
+        "sanitred": settings.GA4_PROPERTY_ID_SANITRED,
+        "ibos": settings.GA4_PROPERTY_ID_IBOS,
+    }
+    if env_map.get(division):
+        return env_map[division]
+
+    # Try auto-discovery (cached for 10 min)
+    if not _ga4_mapping_cache or (_time.time() - _ga4_mapping_ts > 600):
+        try:
+            from app.services.ga4_discovery import match_properties_to_divisions
+            _ga4_mapping_cache = await match_properties_to_divisions()
+            _ga4_mapping_ts = _time.time()
+        except Exception as exc:
+            logger.warning("GA4 auto-discovery failed in property resolution: %s", exc)
+
+    if _ga4_mapping_cache and _ga4_mapping_cache.get(division):
+        return _ga4_mapping_cache[division]
+
+    # Final fallback
+    return settings.GA4_PROPERTY_ID or None
+
+
+@router.get(
+    "/analytics/web",
+    summary="GA4 web analytics for a division",
+    responses={
+        200: {"description": "Web analytics data for the requested division"},
+        401: {"description": "Unauthorized"},
+    },
+)
+async def get_web_analytics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    division: str = Query("cp", description="Division slug: cp, sanitred, ibos"),
+    date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+    granularity: str = Query("auto", description="Granularity: daily, monthly, auto"),
+) -> dict:
+    """
+    Return GA4 web analytics for a division.
+
+    Queries the ga4_metrics table filtered by property_id (resolved from
+    the division) and date range.  Returns:
+      - scorecards (totals with change%)
+      - visitorTrend (time-series for the Visitor Trend chart)
+      - trafficSources (source/medium breakdown)
+      - deviceData (device category breakdown)
+      - hasLiveData flag (so frontend can hide the Estimated Data banner)
+
+    If no GA4 data exists in the DB the endpoint returns hasLiveData=false
+    and empty arrays — the frontend falls back to its static seed data.
+
+    Granularity "auto" uses daily when the range is ≤ 90 days, monthly otherwise.
+    """
+    start_date, end_date = _get_date_range(date_from, date_to)
+    property_id = await _resolve_ga4_property(division)
+
+    # If no property is configured at all, return empty / no-live-data
+    if not property_id:
+        logger.info("No GA4 property configured for division '%s'", division)
+        return _empty_web_analytics(start_date, end_date, division)
+
+    # ── Resolve granularity ──────────────────────────────────────────
+    day_span = (end_date - start_date).days
+    if granularity == "auto":
+        granularity = "daily" if day_span <= 90 else "monthly"
+
+    # ── Overview rows (channel/source/medium/device = '(all)') ───────
+    overview_stmt = (
+        select(GA4Metric)
+        .where(
+            and_(
+                GA4Metric.property_id == property_id,
+                GA4Metric.date >= start_date,
+                GA4Metric.date <= end_date,
+                GA4Metric.channel == "(all)",
+                GA4Metric.source == "(all)",
+                GA4Metric.device == "(all)",
+            )
+        )
+        .order_by(GA4Metric.date)
+    )
+    overview_result = await db.execute(overview_stmt)
+    overview_rows = overview_result.scalars().all()
+
+    if not overview_rows:
+        logger.info(
+            "No GA4 data in DB for property %s (%s), range %s–%s",
+            property_id, division, start_date, end_date,
+        )
+        return _empty_web_analytics(start_date, end_date, division)
+
+    # ── Aggregate scorecards ─────────────────────────────────────────
+    total_sessions = sum(r.sessions for r in overview_rows)
+    total_users = sum(r.total_users for r in overview_rows)
+    total_new = sum(r.new_users for r in overview_rows)
+    total_returning = total_users - total_new
+    total_pageviews = sum(r.page_views for r in overview_rows)
+    avg_bounce = (
+        sum(r.bounce_rate * r.sessions for r in overview_rows) / max(total_sessions, 1)
+    )
+    avg_duration = (
+        sum(r.avg_session_duration * r.sessions for r in overview_rows) / max(total_sessions, 1)
+    )
+
+    # ── Previous period for change % ─────────────────────────────────
+    prev_start = start_date - timedelta(days=day_span)
+    prev_end = start_date - timedelta(days=1)
+    prev_stmt = (
+        select(
+            func.sum(GA4Metric.sessions).label("sessions"),
+            func.sum(GA4Metric.total_users).label("users"),
+            func.sum(GA4Metric.new_users).label("new_users"),
+        )
+        .where(
+            and_(
+                GA4Metric.property_id == property_id,
+                GA4Metric.date >= prev_start,
+                GA4Metric.date <= prev_end,
+                GA4Metric.channel == "(all)",
+                GA4Metric.source == "(all)",
+                GA4Metric.device == "(all)",
+            )
+        )
+    )
+    prev_result = await db.execute(prev_stmt)
+    prev = prev_result.one_or_none()
+    prev_sessions = int(prev.sessions or 0) if prev else 0
+    prev_users = int(prev.users or 0) if prev else 0
+    prev_returning = (int(prev.users or 0) - int(prev.new_users or 0)) if prev else 0
+
+    def _pct(cur, prv):
+        if prv == 0:
+            return 0 if cur == 0 else 100.0
+        return round(((cur - prv) / abs(prv)) * 100, 1)
+
+    # ── Visitor trend series ─────────────────────────────────────────
+    visitor_trend = []
+    if granularity == "daily":
+        for row in overview_rows:
+            visitor_trend.append({
+                "month": row.date.strftime("%b %d"),
+                "visits": row.sessions,
+                "returning": max(0, row.total_users - row.new_users),
+            })
+    else:
+        # Monthly aggregation
+        from collections import defaultdict as _dd
+        monthly = _dd(lambda: {"visits": 0, "returning": 0})
+        for row in overview_rows:
+            key = row.date.strftime("%b %Y")
+            monthly[key]["visits"] += row.sessions
+            monthly[key]["returning"] += max(0, row.total_users - row.new_users)
+        for label, vals in monthly.items():
+            visitor_trend.append({"month": label, **vals})
+
+    # ── Traffic sources ──────────────────────────────────────────────
+    traffic_stmt = (
+        select(
+            (GA4Metric.source + " / " + GA4Metric.medium).label("src_medium"),
+            func.sum(GA4Metric.total_users).label("users"),
+            func.sum(GA4Metric.sessions).label("sessions"),
+            func.avg(GA4Metric.bounce_rate).label("bounce_rate"),
+        )
+        .where(
+            and_(
+                GA4Metric.property_id == property_id,
+                GA4Metric.date >= start_date,
+                GA4Metric.date <= end_date,
+                GA4Metric.source != "(all)",
+            )
+        )
+        .group_by(GA4Metric.source, GA4Metric.medium)
+        .order_by(func.sum(GA4Metric.sessions).desc())
+        .limit(10)
+    )
+    traffic_result = await db.execute(traffic_stmt)
+    traffic_rows = traffic_result.all()
+    traffic_sources = [
+        {
+            "source": row.src_medium,
+            "users": int(row.users or 0),
+            "sessions": int(row.sessions or 0),
+            "bounceRate": f"{float(row.bounce_rate or 0):.1f}%",
+            "avgDuration": "—",  # not stored per-source row
+        }
+        for row in traffic_rows
+    ]
+
+    # ── Device breakdown ─────────────────────────────────────────────
+    device_stmt = (
+        select(
+            GA4Metric.device,
+            func.sum(GA4Metric.total_users).label("users"),
+        )
+        .where(
+            and_(
+                GA4Metric.property_id == property_id,
+                GA4Metric.date >= start_date,
+                GA4Metric.date <= end_date,
+                GA4Metric.device != "(all)",
+            )
+        )
+        .group_by(GA4Metric.device)
+        .order_by(func.sum(GA4Metric.total_users).desc())
+    )
+    device_result = await db.execute(device_stmt)
+    device_rows = device_result.all()
+    device_data = [
+        {"device": row.device.title(), "users": int(row.users or 0)}
+        for row in device_rows
+    ]
+
+    logger.info(
+        "User %s fetched GA4 web analytics for %s (%d overview rows)",
+        current_user.id, division, len(overview_rows),
+    )
+
+    return {
+        "division": division,
+        "property_id": property_id,
+        "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+        "granularity": granularity,
+        "hasLiveData": True,
+        "scorecards": {
+            "totalVisits": total_sessions,
+            "totalVisitsChange": _pct(total_sessions, prev_sessions),
+            "returningVisitors": max(0, total_returning),
+            "returningChange": _pct(total_returning, prev_returning),
+            "bounceRate": round(avg_bounce, 1),
+            "avgSessionMin": round(avg_duration / 60, 2),
+            "totalUsers": total_users,
+            "totalUsersChange": _pct(total_users, prev_users),
+        },
+        "visitorTrend": visitor_trend,
+        "trafficSources": traffic_sources,
+        "deviceData": device_data,
+    }
+
+
+@router.get(
+    "/analytics/ga4-status",
+    summary="GA4 auto-discovery status (admin)",
+    responses={
+        200: {"description": "GA4 property discovery and mapping status"},
+        401: {"description": "Unauthorized"},
+    },
+)
+async def get_ga4_discovery_status(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Return GA4 auto-discovery results: which properties the service account
+    can see, and how they map to divisions.
+    """
+    try:
+        from app.services.ga4_discovery import get_discovery_status
+        return await get_discovery_status()
+    except Exception as exc:
+        logger.error("GA4 discovery status failed: %s", exc)
+        return {
+            "total_properties": 0,
+            "properties": [],
+            "division_mapping": {"cp": None, "sanitred": None, "ibos": None},
+            "error": str(exc),
+        }
+
+
+def _empty_web_analytics(start_date, end_date, division: str) -> dict:
+    """Return the empty / no-live-data shape for the web analytics endpoint."""
+    return {
+        "division": division,
+        "property_id": None,
+        "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+        "granularity": "daily",
+        "hasLiveData": False,
+        "scorecards": {},
+        "visitorTrend": [],
+        "trafficSources": [],
+        "deviceData": [],
     }

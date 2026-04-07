@@ -55,15 +55,16 @@ const ScoreCard = ({
     indigo: 'linear-gradient(135deg, #4338CA, #6366F1)',
   };
 
+  // Light, subtle shadow — no heavy colored glow borders
   const shadowMap = {
-    blue: '0 12px 24px rgba(79, 70, 229, 0.4)',
-    violet: '0 12px 24px rgba(124, 58, 237, 0.4)',
-    emerald: '0 12px 24px rgba(5, 150, 105, 0.4)',
-    amber: '0 12px 24px rgba(217, 119, 6, 0.4)',
-    rose: '0 12px 24px rgba(225, 29, 72, 0.4)',
-    cyan: '0 12px 24px rgba(8, 145, 178, 0.4)',
-    lime: '0 12px 24px rgba(101, 163, 13, 0.4)',
-    indigo: '0 12px 24px rgba(67, 56, 202, 0.4)',
+    blue: '0 2px 8px rgba(0, 0, 0, 0.10)',
+    violet: '0 2px 8px rgba(0, 0, 0, 0.10)',
+    emerald: '0 2px 8px rgba(0, 0, 0, 0.10)',
+    amber: '0 2px 8px rgba(0, 0, 0, 0.10)',
+    rose: '0 2px 8px rgba(0, 0, 0, 0.10)',
+    cyan: '0 2px 8px rgba(0, 0, 0, 0.10)',
+    lime: '0 2px 8px rgba(0, 0, 0, 0.10)',
+    indigo: '0 2px 8px rgba(0, 0, 0, 0.10)',
   };
 
   // ── Confidence / staleness ──────────────────────────────────────────────

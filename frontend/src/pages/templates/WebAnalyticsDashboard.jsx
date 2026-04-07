@@ -11,9 +11,19 @@ import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
-const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning, contractorDetails }) => {
+const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning, contractorDetails, hasLiveData, loading, onDateChange }) => {
   const { isDark } = useTheme();
-  const { handleDateChange, resolveData, isFiltered, clearFilter } = useDashboardDateFilter();
+  const { handleDateChange: _handleDateChange, resolveData, isFiltered, clearFilter: _clearFilter } = useDashboardDateFilter();
+
+  // Wrap date handlers to also notify parent (so useWebAnalytics can refetch)
+  const handleDateChange = (start, end, presetId) => {
+    _handleDateChange(start, end, presetId);
+    if (onDateChange) onDateChange(start, end);
+  };
+  const clearFilter = () => {
+    _clearFilter();
+    if (onDateChange) onDateChange(null, null);
+  };
 
   // ── Unified resolution ────────────────────────────────────────────────────
   const vtResolved = useMemo(
@@ -71,8 +81,8 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
         {/* Page Insights */}
         <PageInsight insights={pageInsights} />
 
-        {/* Data warning — shown when no live pipeline is connected */}
-        {dataWarning && (
+        {/* Data warning — shown only when NO live GA4 data is flowing */}
+        {dataWarning && !hasLiveData && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
             className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
             <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
@@ -80,6 +90,13 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
               <p className="text-sm font-semibold text-amber-400">⚠ Estimated Data — No Live Pipeline Connected</p>
               <p className="text-xs text-amber-300/80 mt-0.5">{dataWarning}</p>
             </div>
+          </motion.div>
+        )}
+        {hasLiveData && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-3 rounded-lg flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            Live GA4 Data Connected
           </motion.div>
         )}
 
