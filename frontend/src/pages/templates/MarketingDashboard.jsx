@@ -4,16 +4,15 @@ import {
   BarChart, Bar, LineChart, Line, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Funnel,
 } from 'recharts';
-import { Filter, AlertCircle, CheckCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
-import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
 const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, spendVsRevenue, funnelData, performanceSummary, spendByPeriod, ctrData, metricsPerPeriod, pageInsights, dataWarning, hasLiveData }) => {
   const { isDark } = useTheme();
-  const { handleDateChange, resolveData, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
+  const { resolveData, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
   // ── Unified resolution — single source of truth ───────────────────────────
   // spendVsRevenue drives both the chart and the scorecard resolution.
@@ -59,16 +58,6 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
             <p className={textSecondary}>{subtitle}</p>
           </div>
           <div className="flex items-center gap-2">
-            {isFiltered && (
-              <motion.button onClick={clearFilter}
-                initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 hover:bg-indigo-500/25 transition-colors"
-                title="Clear filter"
-              >
-                <Filter size={10} /> Filtered ✕
-              </motion.button>
-            )}
-            <DateRangePicker onApply={handleDateChange} onClear={clearFilter} />
           </div>
         </motion.div>
 

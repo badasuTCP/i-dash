@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import WebAnalyticsDashboard from '../templates/WebAnalyticsDashboard';
 import { useWebAnalytics } from '../../hooks/useWebAnalytics';
 
@@ -50,15 +50,7 @@ const STATIC_FALLBACK = {
 };
 
 const SaniTredWebAnalytics = () => {
-  const [dateFrom, setDateFrom] = useState(null);
-  const [dateTo, setDateTo] = useState(null);
-
-  const ga4 = useWebAnalytics('sanitred', STATIC_FALLBACK, dateFrom, dateTo);
-
-  const handleDateChange = (start, end) => {
-    setDateFrom(start);
-    setDateTo(end);
-  };
+  const ga4 = useWebAnalytics('sanitred', STATIC_FALLBACK);
 
   return (
     <WebAnalyticsDashboard
@@ -70,7 +62,6 @@ const SaniTredWebAnalytics = () => {
       loading={ga4.loading}
       apiReachable={ga4.apiReachable}
       propertyId={ga4.propertyId}
-      onDateChange={handleDateChange}
       pageInsights={[
         'Organic search is top acquisition channel — 37% of users, lowest bounce rate of paid sources',
         'Email newsletter highest engagement: 32% bounce, 4:12 avg session — high-intent audience',

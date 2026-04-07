@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
@@ -7,8 +7,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import ScoreCard from '../components/scorecards/ScoreCard';
 import ChartCard from '../components/charts/ChartCard';
-import DateRangePicker from '../components/common/DateRangePicker';
-import { TrendingUp, DollarSign, Users, Target, BarChart3, Activity, Filter, AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { TrendingUp, DollarSign, Users, Target, BarChart3, Activity, AlertCircle, Wifi, WifiOff } from 'lucide-react';
 import { useDashboardDateFilter } from '../hooks/useDashboardDateFilter';
 import { useDashboardData } from '../hooks/useDashboardData';
 import PageInsight from '../components/common/PageInsight';
@@ -140,15 +139,6 @@ const ExecutiveDashboard = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {isFiltered && (
-              <motion.button onClick={clearFilter}
-                initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 hover:bg-indigo-500/25 transition-colors"
-              >
-                <Filter size={10} /> Filtered ✕
-              </motion.button>
-            )}
-            <DateRangePicker onApply={handleDateChange} onClear={clearFilter} />
           </div>
         </motion.div>
 

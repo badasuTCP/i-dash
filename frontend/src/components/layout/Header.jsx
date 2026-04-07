@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Bell, Download, LogOut, Settings, Shield } from 'lucide-react';
+import { Bell, Download, LogOut, Settings, Shield, Filter } from 'lucide-react';
 import { useAuth, ROLE_PERMISSIONS } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useGlobalDate } from '../../context/GlobalDateContext';
+import DateRangePicker from '../common/DateRangePicker';
 
 export const Header = () => {
   const { user, logout } = useAuth();
   const { isDark } = useTheme();
+  const { setGlobalDate, clearGlobalDate, isFiltered } = useGlobalDate();
   const location = useLocation();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
@@ -60,13 +63,18 @@ export const Header = () => {
         )}
       </div>
 
-      {/* Center-Right - Date Range Badge */}
-      <div className={`hidden sm:block px-3 py-1.5 rounded-full text-sm font-medium ${
-        isDark
-          ? 'bg-emerald-900/20 text-emerald-400 border border-emerald-800/30'
-          : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
-      }`}>
-        Last 30 Days
+      {/* Center - Global Date Picker */}
+      <div className="flex items-center gap-2">
+        {isFiltered && (
+          <motion.button onClick={clearGlobalDate}
+            initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 hover:bg-indigo-500/25 transition-colors"
+            title="Clear global date filter"
+          >
+            <Filter size={10} /> Filtered
+          </motion.button>
+        )}
+        <DateRangePicker onApply={setGlobalDate} onClear={clearGlobalDate} />
       </div>
 
       {/* Right - Actions */}

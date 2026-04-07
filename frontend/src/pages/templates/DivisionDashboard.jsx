@@ -4,10 +4,9 @@ import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, ReferenceLine,
 } from 'recharts';
-import { Filter, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
-import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
@@ -15,7 +14,7 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
   // Default headers match the most common real-data range; override per-page via quarterlyHeaders prop
   const qHeaders = quarterlyHeaders || ['Q1 2025', 'Q2 2025', 'Q3 2025', 'Q4 2025', 'Q1 2026'];
   const { isDark } = useTheme();
-  const { handleDateChange, resolveData, isFiltered, clearFilter } = useDashboardDateFilter();
+  const { resolveData, isFiltered, clearFilter } = useDashboardDateFilter();
 
   // ── Unified resolution: one call gives chart data + scorecard metrics ─────
   // useMemo prevents re-running the filter logic on every render; only reruns
@@ -84,16 +83,6 @@ const DivisionDashboard = ({ title, subtitle, accentColor, scorecards, revenueDa
             <p className={textSecondary}>{subtitle}</p>
           </div>
           <div className="flex items-center gap-2">
-            {isFiltered && (
-              <motion.button onClick={clearFilter}
-                initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 hover:bg-indigo-500/25 transition-colors"
-                title="Clear filter"
-              >
-                <Filter size={10} /> Filtered ✕
-              </motion.button>
-            )}
-            <DateRangePicker onApply={handleDateChange} onClear={clearFilter} />
           </div>
         </motion.div>
 

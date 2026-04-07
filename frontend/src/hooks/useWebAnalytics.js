@@ -1,17 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import { dashboardAPI } from '../services/api';
+import { useGlobalDate } from '../context/GlobalDateContext';
 
 /**
  * useWebAnalytics — Fetches live GA4 data from the backend for a division
  * (or a specific property via the Property Switcher).
  *
- * @param {string} division    - 'cp' | 'sanitred' | 'ibos' | 'dckn'
+ * Automatically refetches when the global date range changes.
+ *
+ * @param {string} division    - 'cp' | 'sanitred' | 'ibos'
  * @param {object} fallback    - Static seed data { scorecards, visitorTrend, ... }
- * @param {Date|null} dateFrom - Optional start date from date filter
- * @param {Date|null} dateTo   - Optional end date from date filter
- * @param {string|null} propertyId - Optional explicit GA4 property ID (from Property Switcher)
+ * @param {string|null} propertyId - Optional explicit GA4 property ID
  */
-export function useWebAnalytics(division, fallback = {}, dateFrom = null, dateTo = null, propertyId = null) {
+export function useWebAnalytics(division, fallback = {}, propertyId = null) {
+  const { dateFrom, dateTo } = useGlobalDate();
   const [liveData, setLiveData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasLiveData, setHasLiveData] = useState(false);

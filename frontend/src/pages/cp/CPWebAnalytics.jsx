@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import WebAnalyticsDashboard from '../templates/WebAnalyticsDashboard';
 import { useWebAnalytics } from '../../hooks/useWebAnalytics';
 
@@ -52,15 +52,7 @@ const STATIC_FALLBACK = {
 };
 
 const CPWebAnalytics = () => {
-  const [dateFrom, setDateFrom] = useState(null);
-  const [dateTo, setDateTo] = useState(null);
-
-  const ga4 = useWebAnalytics('cp', STATIC_FALLBACK, dateFrom, dateTo);
-
-  const handleDateChange = (start, end) => {
-    setDateFrom(start);
-    setDateTo(end);
-  };
+  const ga4 = useWebAnalytics('cp', STATIC_FALLBACK);
 
   return (
     <WebAnalyticsDashboard
@@ -72,7 +64,6 @@ const CPWebAnalytics = () => {
       loading={ga4.loading}
       apiReachable={ga4.apiReachable}
       propertyId={ga4.propertyId}
-      onDateChange={handleDateChange}
       pageInsights={[
         'Organic search drives 40% of traffic — strong SEO moat reduces paid dependency',
         'Email newsletter has lowest bounce (28.4%) and highest avg session (4:45) — retain focus',

@@ -8,8 +8,7 @@ import {
 } from 'recharts';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
-import DateRangePicker from '../../components/common/DateRangePicker';
-import { AlertTriangle, TrendingUp, TrendingDown, Award, Users, Globe, DollarSign, Filter, AlertCircle } from 'lucide-react';
+import { AlertTriangle, TrendingUp, TrendingDown, Award, Users, Globe, DollarSign, AlertCircle } from 'lucide-react';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import PageInsight from '../../components/common/PageInsight';
@@ -338,7 +337,7 @@ const CustomTooltip = ({ active, payload, label, isDark }) => {
 const IBOSContractors = () => {
   const { isDark } = useTheme();
   const { isContractorActive } = useDashboardConfig();
-  const { handleDateChange, isFiltered, clearFilter } = useDashboardDateFilter();
+  const { isFiltered, clearFilter } = useDashboardDateFilter();
   const [selectedContractor, setSelectedContractor] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [sortBy, setSortBy] = useState('revenue');
@@ -434,15 +433,6 @@ const IBOSContractors = () => {
             <p className={textSecondary}>Marketing spend, web analytics, lead performance & revenue contribution per contractor</p>
           </div>
           <div className="flex items-center gap-2">
-            {isFiltered && (
-              <motion.button onClick={clearFilter}
-                initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/25 hover:bg-indigo-500/25 transition-colors"
-              >
-                <Filter size={10} /> Filtered ✕
-              </motion.button>
-            )}
-            <DateRangePicker onApply={handleDateChange} onClear={clearFilter} />
           </div>
         </motion.div>
 

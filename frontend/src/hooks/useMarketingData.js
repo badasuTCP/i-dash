@@ -1,21 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { dashboardAPI } from '../services/api';
+import { useGlobalDate } from '../context/GlobalDateContext';
 
 /**
  * useMarketingData — Fetches live Meta + Google Ads data from the backend.
  *
- * Mirrors the useWebAnalytics pattern:
- *  - Returns `hasLiveData: true` when the backend confirms at least one
- *    marketing pipeline (meta_ads or google_ads) has completed successfully.
- *  - Falls back to the static seed props passed to MarketingDashboardTemplate
- *    when no pipeline has ever run (`hasLiveData: false`).
+ * Automatically refetches when the global date range changes.
  *
  * @param {string}  division   - 'cp' | 'sanitred' | 'ibos'
  * @param {object}  fallback   - Static seed data { scorecards, performanceSummary, ... }
- * @param {Date|null} dateFrom - Optional start date
- * @param {Date|null} dateTo   - Optional end date
  */
-export function useMarketingData(division, fallback = {}, dateFrom = null, dateTo = null) {
+export function useMarketingData(division, fallback = {}) {
+  const { dateFrom, dateTo } = useGlobalDate();
   const [liveData, setLiveData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasLiveData, setHasLiveData] = useState(false);
@@ -72,7 +68,7 @@ export function useMarketingData(division, fallback = {}, dateFrom = null, dateT
     { label: 'CPL',             value: sc.cpl || 0,           change: 0, color: 'amber',   format: 'currency', sparkData: [] },
   ];
 
-  // Performance summary per platform (from backend)
+  // Performance summary per platform
   const livePerformanceSummary = (liveData.platforms || []).map((p) => ({
     division: p.division,
     spend: `$${(p.spend / 1000).toFixed(1)}K`,
@@ -92,7 +88,7 @@ export function useMarketingData(division, fallback = {}, dateFrom = null, dateT
   return {
     loading,
     hasLiveData: true,
-    dataWarning: null,  // Live = no warning
+    dataWarning: null,
     scorecards: liveScorecards,
     performanceSummary: livePerformanceSummary.length > 0
       ? livePerformanceSummary

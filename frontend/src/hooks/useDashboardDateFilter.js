@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { format } from 'date-fns';
+import { useGlobalDate } from '../context/GlobalDateContext';
 
 // ─── Label parsers ─────────────────────────────────────────────────────────────
 const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
@@ -41,6 +42,18 @@ export function parseLabel(label) {
     return { start: new Date(year, 0, 1), end: new Date(year, 11, 31) };
   }
 
+  // "Mar 09" / "Apr 07" — daily GA4 labels (MMM dd)
+  const dayMatch = label.match(/^([A-Za-z]{3})\s+(\d{1,2})$/);
+  if (dayMatch) {
+    // Without year, treat as current year — safe for daily data filtering
+    const mIdx = MONTHS.findIndex((m) => m === dayMatch[1].toLowerCase());
+    if (mIdx >= 0) {
+      const now = new Date();
+      const d = new Date(now.getFullYear(), mIdx, parseInt(dayMatch[2], 10));
+      return { start: d, end: d };
+    }
+  }
+
   return null; // unknown — always include
 }
 
@@ -73,46 +86,51 @@ function rangeLabel(start, end) {
 
 // ─── Hook ──────────────────────────────────────────────────────────────────────
 /**
- * useDashboardDateFilter — Single Source of Truth for all dashboard filters.
+ * useDashboardDateFilter — reads from GlobalDateContext so ALL pages share one
+ * date range set by the Header DateRangePicker.
  *
- * State is a single atomic object { dateRange, presetId } so switching presets
- * always performs a complete state replacement (no ghost state from prior custom
- * date inputs).
+ * Also retains handleDateChange / clearFilter for backward compatibility —
+ * they now delegate to the global context.
  *
  * Key exports:
  *   resolveData(arr, labelKey, metricsPerPeriod?)
  *     → { data, resolvedMetrics, activePeriod, noDataForPeriod, fallbackMessage }
- *     Both charts and scorecards consume this ONE function — the resolved metrics
- *     come out of the same call that filtered the chart data, guaranteeing they
- *     always reference the same period label.
  *
- *   filterData(arr, labelKey)   — backward-compat wrapper around resolveData
+ *   filterData(arr, labelKey)   — backward-compat wrapper
  */
 export function useDashboardDateFilter() {
-  // Single atomic state — replaced as a whole on every filter change.
-  const [filter, setFilter] = useState({ dateRange: null, presetId: null });
+  // ── Read from Global Date Context ────────────────────────────────────────
+  // Always call the hook (React rules require unconditional hook calls).
+  // Returns null values when no provider is present (tests), which is safe.
+  const globalCtx = useGlobalDate();
 
-  /**
-   * Apply a new date range.  presetId is optional meta (e.g. 'lastQuarter').
-   * Replacing the whole object guarantees no leftover custom-range ghost state.
-   */
-  const handleDateChange = useCallback((start, end, presetId = null) => {
-    setFilter({ dateRange: { start, end }, presetId });
-  }, []);
+  // Local fallback state (only used if GlobalDateContext is unavailable)
+  const [localFilter, setLocalFilter] = useState({ dateRange: null, presetId: null });
 
+  // Determine active filter — global wins if available
+  const dateRange = globalCtx?.dateRange ?? localFilter.dateRange;
+  const presetId  = globalCtx?.presetId ?? localFilter.presetId;
+
+  /** Apply date range — writes to global context if available, local otherwise */
+  const handleDateChange = useCallback((start, end, preset = null) => {
+    if (globalCtx) {
+      globalCtx.setGlobalDate(start, end, preset);
+    } else {
+      setLocalFilter({ dateRange: { start, end }, presetId: preset });
+    }
+  }, [globalCtx]);
+
+  /** Clear filter */
   const clearFilter = useCallback(() => {
-    setFilter({ dateRange: null, presetId: null });
-  }, []);
+    if (globalCtx) {
+      globalCtx.clearGlobalDate();
+    } else {
+      setLocalFilter({ dateRange: null, presetId: null });
+    }
+  }, [globalCtx]);
 
   /**
    * resolveData — THE unified resolution path for every component.
-   *
-   * 1. Filters `arr` by the active date range using label-based overlap.
-   * 2. Derives `activePeriod` (the canonical label string).
-   * 3. Looks up `metricsPerPeriod[activePeriod]` via three fallback strategies
-   *    so the same "Q1 2026" key works whether the user selected a custom date
-   *    range covering Q1 or clicked the "This Quarter" preset.
-   * 4. Returns everything charts AND scorecards need from one call.
    */
   const resolveData = useCallback(
     (arr, labelKey = 'month', metricsPerPeriod = null) => {
@@ -124,9 +142,9 @@ export function useDashboardDateFilter() {
         fallbackMessage: null,
       };
 
-      if (!filter.dateRange || !Array.isArray(arr) || arr.length === 0) return base;
+      if (!dateRange || !Array.isArray(arr) || arr.length === 0) return base;
 
-      const { start, end } = filter.dateRange;
+      const { start, end } = dateRange;
       const filtered = arr.filter((item) => overlaps(item[labelKey], start, end));
 
       if (filtered.length > 0) {
@@ -134,7 +152,7 @@ export function useDashboardDateFilter() {
         let resolvedMetrics = null;
 
         if (metricsPerPeriod) {
-          // Strategy 1: exact key match on one of the filtered item labels
+          // Strategy 1: exact key match
           for (const item of filtered) {
             const lbl = item[labelKey];
             if (lbl && metricsPerPeriod[lbl] !== undefined) {
@@ -144,13 +162,11 @@ export function useDashboardDateFilter() {
             }
           }
 
-          // Strategy 2: a metricsPerPeriod key whose parsed range falls within
-          // the selected filter range (handles "Last Quarter" → "Q4 2025" key)
+          // Strategy 2: key range contained in filter range
           if (!activePeriod) {
             for (const key of Object.keys(metricsPerPeriod)) {
               const kr = parseLabel(key);
               if (!kr) continue;
-              // Key range is contained in (or equal to) filter range
               if (kr.start >= start && kr.end <= end) {
                 activePeriod    = key;
                 resolvedMetrics = metricsPerPeriod[key];
@@ -159,8 +175,7 @@ export function useDashboardDateFilter() {
             }
           }
 
-          // Strategy 3: overlapping key (partial overlap — e.g. "This Month"
-          // overlapping Q1 data)
+          // Strategy 3: overlapping key
           if (!activePeriod) {
             for (const key of Object.keys(metricsPerPeriod)) {
               const kr = parseLabel(key);
@@ -174,7 +189,6 @@ export function useDashboardDateFilter() {
           }
         }
 
-        // If we still don't have activePeriod use the most-recent filtered label
         if (!activePeriod) {
           activePeriod = mostRecentLabel(filtered, labelKey);
         }
@@ -182,7 +196,7 @@ export function useDashboardDateFilter() {
         return { data: filtered, resolvedMetrics, activePeriod, noDataForPeriod: false, fallbackMessage: null };
       }
 
-      // ── No match — fall back to most recent available ──────────────────────
+      // ── No match — fall back to most recent ────────────────────────────
       const latestLabel = mostRecentLabel(arr, labelKey);
       const fallback    = latestLabel
         ? arr.filter((item) => item[labelKey] === latestLabel)
@@ -201,14 +215,10 @@ export function useDashboardDateFilter() {
         fallbackMessage: `No records for ${rangeLabel(start, end)}. Showing ${latestLabel ?? 'most recent'} — run your pipelines to load fresh data.`,
       };
     },
-    [filter.dateRange]
+    [dateRange]
   );
 
-  /**
-   * filterData — backward-compatible wrapper.
-   * Returns { data, noDataForPeriod, fallbackMessage } — same shape as before
-   * so existing callers that don't need scorecard resolution still work.
-   */
+  /** filterData — backward-compat wrapper */
   const filterData = useCallback(
     (arr, labelKey = 'month') => {
       const { data, noDataForPeriod, fallbackMessage } = resolveData(arr, labelKey, null);
@@ -222,8 +232,8 @@ export function useDashboardDateFilter() {
     clearFilter,
     filterData,
     resolveData,
-    isFiltered: !!filter.dateRange,
-    dateRange:  filter.dateRange,
-    presetId:   filter.presetId,
+    isFiltered: !!dateRange,
+    dateRange,
+    presetId,
   };
 }

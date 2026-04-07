@@ -73,17 +73,10 @@ const STATIC_FALLBACK = {
 
 const IBOSSWebAnalytics = () => {
   const { isContractorActive } = useDashboardConfig();
-  const [dateFrom, setDateFrom] = useState(null);
-  const [dateTo, setDateTo] = useState(null);
   const [selectedPropertyId, setSelectedPropertyId] = useState(null);
   const [selectedPropertyName, setSelectedPropertyName] = useState('All Properties');
 
-  const ga4 = useWebAnalytics('ibos', STATIC_FALLBACK, dateFrom, dateTo, selectedPropertyId);
-
-  const handleDateChange = (start, end) => {
-    setDateFrom(start);
-    setDateTo(end);
-  };
+  const ga4 = useWebAnalytics('ibos', STATIC_FALLBACK, selectedPropertyId);
 
   const handlePropertySelect = (propertyId, displayName) => {
     setSelectedPropertyId(propertyId);
@@ -113,7 +106,6 @@ const IBOSSWebAnalytics = () => {
       loading={ga4.loading}
       apiReachable={ga4.apiReachable}
       propertyId={ga4.propertyId}
-      onDateChange={handleDateChange}
       headerExtra={
         <PropertySwitcher
           division="ibos"
