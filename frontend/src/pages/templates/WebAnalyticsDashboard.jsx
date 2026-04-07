@@ -11,7 +11,7 @@ import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
-const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning, contractorDetails, hasLiveData, loading, onDateChange, apiReachable, propertyId }) => {
+const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning, contractorDetails, hasLiveData, loading, onDateChange, apiReachable, propertyId, headerExtra }) => {
   const { isDark } = useTheme();
   const { handleDateChange: _handleDateChange, resolveData, isFiltered, clearFilter: _clearFilter } = useDashboardDateFilter();
 
@@ -65,6 +65,7 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
             <p className={textSecondary}>{subtitle}</p>
           </div>
           <div className="flex items-center gap-2">
+            {headerExtra}
             {isFiltered && (
               <motion.button onClick={clearFilter}
                 initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}

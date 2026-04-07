@@ -1067,19 +1067,31 @@ _ga4_mapping_cache: Optional[dict] = None
 _ga4_mapping_ts: float = 0
 
 
-async def _resolve_ga4_property(division: str) -> Optional[str]:
+async def _resolve_ga4_property(division: str, db=None, property_id_override: str = None) -> Optional[str]:
     """
     Resolve a division slug to a GA4 property ID.
 
     Priority order:
-    1. Division-specific env var (GA4_PROPERTY_ID_CP, etc.)
-    2. Auto-discovery via listAccountSummaries + fuzzy name matching
-    3. Shared GA4_PROPERTY_ID fallback
+    1. Explicit property_id override (from Property Switcher dropdown)
+    2. DB lookup via ga4_properties table (first enabled property for division)
+    3. Division-specific env var (GA4_PROPERTY_ID_CP, etc.)
+    4. Shared GA4_PROPERTY_ID fallback
     """
-    global _ga4_mapping_cache, _ga4_mapping_ts
-    import time as _time
+    # 1. Explicit override from Property Switcher
+    if property_id_override:
+        return property_id_override
 
-    # Check env var first (fastest path)
+    # 2. DB lookup (preferred — populated by the pipeline)
+    if db is not None:
+        try:
+            from app.services.ga4_discovery import resolve_primary_property
+            db_prop = await resolve_primary_property(db, division)
+            if db_prop:
+                return db_prop
+        except Exception as exc:
+            logger.warning("GA4 DB property resolution failed for %s: %s", division, exc)
+
+    # 3. Env var fallback
     env_map = {
         "cp": settings.GA4_PROPERTY_ID_CP,
         "sanitred": settings.GA4_PROPERTY_ID_SANITRED,
@@ -1088,19 +1100,7 @@ async def _resolve_ga4_property(division: str) -> Optional[str]:
     if env_map.get(division):
         return env_map[division]
 
-    # Try auto-discovery (cached for 10 min)
-    if not _ga4_mapping_cache or (_time.time() - _ga4_mapping_ts > 600):
-        try:
-            from app.services.ga4_discovery import match_properties_to_divisions
-            _ga4_mapping_cache = await match_properties_to_divisions()
-            _ga4_mapping_ts = _time.time()
-        except Exception as exc:
-            logger.warning("GA4 auto-discovery failed in property resolution: %s", exc)
-
-    if _ga4_mapping_cache and _ga4_mapping_cache.get(division):
-        return _ga4_mapping_cache[division]
-
-    # Final fallback
+    # 4. Shared fallback
     return settings.GA4_PROPERTY_ID or None
 
 
@@ -1115,16 +1115,19 @@ async def _resolve_ga4_property(division: str) -> Optional[str]:
 async def get_web_analytics(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    division: str = Query("cp", description="Division slug: cp, sanitred, ibos"),
+    division: str = Query("cp", description="Division slug: cp, sanitred, ibos, dckn"),
     date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
     granularity: str = Query("auto", description="Granularity: daily, monthly, auto"),
+    property_id: Optional[str] = Query(None, description="Explicit GA4 property ID (from Property Switcher)"),
 ) -> dict:
     """
-    Return GA4 web analytics for a division.
+    Return GA4 web analytics for a division (or a specific property).
 
     Queries the ga4_metrics table filtered by property_id (resolved from
-    the division) and date range.  Returns:
+    the division or explicitly provided via Property Switcher) and date range.
+
+    Returns:
       - scorecards (totals with change%)
       - visitorTrend (time-series for the Visitor Trend chart)
       - trafficSources (source/medium breakdown)
@@ -1137,7 +1140,7 @@ async def get_web_analytics(
     Granularity "auto" uses daily when the range is ≤ 90 days, monthly otherwise.
     """
     start_date, end_date = _get_date_range(date_from, date_to)
-    property_id = await _resolve_ga4_property(division)
+    property_id = await _resolve_ga4_property(division, db=db, property_id_override=property_id)
 
     # If no property is configured at all, return empty / no-live-data
     if not property_id:
@@ -1331,23 +1334,132 @@ async def get_web_analytics(
     },
 )
 async def get_ga4_discovery_status(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """
-    Return GA4 auto-discovery results: which properties the service account
-    can see, and how they map to divisions.
+    Return GA4 account-level discovery results: which properties the service
+    account can see across all five target accounts, and how they map to divisions.
     """
     try:
         from app.services.ga4_discovery import get_discovery_status
-        return await get_discovery_status()
+        return await get_discovery_status(db=db)
     except Exception as exc:
         logger.error("GA4 discovery status failed: %s", exc)
         return {
             "total_properties": 0,
-            "properties": [],
-            "division_mapping": {"cp": None, "sanitred": None, "ibos": None},
+            "by_division": {},
             "error": str(exc),
         }
+
+
+@router.get(
+    "/analytics/ga4-properties",
+    summary="List GA4 properties for a division (Property Switcher)",
+    responses={200: {"description": "Properties for the given division"}},
+)
+async def list_ga4_properties(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    division: str = Query("ibos", description="Division slug: cp, sanitred, ibos, dckn"),
+    include_disabled: bool = Query(False, description="Include disabled properties"),
+) -> dict:
+    """
+    Return all GA4 properties registered for a division.
+
+    Used by the Property Switcher dropdown on I-BOS and DCKN Web Analytics
+    pages to let the user toggle between contractor websites.
+    """
+    from app.services.ga4_discovery import get_properties_for_division
+
+    enabled_only = not include_disabled
+    properties = await get_properties_for_division(db, division, enabled_only=enabled_only)
+
+    return {
+        "division": division,
+        "count": len(properties),
+        "properties": properties,
+    }
+
+
+@router.post(
+    "/analytics/ga4-discover",
+    summary="Trigger GA4 account-level discovery and persist results",
+    responses={200: {"description": "Discovery results"}},
+)
+async def trigger_ga4_discovery(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Manually trigger the GA4 account-level property discovery.
+
+    Scans all five target accounts, inserts new properties into the
+    ga4_properties table, and auto-creates contractors for DCKN properties.
+    """
+    if current_user.role.value != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can trigger GA4 discovery",
+        )
+
+    from app.services.ga4_discovery import persist_discovered_properties
+    result = await persist_discovered_properties(db)
+    return result
+
+
+@router.put(
+    "/analytics/ga4-properties/{property_id}/toggle",
+    summary="Enable or disable a GA4 property (Super Admin)",
+    responses={200: {"description": "Updated property"}},
+)
+async def toggle_ga4_property(
+    property_id: str,
+    enabled: bool = Query(..., description="Enable or disable"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Super Admin toggle for a GA4 property.  This is a permanent PostgreSQL
+    write — the enabled state persists across pipeline re-runs.
+    """
+    if current_user.role.value != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can toggle GA4 properties",
+        )
+
+    from app.models.ga4_property import GA4Property
+    from datetime import datetime, timezone
+
+    result = await db.execute(
+        select(GA4Property).where(GA4Property.property_id == property_id)
+    )
+    prop = result.scalar_one_or_none()
+    if not prop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"GA4 property '{property_id}' not found",
+        )
+
+    prop.enabled = enabled
+    prop.status = "active" if enabled else "inactive"
+    prop.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(prop)
+
+    logger.info(
+        "User %s toggled GA4 property %s (%s) enabled=%s",
+        current_user.email, property_id, prop.display_name, enabled,
+    )
+
+    return {
+        "property_id": prop.property_id,
+        "display_name": prop.display_name,
+        "division": prop.division,
+        "enabled": prop.enabled,
+        "status": prop.status,
+    }
 
 
 def _empty_web_analytics(start_date, end_date, division: str) -> dict:

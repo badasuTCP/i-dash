@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import WebAnalyticsDashboard from '../templates/WebAnalyticsDashboard';
 import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import { useWebAnalytics } from '../../hooks/useWebAnalytics';
+import PropertySwitcher from '../../components/PropertySwitcher';
 
 // ── Per-contractor web metrics (visits, visitors, engagement, bounce, source) ──
 const ALL_WEBSITE_BREAKDOWN = [
@@ -74,12 +75,19 @@ const IBOSSWebAnalytics = () => {
   const { isContractorActive } = useDashboardConfig();
   const [dateFrom, setDateFrom] = useState(null);
   const [dateTo, setDateTo] = useState(null);
+  const [selectedPropertyId, setSelectedPropertyId] = useState(null);
+  const [selectedPropertyName, setSelectedPropertyName] = useState('All Properties');
 
-  const ga4 = useWebAnalytics('ibos', STATIC_FALLBACK, dateFrom, dateTo);
+  const ga4 = useWebAnalytics('ibos', STATIC_FALLBACK, dateFrom, dateTo, selectedPropertyId);
 
   const handleDateChange = (start, end) => {
     setDateFrom(start);
     setDateTo(end);
+  };
+
+  const handlePropertySelect = (propertyId, displayName) => {
+    setSelectedPropertyId(propertyId);
+    setSelectedPropertyName(displayName);
   };
 
   const websiteBreakdown = useMemo(
@@ -92,16 +100,27 @@ const IBOSSWebAnalytics = () => {
     [isContractorActive]
   );
 
+  const subtitle = selectedPropertyId
+    ? `Viewing: ${selectedPropertyName} · Property ${selectedPropertyId}`
+    : 'All contractor websites combined — 109K visits · 86.3K visitors · 71.4K new · 14.9K returning';
+
   return (
     <WebAnalyticsDashboard
       title="I-BOS Web Analytics"
-      subtitle="All contractor websites combined — 109K visits · 86.3K visitors · 71.4K new · 14.9K returning"
+      subtitle={subtitle}
       accentColor="#F59E0B"
       hasLiveData={ga4.hasLiveData}
       loading={ga4.loading}
       apiReachable={ga4.apiReachable}
       propertyId={ga4.propertyId}
       onDateChange={handleDateChange}
+      headerExtra={
+        <PropertySwitcher
+          division="ibos"
+          selectedId={selectedPropertyId}
+          onSelect={handlePropertySelect}
+        />
+      }
       pageInsights={[
         'Columbus dominates traffic at 71.8K visits — 66% of total I-BOS web traffic',
         'Organic beats paid on avg engagement time (2:18 vs 1:52) — content quality drives stay',

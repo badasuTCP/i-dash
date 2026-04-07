@@ -2,30 +2,29 @@ import { useState, useEffect, useCallback } from 'react';
 import { dashboardAPI } from '../services/api';
 
 /**
- * useWebAnalytics — Fetches live GA4 data from the backend for a division.
+ * useWebAnalytics — Fetches live GA4 data from the backend for a division
+ * (or a specific property via the Property Switcher).
  *
- * Returns the live data when available, or signals the caller to use
- * its static fallback data.
- *
- * @param {string} division  - 'cp' | 'sanitred' | 'ibos'
- * @param {object} fallback  - Static seed data { scorecards, visitorTrend, ... }
+ * @param {string} division    - 'cp' | 'sanitred' | 'ibos' | 'dckn'
+ * @param {object} fallback    - Static seed data { scorecards, visitorTrend, ... }
  * @param {Date|null} dateFrom - Optional start date from date filter
  * @param {Date|null} dateTo   - Optional end date from date filter
+ * @param {string|null} propertyId - Optional explicit GA4 property ID (from Property Switcher)
  */
-export function useWebAnalytics(division, fallback = {}, dateFrom = null, dateTo = null) {
+export function useWebAnalytics(division, fallback = {}, dateFrom = null, dateTo = null, propertyId = null) {
   const [liveData, setLiveData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasLiveData, setHasLiveData] = useState(false);
-  const [propertyId, setPropertyId] = useState(null);
+  const [resolvedPropertyId, setResolvedPropertyId] = useState(null);
   const [apiReachable, setApiReachable] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await dashboardAPI.getWebAnalytics(division, dateFrom, dateTo);
+      const resp = await dashboardAPI.getWebAnalytics(division, dateFrom, dateTo, 'auto', propertyId);
       const data = resp.data;
       setApiReachable(true);
-      setPropertyId(data.property_id || null);
+      setResolvedPropertyId(data.property_id || null);
 
       if (data.hasLiveData) {
         setLiveData(data);
@@ -37,7 +36,6 @@ export function useWebAnalytics(division, fallback = {}, dateFrom = null, dateTo
         console.info(`[GA4] ${division}: No live data. Property: ${data.property_id || 'NONE CONFIGURED'}`);
       }
     } catch (err) {
-      // API call failed — fall back to static data silently
       console.warn(`[useWebAnalytics] Failed to fetch GA4 data for ${division}:`, err.message);
       setApiReachable(false);
       setHasLiveData(false);
@@ -45,22 +43,19 @@ export function useWebAnalytics(division, fallback = {}, dateFrom = null, dateTo
     } finally {
       setLoading(false);
     }
-  }, [division, dateFrom, dateTo]);
+  }, [division, dateFrom, dateTo, propertyId]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   // ── Merge live data over static fallback ───────────────────────────────────
-  // If we have live data, transform it into the shape the WebAnalyticsDashboard
-  // template expects.  Otherwise, pass through the static fallback unchanged.
-
   if (!hasLiveData || !liveData) {
     return {
       loading,
       hasLiveData: false,
       apiReachable,
-      propertyId,
+      propertyId: resolvedPropertyId,
       scorecards: fallback.scorecards || [],
       visitorTrend: fallback.visitorTrend || [],
       trafficSources: fallback.trafficSources || [],
@@ -79,7 +74,7 @@ export function useWebAnalytics(division, fallback = {}, dateFrom = null, dateTo
     { label: 'Avg Session (min)',   value: sc.avgSessionMin || 0,      change: 0,                          color: 'amber',   format: 'decimal' },
   ];
 
-  // Build metricsPerPeriod from live visitorTrend so date filter resolution works
+  // Build metricsPerPeriod from live visitorTrend
   const liveMetricsPerPeriod = {};
   for (const pt of liveData.visitorTrend || []) {
     liveMetricsPerPeriod[pt.month] = {

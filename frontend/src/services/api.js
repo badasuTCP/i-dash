@@ -131,9 +131,25 @@ export const dashboardAPI = {
     apiClient.get('/dashboard/custom', {
       params: { metric, date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), granularity },
     }),
-  getWebAnalytics: (division, startDate, endDate, granularity = 'auto') =>
+  getWebAnalytics: (division, startDate, endDate, granularity = 'auto', propertyId = null) =>
     apiClient.get('/dashboard/analytics/web', {
-      params: { division, date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), granularity },
+      params: {
+        division,
+        date_from: _fmtDate(startDate),
+        date_to: _fmtDate(endDate),
+        granularity,
+        ...(propertyId ? { property_id: propertyId } : {}),
+      },
+    }),
+  getGA4Properties: (division, includeDisabled = false) =>
+    apiClient.get('/dashboard/analytics/ga4-properties', {
+      params: { division, include_disabled: includeDisabled },
+    }),
+  triggerGA4Discovery: () =>
+    apiClient.post('/dashboard/analytics/ga4-discover'),
+  toggleGA4Property: (propertyId, enabled) =>
+    apiClient.put(`/dashboard/analytics/ga4-properties/${propertyId}/toggle`, null, {
+      params: { enabled },
     }),
 };
 

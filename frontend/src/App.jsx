@@ -29,6 +29,9 @@ import IBOSSWebAnalytics from './pages/iboss/IBOSSWebAnalytics';
 import IBOSSMarketing from './pages/iboss/IBOSSMarketing';
 import IBOSContractors from './pages/iboss/IBOSContractors';
 
+// Pages - DCKN (Lead Gen)
+import DCKNWebAnalytics from './pages/dckn/DCKNWebAnalytics';
+
 // Pages - Sales Intelligence
 import SalesIntelligence from './pages/SalesIntelligence';
 
@@ -96,6 +99,9 @@ const AppContent = () => {
 
       {/* Legacy /iboss routes redirect to /ibos */}
       <Route path="/dashboard/iboss/*" element={<Navigate to="/dashboard/ibos" replace />} />
+
+      {/* DCKN (Lead Gen Network) */}
+      <Route path="/dashboard/dckn/web-analytics" element={<ProtectedPageRoute><DCKNWebAnalytics /></ProtectedPageRoute>} />
 
       {/* Sales Intelligence — both roles */}
       <Route path="/dashboard/sales-intelligence" element={<ProtectedPageRoute><SalesIntelligence /></ProtectedPageRoute>} />

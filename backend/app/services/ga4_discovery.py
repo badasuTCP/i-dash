@@ -1,59 +1,58 @@
 """
-GA4 Property Auto-Discovery Service.
+GA4 Account-Level Discovery Service.
 
-Uses the Google Analytics Admin API (`listAccountSummaries`) to discover
-all GA4 properties the service account can access.  Then applies fuzzy
-name matching to map each property to a business division (CP, Sani-Tred,
-I-BOS) so the correct property ID is used for each dashboard.
+Iterates through a known set of GA4 Account IDs using the Admin API's
+``listAccountSummaries`` endpoint, discovers every underlying property,
+and maps each to an I-Dash division.
+
+The service account ``idash-sheets@big-query-485015.iam.gserviceaccount.com``
+has Viewer access at the Account Level for all five accounts.
+
+Account → Division mapping (source of truth):
+    115324581  → sanitred     (Sani-Tred primary retail)
+    178431870  → cp           (CP eStore)
+    108635203  → cp           (CP Websites — 13 properties)
+    174590625  → ibos         (I-BOS contractor websites — 16 properties)
+    175160117  → dckn         (DCKN Lead Gen — 48 properties)
 
 Usage:
-    properties = await discover_ga4_properties()
-    mapping    = await match_properties_to_divisions()
+    properties = await discover_all_ga4_properties()
+    await persist_discovered_properties(db)
 """
 
-import json
 import logging
 import os
-import re
 import tempfile
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ── In-memory cache ────────────────────────────────────────────────────────────
+# ── Account-to-Division mapping ──────────────────────────────────────────────
+ACCOUNT_DIVISION_MAP: Dict[str, str] = {
+    "115324581": "sanitred",   # Sani-Tred (Primary Retail)
+    "178431870": "cp",         # CP eStore
+    "108635203": "cp",         # CP Websites (13 properties)
+    "174590625": "ibos",       # I-BOS (16 contractor websites)
+    "175160117": "dckn",       # DCKN Lead Gen (48 properties)
+}
+
+# Accounts we explicitly iterate (order preserved for logging)
+TARGET_ACCOUNT_IDS = list(ACCOUNT_DIVISION_MAP.keys())
+
+# ── In-memory cache ──────────────────────────────────────────────────────────
 _discovery_cache: List[Dict[str, Any]] = []
 _cache_ts: float = 0
 _CACHE_TTL: int = 600  # 10 minutes
 
-# ── Division fuzzy-match patterns ──────────────────────────────────────────────
-# Each division has a list of regex patterns that match property display names.
-# Order matters — first match wins.
-_DIVISION_PATTERNS = {
-    "cp": [
-        re.compile(r"concrete\s*protect", re.IGNORECASE),
-        re.compile(r"\bCP\b"),
-        re.compile(r"decorative\s*concrete", re.IGNORECASE),
-        re.compile(r"theconcreteprotector", re.IGNORECASE),
-    ],
-    "sanitred": [
-        re.compile(r"sani.?tred", re.IGNORECASE),
-        re.compile(r"sanitred", re.IGNORECASE),
-    ],
-    "ibos": [
-        re.compile(r"i.?bos", re.IGNORECASE),
-        re.compile(r"ibos", re.IGNORECASE),
-        re.compile(r"business\s*operating", re.IGNORECASE),
-    ],
-}
-
 
 def _init_ga4_admin_client():
     """
-    Initialize the GA4 Admin API client using the same credentials
-    as the GA4 Data API pipeline.
+    Initialize the GA4 Admin API client using the service-account
+    credentials from GA4_CREDENTIALS_JSON.
     """
     try:
         from google.analytics.admin_v1beta import AnalyticsAdminServiceClient
@@ -84,24 +83,24 @@ def _init_ga4_admin_client():
     return AnalyticsAdminServiceClient()
 
 
-async def discover_ga4_properties(
+async def discover_all_ga4_properties(
     force_refresh: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Discover all GA4 properties the service account can access.
+    Discover every GA4 property under our five target accounts.
 
-    Uses `listAccountSummaries()` from the GA4 Admin API, which returns
-    every account + property the service-account credential has at least
-    Viewer access to.
+    Calls ``listAccountSummaries()`` once (which returns ALL accounts the
+    service account can see), then filters to only our target accounts.
+    Each property is tagged with its division based on the account mapping.
 
-    Returns a list of dicts:
+    Returns:
         [
           {
-            "account": "accounts/12345",
-            "account_name": "My Company",
-            "property": "properties/67890",
+            "account_id": "115324581",
+            "account_name": "Sani-Tred",
             "property_id": "67890",
-            "display_name": "CP - Main Site",
+            "display_name": "Sani-Tred Main Site",
+            "division": "sanitred",
           },
           ...
         ]
@@ -120,107 +119,264 @@ async def discover_ga4_properties(
         summaries = client.list_account_summaries()
 
         for account_summary in summaries:
-            acct_name = account_summary.display_name or account_summary.account
+            # Extract numeric account ID from "accounts/115324581"
+            acct_resource = account_summary.account or ""
+            acct_id = acct_resource.split("/")[-1] if "/" in acct_resource else acct_resource
+            acct_name = account_summary.display_name or acct_resource
+
+            # Only process our target accounts
+            if acct_id not in ACCOUNT_DIVISION_MAP:
+                logger.debug("Skipping non-target account %s (%s)", acct_id, acct_name)
+                continue
+
+            division = ACCOUNT_DIVISION_MAP[acct_id]
+
             for prop_summary in (account_summary.property_summaries or []):
                 prop_resource = prop_summary.property  # "properties/12345"
-                prop_id = prop_resource.split("/")[-1] if "/" in prop_resource else prop_resource
+                prop_id = (
+                    prop_resource.split("/")[-1]
+                    if "/" in prop_resource
+                    else prop_resource
+                )
                 properties.append({
-                    "account": account_summary.account,
+                    "account_id": acct_id,
                     "account_name": acct_name,
-                    "property": prop_resource,
                     "property_id": prop_id,
                     "display_name": prop_summary.display_name or prop_resource,
+                    "division": division,
                 })
 
         _discovery_cache = properties
         _cache_ts = time.time()
-        logger.info("GA4 auto-discovery found %d properties", len(properties))
+
+        # Log summary per account
+        from collections import Counter
+        div_counts = Counter(p["division"] for p in properties)
+        logger.info(
+            "GA4 account-level discovery found %d total properties: %s",
+            len(properties),
+            ", ".join(f"{d}={c}" for d, c in sorted(div_counts.items())),
+        )
         return properties
 
     except Exception as exc:
-        logger.error("GA4 auto-discovery failed: %s", exc)
+        logger.error("GA4 account-level discovery failed: %s", exc)
         return _discovery_cache or []
 
 
-async def match_properties_to_divisions() -> Dict[str, Optional[str]]:
+async def persist_discovered_properties(db) -> Dict[str, Any]:
     """
-    Match discovered GA4 properties to divisions using fuzzy name matching.
+    Discover all GA4 properties and upsert them into the ``ga4_properties``
+    table.  Also auto-creates contractors for DCKN properties.
 
-    Returns:
-        {
-          "cp": "12345" or None,
-          "sanitred": "67890" or None,
-          "ibos": "11111" or None,
-        }
-
-    The matching first checks if division-specific env vars are set
-    (GA4_PROPERTY_ID_CP, etc.) and uses those as overrides.  For any
-    division without an explicit env var, it tries to match by property
-    display name.
+    Returns a summary dict with counts.
     """
-    # Start with explicit env var overrides
-    mapping: Dict[str, Optional[str]] = {
-        "cp": settings.GA4_PROPERTY_ID_CP or None,
-        "sanitred": settings.GA4_PROPERTY_ID_SANITRED or None,
-        "ibos": settings.GA4_PROPERTY_ID_IBOS or None,
-    }
+    from sqlalchemy import select
+    from app.models.ga4_property import GA4Property
+    from app.models.contractor import Contractor
 
-    # If all three are already set, no need to auto-discover
-    if all(mapping.values()):
-        logger.info("All GA4 property IDs set via env vars — skipping auto-discovery")
-        return mapping
-
-    # Discover properties
-    properties = await discover_ga4_properties()
+    properties = await discover_all_ga4_properties(force_refresh=True)
     if not properties:
-        # Fall back to shared GA4_PROPERTY_ID for unset divisions
-        fallback = settings.GA4_PROPERTY_ID or None
-        for div in mapping:
-            if not mapping[div]:
-                mapping[div] = fallback
-        return mapping
+        return {"discovered": 0, "inserted": 0, "updated": 0, "contractors_created": 0}
 
-    # For each unset division, try fuzzy matching
-    for div, patterns in _DIVISION_PATTERNS.items():
-        if mapping[div]:
-            continue  # Already set by env var
+    now = datetime.now(timezone.utc)
+    inserted = 0
+    updated = 0
+    contractors_created = 0
 
-        for prop in properties:
-            name = prop.get("display_name", "")
-            for pattern in patterns:
-                if pattern.search(name):
-                    mapping[div] = prop["property_id"]
+    for prop in properties:
+        # Check if property already exists
+        result = await db.execute(
+            select(GA4Property).where(GA4Property.property_id == prop["property_id"])
+        )
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            # Update display name / account name if changed, but NEVER
+            # overwrite admin-controlled fields (enabled, status)
+            changed = False
+            if existing.display_name != prop["display_name"]:
+                existing.display_name = prop["display_name"]
+                changed = True
+            if existing.account_name != prop["account_name"]:
+                existing.account_name = prop["account_name"]
+                changed = True
+            if changed:
+                existing.updated_at = now
+                updated += 1
+        else:
+            # New property — determine initial status
+            division = prop["division"]
+            # DCKN and new I-BOS properties start as pending_admin
+            is_pending = division in ("dckn",)
+            initial_enabled = division in ("cp", "sanitred")
+            initial_status = "pending_admin" if is_pending else "active"
+
+            # Generate a contractor slug for I-BOS and DCKN properties
+            contractor_slug = None
+            if division in ("ibos", "dckn"):
+                contractor_slug = _make_contractor_slug(prop["display_name"], prop["property_id"])
+
+            ga4_prop = GA4Property(
+                property_id=prop["property_id"],
+                account_id=prop["account_id"],
+                account_name=prop["account_name"],
+                display_name=prop["display_name"],
+                division=division,
+                enabled=initial_enabled,
+                status=initial_status,
+                contractor_id=contractor_slug,
+                discovered_at=now,
+                updated_at=now,
+            )
+            db.add(ga4_prop)
+            inserted += 1
+
+            # Auto-create contractor record for DCKN properties
+            if division == "dckn" and contractor_slug:
+                existing_contractor = await db.execute(
+                    select(Contractor).where(Contractor.id == contractor_slug)
+                )
+                if not existing_contractor.scalar_one_or_none():
+                    db.add(Contractor(
+                        id=contractor_slug,
+                        name=prop["display_name"],
+                        division="dckn",
+                        active=False,
+                        status="pending_admin",
+                        updated_at=now,
+                    ))
+                    contractors_created += 1
                     logger.info(
-                        "GA4 auto-discovery matched '%s' → %s (property %s)",
-                        name, div, prop["property_id"],
+                        "Auto-created DCKN contractor '%s' for GA4 property %s",
+                        contractor_slug, prop["property_id"],
                     )
-                    break
-            if mapping[div]:
-                break
 
-    # Final fallback for any still-unmatched divisions
-    fallback = settings.GA4_PROPERTY_ID or None
-    for div in mapping:
-        if not mapping[div]:
-            mapping[div] = fallback
+    await db.commit()
 
-    return mapping
+    summary = {
+        "discovered": len(properties),
+        "inserted": inserted,
+        "updated": updated,
+        "contractors_created": contractors_created,
+    }
+    logger.info("GA4 property persistence complete: %s", summary)
+    return summary
 
 
-async def get_discovery_status() -> Dict[str, Any]:
+def _make_contractor_slug(display_name: str, property_id: str) -> str:
     """
-    Return a status report for the GA4 auto-discovery system.
+    Generate a URL-safe contractor slug from a property display name.
 
-    Useful for the admin/integrations UI to show which properties
-    are discovered and how they're mapped.
+    Examples:
+        "Columbus Concrete Coatings" → "columbus-concrete-coatings"
+        "GA4 Property 12345"         → "ga4-prop-12345"
     """
-    properties = await discover_ga4_properties()
-    mapping = await match_properties_to_divisions()
+    import re
+    slug = display_name.strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = slug.strip("-")
+    if not slug or len(slug) < 3:
+        slug = f"ga4-prop-{property_id}"
+    # Cap length
+    return slug[:64]
+
+
+async def get_properties_for_division(
+    db,
+    division: str,
+    enabled_only: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Return all GA4 properties for a division from the database.
+
+    Used by the Property Switcher dropdown and the web-analytics endpoint
+    to resolve which property_id(s) to query.
+    """
+    from sqlalchemy import select
+    from app.models.ga4_property import GA4Property
+
+    stmt = select(GA4Property).where(GA4Property.division == division)
+    if enabled_only:
+        stmt = stmt.where(GA4Property.enabled == True)  # noqa: E712
+    stmt = stmt.order_by(GA4Property.display_name)
+
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+
+    return [
+        {
+            "property_id": row.property_id,
+            "display_name": row.display_name,
+            "account_name": row.account_name,
+            "account_id": row.account_id,
+            "division": row.division,
+            "enabled": row.enabled,
+            "status": row.status,
+            "contractor_id": row.contractor_id,
+        }
+        for row in rows
+    ]
+
+
+async def resolve_primary_property(db, division: str) -> Optional[str]:
+    """
+    Resolve the single 'primary' GA4 property ID for a division.
+
+    For CP / Sani-Tred — returns the first enabled property.
+    For I-BOS / DCKN — returns the first enabled property (default view);
+    the Property Switcher lets the user select a specific one.
+
+    Falls back to env vars if no DB properties exist.
+    """
+    from sqlalchemy import select
+    from app.models.ga4_property import GA4Property
+
+    stmt = (
+        select(GA4Property.property_id)
+        .where(
+            GA4Property.division == division,
+            GA4Property.enabled == True,  # noqa: E712
+        )
+        .order_by(GA4Property.discovered_at)
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    row = result.scalar_one_or_none()
+    if row:
+        return row
+
+    # Fallback to env vars
+    env_map = {
+        "cp": settings.GA4_PROPERTY_ID_CP,
+        "sanitred": settings.GA4_PROPERTY_ID_SANITRED,
+        "ibos": settings.GA4_PROPERTY_ID_IBOS,
+    }
+    if env_map.get(division):
+        return env_map[division]
+
+    return settings.GA4_PROPERTY_ID or None
+
+
+async def get_discovery_status(db=None) -> Dict[str, Any]:
+    """
+    Return a status report for the GA4 discovery system.
+    """
+    properties = await discover_all_ga4_properties()
+
+    # Group by division
+    from collections import defaultdict
+    by_division = defaultdict(list)
+    for p in properties:
+        by_division[p["division"]].append(p)
 
     return {
         "total_properties": len(properties),
-        "properties": properties,
-        "division_mapping": mapping,
+        "by_division": {
+            div: {"count": len(props), "properties": props}
+            for div, props in sorted(by_division.items())
+        },
+        "target_accounts": ACCOUNT_DIVISION_MAP,
         "env_overrides": {
             "GA4_PROPERTY_ID": settings.GA4_PROPERTY_ID or "(not set)",
             "GA4_PROPERTY_ID_CP": settings.GA4_PROPERTY_ID_CP or "(not set)",
