@@ -141,6 +141,14 @@ export const dashboardAPI = {
         ...(propertyId ? { property_id: propertyId } : {}),
       },
     }),
+  getMarketing: (division, startDate, endDate) =>
+    apiClient.get('/dashboard/marketing', {
+      params: {
+        division,
+        date_from: _fmtDate(startDate),
+        date_to: _fmtDate(endDate),
+      },
+    }),
   getGA4Properties: (division, includeDisabled = false) =>
     apiClient.get('/dashboard/analytics/ga4-properties', {
       params: { division, include_disabled: includeDisabled },

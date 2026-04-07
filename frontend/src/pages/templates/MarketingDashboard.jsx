@@ -4,14 +4,14 @@ import {
   BarChart, Bar, LineChart, Line, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Funnel,
 } from 'recharts';
-import { Filter, AlertCircle } from 'lucide-react';
+import { Filter, AlertCircle, CheckCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
-const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, spendVsRevenue, funnelData, performanceSummary, spendByPeriod, ctrData, metricsPerPeriod, pageInsights, dataWarning }) => {
+const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, spendVsRevenue, funnelData, performanceSummary, spendByPeriod, ctrData, metricsPerPeriod, pageInsights, dataWarning, hasLiveData }) => {
   const { isDark } = useTheme();
   const { handleDateChange, resolveData, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
@@ -75,8 +75,17 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
         {/* Page Insights */}
         <PageInsight insights={pageInsights} />
 
-        {/* Data warning — shown when no live pipeline is connected */}
-        {dataWarning && (
+        {/* Live data banner (green) — pipeline ran, showing real data */}
+        {hasLiveData && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-3 rounded-xl flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30">
+            <CheckCircle size={15} className="text-emerald-400 flex-shrink-0" />
+            <p className="text-sm font-medium text-emerald-400">Live Ad Data Connected · Meta Ads + Google Ads pipelines synced</p>
+          </motion.div>
+        )}
+
+        {/* Estimated data warning (amber) — no pipeline has run yet */}
+        {!hasLiveData && dataWarning && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
             className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
             <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />

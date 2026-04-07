@@ -16,8 +16,9 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import async_session_maker, get_db
 from app.core.security import get_current_user, role_required
+from app.models.pipeline_log import PipelineLog, PipelineStatus
 from app.models.user import User
 from app.services.pipeline_service import PipelineService
 
@@ -78,26 +79,58 @@ async def list_pipelines(
     }
 
 
+async def _persist_pipeline_log(
+    name: str, status_val: PipelineStatus, records: int,
+    started: datetime, completed: datetime, error_msg: str | None = None,
+) -> None:
+    """Write a PipelineLog row so marketing / dashboard endpoints can detect past runs."""
+    try:
+        async with async_session_maker() as db:
+            log = PipelineLog(
+                pipeline_name=name,
+                status=status_val,
+                records_fetched=records,
+                error_message=error_msg,
+                started_at=started,
+                completed_at=completed,
+            )
+            db.add(log)
+            await db.commit()
+    except Exception as exc:
+        logger.warning("Could not persist PipelineLog for '%s': %s", name, exc)
+
+
 async def _run_pipeline_bg(name: str, pipeline_service: PipelineService) -> None:
     """Background coroutine that runs a single pipeline and stores the result."""
+    started_at = datetime.now(timezone.utc)
     _running_pipelines[name] = {
         "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": started_at.isoformat(),
     }
     try:
         result = await pipeline_service.run_pipeline(name)
+        completed_at = datetime.now(timezone.utc)
         _running_pipelines[name] = {
             **result,
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": completed_at.isoformat(),
         }
         logger.info("Background pipeline '%s' finished: %s records", name, result.get("records_loaded", 0))
+        # Persist to DB for durable hasLiveData detection
+        await _persist_pipeline_log(
+            name, PipelineStatus.SUCCESS,
+            result.get("records_loaded", 0), started_at, completed_at,
+        )
     except Exception as exc:
+        completed_at = datetime.now(timezone.utc)
         _running_pipelines[name] = {
             "status": "failed",
             "error": str(exc),
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": completed_at.isoformat(),
         }
         logger.error("Background pipeline '%s' failed: %s", name, exc)
+        await _persist_pipeline_log(
+            name, PipelineStatus.FAILED, 0, started_at, completed_at, str(exc),
+        )
 
 
 @router.post(

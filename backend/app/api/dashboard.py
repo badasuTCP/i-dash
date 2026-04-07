@@ -23,6 +23,7 @@ from app.models.metrics import (
     HubSpotMetric,
     MetaAdMetric,
 )
+from app.models.pipeline_log import PipelineLog, PipelineStatus
 from app.models.user import User, UserDepartment
 from app.schemas.metrics import (
     ChangeDirection,
@@ -1522,4 +1523,203 @@ def _empty_web_analytics(start_date, end_date, division: str) -> dict:
         "visitorTrend": [],
         "trafficSources": [],
         "deviceData": [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Marketing data endpoint — mirrors the Web Analytics live-data pattern
+# ---------------------------------------------------------------------------
+
+async def _has_pipeline_run(db: AsyncSession, *pipeline_names: str) -> bool:
+    """Check PipelineLog for at least one successful run of any given pipeline."""
+    stmt = (
+        select(func.count())
+        .select_from(PipelineLog)
+        .where(
+            and_(
+                PipelineLog.pipeline_name.in_(pipeline_names),
+                PipelineLog.status == PipelineStatus.SUCCESS,
+            )
+        )
+    )
+    result = await db.execute(stmt)
+    return (result.scalar() or 0) > 0
+
+
+@router.get(
+    "/marketing",
+    summary="Get marketing metrics (Meta + Google Ads) with live-data detection",
+    responses={
+        200: {"description": "Marketing metrics with hasLiveData flag"},
+        401: {"description": "Unauthorized"},
+    },
+)
+async def get_marketing_data(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    division: str = Query("sanitred", description="Division slug: cp, sanitred, ibos"),
+    date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+) -> dict:
+    """
+    Return combined Meta + Google Ads marketing data for a division.
+
+    Mirrors the Web Analytics pattern:
+    - ``hasLiveData: true`` when at least one ad pipeline has completed
+      successfully (even if $0 spend).
+    - ``hasLiveData: false`` when no pipeline has ever run.
+
+    The frontend uses this flag to show a green "Live" banner vs the amber
+    "Estimated Data" banner.
+    """
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    # ── 1. Check if pipelines have run at least once ──────────────────
+    pipeline_ran = await _has_pipeline_run(
+        db, "meta_ads", "meta_ads_pipeline", "google_ads", "google_ads_pipeline",
+    )
+
+    if not pipeline_ran:
+        # Also check in-memory status (handles current-session runs before
+        # server restart writes to PipelineLog)
+        from app.api.pipelines import _running_pipelines
+        for pname in ("meta_ads", "meta_ads_pipeline", "google_ads", "google_ads_pipeline"):
+            info = _running_pipelines.get(pname, {})
+            if info.get("status") in ("success", "completed"):
+                pipeline_ran = True
+                break
+
+    if not pipeline_ran:
+        return {
+            "division": division,
+            "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+            "hasLiveData": False,
+            "scorecards": {},
+            "platforms": [],
+            "spendByPeriod": [],
+        }
+
+    # ── 2. Meta Ads aggregates ────────────────────────────────────────
+    meta_stmt = select(
+        func.sum(MetaAdMetric.impressions).label("impressions"),
+        func.sum(MetaAdMetric.clicks).label("clicks"),
+        func.sum(MetaAdMetric.spend).label("spend"),
+        func.sum(MetaAdMetric.conversions).label("conversions"),
+        func.sum(MetaAdMetric.conversion_value).label("conversion_value"),
+        func.avg(MetaAdMetric.ctr).label("avg_ctr"),
+        func.avg(MetaAdMetric.roas).label("avg_roas"),
+    ).where(
+        and_(
+            MetaAdMetric.date >= start_date,
+            MetaAdMetric.date <= end_date,
+        )
+    )
+    meta_result = await db.execute(meta_stmt)
+    meta = meta_result.first()
+
+    # ── 3. Google Ads aggregates ──────────────────────────────────────
+    google_stmt = select(
+        func.sum(GoogleAdMetric.impressions).label("impressions"),
+        func.sum(GoogleAdMetric.clicks).label("clicks"),
+        func.sum(GoogleAdMetric.spend).label("spend"),
+        func.sum(GoogleAdMetric.conversions).label("conversions"),
+        func.sum(GoogleAdMetric.conversion_value).label("conversion_value"),
+        func.avg(GoogleAdMetric.ctr).label("avg_ctr"),
+        func.avg(GoogleAdMetric.roas).label("avg_roas"),
+    ).where(
+        and_(
+            GoogleAdMetric.date >= start_date,
+            GoogleAdMetric.date <= end_date,
+        )
+    )
+    google_result = await db.execute(google_stmt)
+    gads = google_result.first()
+
+    # ── 4. Daily spend time-series (for Spend & Leads chart) ─────────
+    meta_daily = select(
+        MetaAdMetric.date,
+        func.sum(MetaAdMetric.spend).label("spend"),
+        func.sum(MetaAdMetric.conversions).label("leads"),
+    ).where(
+        and_(MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date)
+    ).group_by(MetaAdMetric.date).order_by(MetaAdMetric.date)
+
+    google_daily = select(
+        GoogleAdMetric.date,
+        func.sum(GoogleAdMetric.spend).label("spend"),
+        func.sum(GoogleAdMetric.conversions).label("leads"),
+    ).where(
+        and_(GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date)
+    ).group_by(GoogleAdMetric.date).order_by(GoogleAdMetric.date)
+
+    meta_daily_res = await db.execute(meta_daily)
+    google_daily_res = await db.execute(google_daily)
+
+    # Merge daily series by date
+    daily_map: dict = {}
+    for row in meta_daily_res.all():
+        d = row[0].isoformat()
+        daily_map.setdefault(d, {"date": d, "spend": 0, "leads": 0})
+        daily_map[d]["spend"] += float(row[1] or 0)
+        daily_map[d]["leads"] += float(row[2] or 0)
+    for row in google_daily_res.all():
+        d = row[0].isoformat()
+        daily_map.setdefault(d, {"date": d, "spend": 0, "leads": 0})
+        daily_map[d]["spend"] += float(row[1] or 0)
+        daily_map[d]["leads"] += float(row[2] or 0)
+
+    spend_by_period = sorted(daily_map.values(), key=lambda x: x["date"])
+
+    # ── 5. Build response ─────────────────────────────────────────────
+    meta_spend = float(meta[2] or 0)
+    meta_conv = float(meta[3] or 0)
+    meta_value = float(meta[4] or 0)
+    gads_spend = float(gads[2] or 0)
+    gads_conv = float(gads[3] or 0)
+    gads_value = float(gads[4] or 0)
+
+    total_spend = meta_spend + gads_spend
+    total_impressions = int(meta[0] or 0) + int(gads[0] or 0)
+    total_clicks = int(meta[1] or 0) + int(gads[1] or 0)
+    total_leads = meta_conv + gads_conv
+    cpl = (total_spend / total_leads) if total_leads > 0 else 0
+
+    platforms = []
+    if meta_spend > 0 or int(meta[0] or 0) > 0:
+        meta_roas = (meta_value / meta_spend) if meta_spend > 0 else 0
+        meta_cpl = (meta_spend / meta_conv) if meta_conv > 0 else 0
+        platforms.append({
+            "division": "Meta Ads",
+            "spend": meta_spend, "revenue": meta_value,
+            "roas": round(meta_roas, 1), "conversions": int(meta_conv),
+            "cpl": round(meta_cpl, 2),
+        })
+    if gads_spend > 0 or int(gads[0] or 0) > 0:
+        gads_roas = (gads_value / gads_spend) if gads_spend > 0 else 0
+        gads_cpl = (gads_spend / gads_conv) if gads_conv > 0 else 0
+        platforms.append({
+            "division": "Google Ads",
+            "spend": gads_spend, "revenue": gads_value,
+            "roas": round(gads_roas, 1), "conversions": int(gads_conv),
+            "cpl": round(gads_cpl, 2),
+        })
+
+    logger.info(
+        "Marketing data for %s: spend=$%.2f, impressions=%d, leads=%d, hasLive=True",
+        division, total_spend, total_impressions, total_leads,
+    )
+
+    return {
+        "division": division,
+        "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+        "hasLiveData": True,
+        "scorecards": {
+            "totalSpend": total_spend,
+            "totalImpressions": total_impressions,
+            "totalClicks": total_clicks,
+            "totalLeads": total_leads,
+            "cpl": round(cpl, 2),
+        },
+        "platforms": platforms,
+        "spendByPeriod": spend_by_period,
     }
