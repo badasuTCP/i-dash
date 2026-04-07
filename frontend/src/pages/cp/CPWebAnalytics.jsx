@@ -70,6 +70,8 @@ const CPWebAnalytics = () => {
       accentColor="#3B82F6"
       hasLiveData={ga4.hasLiveData}
       loading={ga4.loading}
+      apiReachable={ga4.apiReachable}
+      propertyId={ga4.propertyId}
       onDateChange={handleDateChange}
       pageInsights={[
         'Organic search drives 40% of traffic — strong SEO moat reduces paid dependency',

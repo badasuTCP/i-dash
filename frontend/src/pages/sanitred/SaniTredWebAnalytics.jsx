@@ -68,6 +68,8 @@ const SaniTredWebAnalytics = () => {
       accentColor="#10B981"
       hasLiveData={ga4.hasLiveData}
       loading={ga4.loading}
+      apiReachable={ga4.apiReachable}
+      propertyId={ga4.propertyId}
       onDateChange={handleDateChange}
       pageInsights={[
         'Organic search is top acquisition channel — 37% of users, lowest bounce rate of paid sources',

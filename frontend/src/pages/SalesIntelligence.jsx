@@ -202,23 +202,22 @@ const SalesIntelligence = () => {
   const axisColor = isDark ? 'rgba(148,163,184,0.3)' : 'rgba(148,163,184,0.5)';
 
   // ── Fetch live data ───────────────────────────────────────────────────────
-  useEffect(() => {
-    let cancelled = false;
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const { data } = await dashboardAPI.getSalesIntelligence();
-        if (!cancelled) setApiData(data);
-      } catch (err) {
-        if (!cancelled) setError(err?.response?.data?.detail || 'Failed to load sales data');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    fetchData();
-    return () => { cancelled = true; };
+  const fetchSalesData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data } = await dashboardAPI.getSalesIntelligence();
+      setApiData(data);
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Failed to load sales data');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchSalesData();
+  }, [fetchSalesData]);
 
   // ── Derived data from API response ────────────────────────────────────────
   const allReps = useMemo(() => apiData?.reps || [], [apiData]);
@@ -327,18 +326,30 @@ const SalesIntelligence = () => {
   }
 
   if (error && !apiData) {
+    const is403 = error.toLowerCase().includes('403') || error.toLowerCase().includes('forbidden');
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
             <AlertTriangle size={48} className="text-amber-500" />
             <h2 className={`text-xl font-bold ${textPri}`}>Unable to Load Sales Data</h2>
-            <p className={`text-sm ${textSec}`}>{error}</p>
+            <p className={`text-sm ${textSec} max-w-md text-center`}>{error}</p>
+            {is403 && (
+              <p className="text-xs text-amber-400/80 max-w-sm text-center">
+                The HubSpot private app needs the <strong>crm.objects.owners.read</strong> scope.
+                Once your admin adds it, hit Retry below.
+              </p>
+            )}
             <button
-              onClick={() => window.location.reload()}
-              className="mt-4 px-4 py-2 rounded-lg bg-cyan-600 text-white text-sm font-semibold hover:bg-cyan-700 transition-colors"
+              onClick={fetchSalesData}
+              disabled={loading}
+              className="mt-4 px-5 py-2.5 rounded-lg bg-cyan-600 text-white text-sm font-semibold hover:bg-cyan-700 transition-colors disabled:opacity-50 flex items-center gap-2"
             >
-              Retry
+              {loading ? (
+                <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Retrying...</>
+              ) : (
+                'Retry'
+              )}
             </button>
           </div>
         </div>

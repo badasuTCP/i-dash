@@ -14,11 +14,12 @@ import {
 
 // Pipeline display metadata
 const PIPELINE_META = {
-  hubspot:      { icon: '🟠', label: 'HubSpot CRM',    color: 'orange', key: 'hubspot' },
-  meta_ads:     { icon: '🔵', label: 'Meta Ads',        color: 'blue',   key: 'metaAds' },
-  google_ads:   { icon: '🟢', label: 'Google Ads',      color: 'emerald',key: 'googleAds' },
-  google_sheets:{ icon: '📊', label: 'Google Sheets',   color: 'teal',   key: 'googleSheets' },
-  snapshot:     { icon: '📸', label: 'Snapshot Aggregator', color: 'violet', key: 'snapshot' },
+  hubspot:          { icon: '🟠', label: 'HubSpot CRM',          color: 'orange',  key: 'hubspot' },
+  meta_ads:         { icon: '🔵', label: 'Meta Ads',              color: 'blue',    key: 'metaAds' },
+  google_ads:       { icon: '🟢', label: 'Google Ads',            color: 'emerald', key: 'googleAds' },
+  google_analytics: { icon: '📈', label: 'Google Analytics (GA4)', color: 'cyan',    key: 'ga4' },
+  google_sheets:    { icon: '📊', label: 'Google Sheets',         color: 'teal',    key: 'googleSheets' },
+  snapshot:         { icon: '📸', label: 'Snapshot Aggregator',   color: 'violet',  key: 'snapshot' },
 };
 
 const FREQ_OPTIONS = [
@@ -49,14 +50,20 @@ function relativeTime(dateStr) {
 
 function StatusBadge({ status, size = 'sm' }) {
   const styles = {
-    success: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
-    failed:  'bg-red-500/15 text-red-400 border-red-500/25',
-    running: 'bg-blue-500/15 text-blue-400 border-blue-500/25',
-    error:   'bg-red-500/15 text-red-400 border-red-500/25',
-    unknown: 'bg-slate-500/15 text-slate-400 border-slate-500/25',
-    idle:    'bg-slate-500/15 text-slate-400 border-slate-500/25',
+    success:        'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
+    failed:         'bg-red-500/15 text-red-400 border-red-500/25',
+    running:        'bg-blue-500/15 text-blue-400 border-blue-500/25',
+    error:          'bg-red-500/15 text-red-400 border-red-500/25',
+    not_configured: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
+    never_run:      'bg-slate-500/15 text-slate-400 border-slate-500/25',
+    unknown:        'bg-slate-500/15 text-slate-400 border-slate-500/25',
+    idle:           'bg-slate-500/15 text-slate-400 border-slate-500/25',
   };
-  const label = status === 'success' ? 'OK' : status === 'unknown' ? 'Idle' : status;
+  const label = status === 'success' ? 'OK'
+    : status === 'not_configured' ? 'Not Configured'
+    : status === 'never_run' ? 'Ready'
+    : status === 'unknown' ? 'Idle'
+    : status;
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border capitalize ${styles[status] || styles.idle}`}>
       {status === 'running' && <Loader2 size={10} className="inline mr-1 animate-spin" />}
@@ -95,7 +102,7 @@ const PipelinesPage = () => {
   // ── Frequencies (local UI state, can later persist to backend) ───────────────
   const [frequencies, setFrequencies] = useState({
     hubspot: '2hrs', meta_ads: '2hrs', google_ads: '4hrs',
-    google_sheets: '6hrs', snapshot: '4hrs',
+    google_analytics: '4hrs', google_sheets: '6hrs', snapshot: '4hrs',
   });
 
   // ── Contractor state — driven by DashboardConfigContext ──────────────────────
@@ -594,7 +601,7 @@ const PipelinesPage = () => {
               <div className="space-y-3">
                 {Object.entries(PIPELINE_META).map(([name, meta]) => {
                   const pipe    = pipelines.find((p) => p.name === name) || {};
-                  const health  = pipe.status === 'success' ? 100 : pipe.status === 'failed' || pipe.status === 'error' ? 0 : 50;
+                  const health  = pipe.status === 'success' ? 100 : pipe.status === 'failed' || pipe.status === 'error' ? 0 : pipe.status === 'not_configured' ? 25 : 50;
                   const barClr  = health === 100 ? 'bg-emerald-500' : health === 0 ? 'bg-red-500' : 'bg-amber-500';
                   return (
                     <div key={name}>

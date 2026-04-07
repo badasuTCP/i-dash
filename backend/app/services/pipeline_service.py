@@ -43,6 +43,10 @@ class PipelineService:
         """Initialize the pipeline service."""
         self.logger = logging.getLogger(f"{__name__}.PipelineService")
         self.pipelines: Dict[str, BasePipeline] = {}
+        # Track ALL expected pipelines (even those that fail to init)
+        self.all_pipeline_names: List[str] = []
+        # Track which pipelines failed to initialize and why
+        self.init_errors: Dict[str, str] = {}
         self._initialize_pipelines()
 
     def _initialize_pipelines(self) -> None:
@@ -56,10 +60,13 @@ class PipelineService:
             ("snapshot", lambda: SnapshotPipeline()),
         ]
 
+        self.all_pipeline_names = [name for name, _ in pipeline_factories]
+
         for name, factory in pipeline_factories:
             try:
                 self.pipelines[name] = factory()
             except Exception as e:
+                self.init_errors[name] = str(e)
                 self.logger.warning(
                     f"Pipeline '{name}' failed to initialize: {e}"
                 )
@@ -186,10 +193,17 @@ class PipelineService:
                 print(f"Loaded {result['records_loaded']} records")
         """
         if pipeline_name not in self.pipelines:
-            error_msg = (
-                f"Pipeline '{pipeline_name}' not found. "
-                f"Available: {list(self.pipelines.keys())}"
-            )
+            # Distinguish "not configured" from truly unknown
+            if pipeline_name in self.init_errors:
+                error_msg = (
+                    f"Pipeline '{pipeline_name}' is not configured: "
+                    f"{self.init_errors[pipeline_name]}"
+                )
+            else:
+                error_msg = (
+                    f"Pipeline '{pipeline_name}' not found. "
+                    f"Available: {list(self.all_pipeline_names)}"
+                )
             self.logger.error(error_msg)
             raise ValueError(error_msg)
 
@@ -238,7 +252,21 @@ class PipelineService:
             async with async_session_maker() as session:
                 pipelines_status = []
 
-                for pipeline_name in self.pipelines.keys():
+                # Iterate ALL expected pipelines, not just initialized ones
+                for pipeline_name in self.all_pipeline_names:
+                    # Check if this pipeline failed to initialize
+                    if pipeline_name in self.init_errors:
+                        pipelines_status.append({
+                            "name": pipeline_name,
+                            "status": "not_configured",
+                            "last_run": None,
+                            "completed_at": None,
+                            "records_fetched": 0,
+                            "duration_seconds": 0.0,
+                            "error": self.init_errors[pipeline_name],
+                        })
+                        continue
+
                     # Get most recent log entry
                     stmt = (
                         select(PipelineLog)
@@ -333,7 +361,7 @@ class PipelineService:
             for entry in history:
                 print(f"{entry['started_at']}: {entry['status']}")
         """
-        if pipeline_name not in self.pipelines:
+        if pipeline_name not in self.all_pipeline_names:
             raise ValueError(f"Pipeline '{pipeline_name}' not found")
 
         try:
@@ -375,12 +403,12 @@ class PipelineService:
 
     async def get_pipeline_list(self) -> List[str]:
         """
-        Get list of available pipelines.
+        Get list of ALL expected pipelines (including unconfigured ones).
 
         Returns:
             List of pipeline names.
         """
-        return list(self.pipelines.keys())
+        return list(self.all_pipeline_names)
 
     async def configure_google_sheets(
         self,

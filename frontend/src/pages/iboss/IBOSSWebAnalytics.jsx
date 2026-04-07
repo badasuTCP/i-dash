@@ -99,6 +99,8 @@ const IBOSSWebAnalytics = () => {
       accentColor="#F59E0B"
       hasLiveData={ga4.hasLiveData}
       loading={ga4.loading}
+      apiReachable={ga4.apiReachable}
+      propertyId={ga4.propertyId}
       onDateChange={handleDateChange}
       pageInsights={[
         'Columbus dominates traffic at 71.8K visits — 66% of total I-BOS web traffic',

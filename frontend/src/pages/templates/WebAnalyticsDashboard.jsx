@@ -11,7 +11,7 @@ import DateRangePicker from '../../components/common/DateRangePicker';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
-const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning, contractorDetails, hasLiveData, loading, onDateChange }) => {
+const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning, contractorDetails, hasLiveData, loading, onDateChange, apiReachable, propertyId }) => {
   const { isDark } = useTheme();
   const { handleDateChange: _handleDateChange, resolveData, isFiltered, clearFilter: _clearFilter } = useDashboardDateFilter();
 
@@ -81,22 +81,42 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
         {/* Page Insights */}
         <PageInsight insights={pageInsights} />
 
-        {/* Data warning — shown only when NO live GA4 data is flowing */}
-        {dataWarning && !hasLiveData && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
-            <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-amber-400">⚠ Estimated Data — No Live Pipeline Connected</p>
-              <p className="text-xs text-amber-300/80 mt-0.5">{dataWarning}</p>
-            </div>
-          </motion.div>
-        )}
+        {/* Status banner — context-aware based on GA4 connection state */}
         {hasLiveData && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
             className="mb-6 p-3 rounded-lg flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Live GA4 Data Connected
+            Live GA4 Data Connected{propertyId ? ` · Property ${propertyId}` : ''}
+          </motion.div>
+        )}
+        {!hasLiveData && !loading && apiReachable && !propertyId && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-red-500/10 border border-red-500/30">
+            <AlertCircle size={16} className="text-red-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-red-400">Error: GA4 Property Not Found</p>
+              <p className="text-xs text-red-300/80 mt-0.5">No GA4 property ID is configured for this division. Set the env var or check auto-discovery. Showing estimated data below.</p>
+            </div>
+          </motion.div>
+        )}
+        {!hasLiveData && !loading && apiReachable && propertyId && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
+            <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-400">GA4 Property Found — Awaiting Pipeline Data</p>
+              <p className="text-xs text-amber-300/80 mt-0.5">Property {propertyId} is configured but no data has been loaded yet. Run the GA4 pipeline to populate. Showing estimates below.</p>
+            </div>
+          </motion.div>
+        )}
+        {!hasLiveData && !loading && !apiReachable && dataWarning && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
+            <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-400">⚠ Estimated Data</p>
+              <p className="text-xs text-amber-300/80 mt-0.5">{dataWarning}</p>
+            </div>
           </motion.div>
         )}
 

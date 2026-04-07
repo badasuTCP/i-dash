@@ -16,23 +16,30 @@ export function useWebAnalytics(division, fallback = {}, dateFrom = null, dateTo
   const [liveData, setLiveData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hasLiveData, setHasLiveData] = useState(false);
+  const [propertyId, setPropertyId] = useState(null);
+  const [apiReachable, setApiReachable] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const resp = await dashboardAPI.getWebAnalytics(division, dateFrom, dateTo);
       const data = resp.data;
+      setApiReachable(true);
+      setPropertyId(data.property_id || null);
 
       if (data.hasLiveData) {
         setLiveData(data);
         setHasLiveData(true);
+        console.info(`[GA4] ${division}: Live data from property ${data.property_id} (${data.granularity}, ${data.visitorTrend?.length || 0} data points)`);
       } else {
         setHasLiveData(false);
         setLiveData(null);
+        console.info(`[GA4] ${division}: No live data. Property: ${data.property_id || 'NONE CONFIGURED'}`);
       }
     } catch (err) {
       // API call failed — fall back to static data silently
       console.warn(`[useWebAnalytics] Failed to fetch GA4 data for ${division}:`, err.message);
+      setApiReachable(false);
       setHasLiveData(false);
       setLiveData(null);
     } finally {
@@ -52,6 +59,8 @@ export function useWebAnalytics(division, fallback = {}, dateFrom = null, dateTo
     return {
       loading,
       hasLiveData: false,
+      apiReachable,
+      propertyId,
       scorecards: fallback.scorecards || [],
       visitorTrend: fallback.visitorTrend || [],
       trafficSources: fallback.trafficSources || [],
@@ -82,6 +91,8 @@ export function useWebAnalytics(division, fallback = {}, dateFrom = null, dateTo
   return {
     loading,
     hasLiveData: true,
+    apiReachable: true,
+    propertyId: liveData.property_id,
     scorecards: liveScorecards,
     visitorTrend: liveData.visitorTrend || [],
     trafficSources: liveData.trafficSources || [],
