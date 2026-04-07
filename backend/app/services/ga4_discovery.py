@@ -370,6 +370,9 @@ async def get_discovery_status(db=None) -> Dict[str, Any]:
     for p in properties:
         by_division[p["division"]].append(p)
 
+    # Also run raw diagnostic to show what the API actually returns
+    raw_accounts = await _raw_list_accounts()
+
     return {
         "total_properties": len(properties),
         "by_division": {
@@ -377,6 +380,7 @@ async def get_discovery_status(db=None) -> Dict[str, Any]:
             for div, props in sorted(by_division.items())
         },
         "target_accounts": ACCOUNT_DIVISION_MAP,
+        "raw_accounts_visible": raw_accounts,
         "env_overrides": {
             "GA4_PROPERTY_ID": settings.GA4_PROPERTY_ID or "(not set)",
             "GA4_PROPERTY_ID_CP": settings.GA4_PROPERTY_ID_CP or "(not set)",
@@ -385,3 +389,37 @@ async def get_discovery_status(db=None) -> Dict[str, Any]:
             "GA4_CREDENTIALS_JSON": "configured" if settings.GA4_CREDENTIALS_JSON else "(not set)",
         },
     }
+
+
+async def _raw_list_accounts() -> List[Dict[str, Any]]:
+    """
+    Diagnostic: list ALL accounts and properties visible to the
+    service account, with NO filtering.  Used to debug mismatched
+    account IDs.
+    """
+    client = _init_ga4_admin_client()
+    if not client:
+        return [{"error": "Admin API client could not be initialized"}]
+
+    try:
+        results = []
+        summaries = client.list_account_summaries()
+        for acct in summaries:
+            acct_resource = acct.account or ""
+            acct_id = acct_resource.split("/")[-1] if "/" in acct_resource else acct_resource
+            props = []
+            for p in (acct.property_summaries or []):
+                prop_resource = p.property
+                pid = prop_resource.split("/")[-1] if "/" in prop_resource else prop_resource
+                props.append({"property_id": pid, "display_name": p.display_name})
+            results.append({
+                "account_id": acct_id,
+                "account_resource": acct_resource,
+                "account_name": acct.display_name,
+                "property_count": len(props),
+                "properties": props[:5],  # First 5 only to keep response small
+                "properties_total": len(props),
+            })
+        return results
+    except Exception as exc:
+        return [{"error": str(exc)}]
