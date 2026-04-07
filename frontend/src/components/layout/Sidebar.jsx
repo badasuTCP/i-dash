@@ -12,6 +12,7 @@ import {
   brands,
   brandPages,
   executiveLink,
+  salesIntelligenceLink,
   adminLinks,
 } from './navConfig';
 
@@ -212,6 +213,19 @@ const Sidebar = () => {
               label={executiveLink.label}
               icon={executiveLink.icon}
               accent="#F97066"
+              collapsed={collapsed}
+            />
+          </div>
+        )}
+
+        {/* Sales Intelligence */}
+        {salesIntelligenceLink.roles.includes(userRole) && (
+          <div className={collapsed ? 'px-2' : 'px-3'}>
+            <NavItem
+              to={salesIntelligenceLink.to}
+              label={salesIntelligenceLink.label}
+              icon={salesIntelligenceLink.icon}
+              accent="#06B6D4"
               collapsed={collapsed}
             />
           </div>

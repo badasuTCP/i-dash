@@ -123,6 +123,10 @@ export const dashboardAPI = {
     apiClient.get('/dashboard/hubspot', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
     }),
+  getSalesIntelligence: (startDate, endDate) =>
+    apiClient.get('/dashboard/hubspot/sales-intelligence', {
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
+    }),
   getCustomMetric: (metric, startDate, endDate, granularity = 'daily') =>
     apiClient.get('/dashboard/custom', {
       params: { metric, date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), granularity },

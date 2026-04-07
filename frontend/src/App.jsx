@@ -29,6 +29,9 @@ import IBOSSWebAnalytics from './pages/iboss/IBOSSWebAnalytics';
 import IBOSSMarketing from './pages/iboss/IBOSSMarketing';
 import IBOSContractors from './pages/iboss/IBOSContractors';
 
+// Pages - Sales Intelligence
+import SalesIntelligence from './pages/SalesIntelligence';
+
 // Utility Pages
 import PipelinesPage from './pages/PipelinesPage';
 import AccountManagement from './pages/AccountManagement';
@@ -93,6 +96,9 @@ const AppContent = () => {
 
       {/* Legacy /iboss routes redirect to /ibos */}
       <Route path="/dashboard/iboss/*" element={<Navigate to="/dashboard/ibos" replace />} />
+
+      {/* Sales Intelligence — both roles */}
+      <Route path="/dashboard/sales-intelligence" element={<ProtectedPageRoute><SalesIntelligence /></ProtectedPageRoute>} />
 
       {/* Data Analyst Only Pages */}
       <Route path="/dashboard/pipelines" element={<ProtectedPageRoute requiredRole="data-analyst"><PipelinesPage /></ProtectedPageRoute>} />

@@ -17,6 +17,7 @@ import {
   Sparkles,
   Users,
   Settings,
+  TrendingUp,
 } from 'lucide-react';
 
 // ────────────────────────────────────────────────────────────────
@@ -85,6 +86,13 @@ export const executiveLink = {
   to: '/dashboard/executive',
   label: 'Executive Dashboard',
   icon: BarChart3,
+  roles: ['executive', 'data-analyst'],
+};
+
+export const salesIntelligenceLink = {
+  to: '/dashboard/sales-intelligence',
+  label: 'Sales Intelligence',
+  icon: TrendingUp,
   roles: ['executive', 'data-analyst'],
 };
 

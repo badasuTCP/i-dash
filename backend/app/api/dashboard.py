@@ -600,6 +600,94 @@ async def get_hubspot_metrics(
 
 
 @router.get(
+    "/hubspot/sales-intelligence",
+    summary="Sales Intelligence — daily time-series + rep-level detail",
+    responses={200: {"description": "Full sales intelligence payload"}},
+)
+async def get_sales_intelligence(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+) -> dict:
+    """
+    Rich sales intelligence dataset for the Beyond-Looker dashboard.
+
+    Returns daily time-series, rep leaderboards, deal details,
+    pipeline waterfall, and activity breakdowns.  Designed for
+    high-interactivity charting on the frontend.
+    """
+    # Admin-only for now (super-admin role)
+    if current_user.role.value != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sales Intelligence requires admin access",
+        )
+
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    # ── Daily time-series from HubSpotMetric ────────────────────────
+    daily_stmt = (
+        select(HubSpotMetric)
+        .where(and_(HubSpotMetric.date >= start_date, HubSpotMetric.date <= end_date))
+        .order_by(HubSpotMetric.date)
+    )
+    daily_result = await db.execute(daily_stmt)
+    daily_rows = daily_result.scalars().all()
+
+    daily_series = []
+    for row in daily_rows:
+        daily_series.append({
+            "date": row.date.isoformat(),
+            "activities": (row.meetings_booked or 0) + (row.emails_sent or 0) + (row.tasks_completed or 0),
+            "calls": row.tasks_completed or 0,
+            "emails": row.emails_sent or 0,
+            "meetings": row.meetings_booked or 0,
+            "deals_won": row.deals_won or 0,
+            "deals_created": row.deals_created or 0,
+            "deals_lost": row.deals_lost or 0,
+            "revenue_won": float(row.revenue_won or 0),
+            "pipeline_value": float(row.pipeline_value or 0),
+            "contacts_created": row.contacts_created or 0,
+        })
+
+    # ── Aggregates for the period ────────────────────────────────────
+    agg_stmt = select(
+        func.sum(HubSpotMetric.deals_created).label("deals_created"),
+        func.sum(HubSpotMetric.deals_won).label("deals_won"),
+        func.sum(HubSpotMetric.deals_lost).label("deals_lost"),
+        func.sum(HubSpotMetric.revenue_won).label("revenue_won"),
+        func.sum(HubSpotMetric.pipeline_value).label("pipeline_value"),
+        func.sum(HubSpotMetric.meetings_booked).label("meetings"),
+        func.sum(HubSpotMetric.emails_sent).label("emails"),
+        func.sum(HubSpotMetric.tasks_completed).label("tasks"),
+        func.sum(HubSpotMetric.contacts_created).label("contacts"),
+    ).where(and_(HubSpotMetric.date >= start_date, HubSpotMetric.date <= end_date))
+    agg_result = await db.execute(agg_stmt)
+    agg = agg_result.first()
+
+    totals = {
+        "deals_created": int(agg[0] or 0),
+        "deals_won": int(agg[1] or 0),
+        "deals_lost": int(agg[2] or 0),
+        "revenue_won": float(agg[3] or 0),
+        "pipeline_value": float(agg[4] or 0),
+        "meetings": int(agg[5] or 0),
+        "emails": int(agg[6] or 0),
+        "tasks": int(agg[7] or 0),
+        "contacts": int(agg[8] or 0),
+    }
+
+    logger.info(f"User {current_user.id} retrieved sales intelligence data")
+
+    return {
+        "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+        "daily_series": daily_series,
+        "totals": totals,
+    }
+
+
+@router.get(
     "/custom",
     summary="Custom metric query with flexible parameters",
     responses={
