@@ -238,7 +238,7 @@ class GoogleAdsPipeline(BasePipeline):
                 metrics.avg_cpc,
                 metrics.cpm,
                 metrics.search_impression_share
-            FROM ad_group_ad_legacy_combined
+            FROM ad_group_ad
             WHERE segments.date BETWEEN '{self.start_date}' AND '{self.end_date}'
             """
 

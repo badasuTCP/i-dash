@@ -10,8 +10,8 @@ immediately (202 Accepted) without hitting the gunicorn/proxy timeout.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -151,12 +151,17 @@ async def run_pipeline(
     current_user: User = Depends(get_current_user),
     _: None = Depends(role_required(["admin", "data-analyst"])),
     pipeline_service: PipelineService = Depends(get_pipeline_service),
+    date_from: Optional[date] = Query(None, description="Override start date (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="Override end date (YYYY-MM-DD)"),
 ) -> Dict[str, Any]:
     """
     Trigger execution of a specific pipeline in the background.
 
     Returns immediately with 202 Accepted. The pipeline runs asynchronously;
     check ``GET /pipelines/{name}/status`` or the Pipelines page for results.
+
+    Optional ``date_from`` / ``date_to`` override the pipeline's default
+    30-day window so the Global Date Picker can drive longer lookbacks.
     """
     available_pipelines = await pipeline_service.get_pipeline_list()
     if name not in available_pipelines:
@@ -179,6 +184,15 @@ async def run_pipeline(
             "status": "already_running",
             "message": f"Pipeline '{name}' is already running — started at {current.get('started_at')}",
         }
+
+    # Apply date overrides to the pipeline before dispatching
+    pipeline_obj = pipeline_service.pipelines.get(name)
+    if pipeline_obj and (date_from or date_to):
+        end_dt = date_to or date.today()
+        start_dt = date_from or (end_dt - timedelta(days=30))
+        pipeline_obj.start_date = start_dt
+        pipeline_obj.end_date = end_dt
+        logger.info("Pipeline '%s' date range overridden to %s → %s", name, start_dt, end_dt)
 
     # Dispatch to background using asyncio.create_task for proper async support
     asyncio.create_task(_run_pipeline_bg(name, pipeline_service))

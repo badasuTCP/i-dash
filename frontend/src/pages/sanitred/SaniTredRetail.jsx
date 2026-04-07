@@ -5,10 +5,11 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart,
   AreaChart, Area,
 } from 'recharts';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
+import { useRetailData } from '../../hooks/useRetailData';
 import PageInsight from '../../components/common/PageInsight';
 
 // ── Retail Channels ────────────────────────────────────────────
@@ -80,9 +81,21 @@ const retailData = {
   ],
 };
 
+// Static fallback data used when no live pipeline data is available
+const STATIC_FALLBACK = {
+  scorecards: retailData.scorecards,
+  channelRevenue: retailData.channelRevenue,
+  topProducts: retailData.topProducts,
+  monthlyMetrics: retailData.monthlyMetrics,
+  channelSplit: retailData.channelSplit,
+  customerInsights: retailData.customerInsights,
+  regionData: retailData.regionData,
+};
+
 const SaniTredRetail = () => {
   const { isDark } = useTheme();
   const { isFiltered, clearFilter } = useDashboardDateFilter();
+  const { hasLiveData, loading: retailLoading, scorecards: liveScoreCards } = useRetailData('sanitred', STATIC_FALLBACK);
   const [activeView, setActiveView] = useState('overview');
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
@@ -117,15 +130,23 @@ const SaniTredRetail = () => {
           'NPS of 72 and 4.6 review score signal strong brand loyalty — leverage for upsell',
         ]} />
 
-        {/* Data warning */}
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-          className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
-          <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-amber-400">⚠ Estimated Data — No Live Pipeline Connected</p>
-            <p className="text-xs text-amber-300/80 mt-0.5">Sani-Tred retail channel and order data not yet connected. Channel split, product units, and regional figures shown are estimates — connect the Sani-Tred store pipeline for real data.</p>
-          </div>
-        </motion.div>
+        {/* Data status banner */}
+        {hasLiveData ? (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-emerald-500/10 border border-emerald-500/30">
+            <CheckCircle2 size={16} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+            <p className="text-sm font-semibold text-emerald-400">Live Retail Data Connected · Google Sheets pipeline synced</p>
+          </motion.div>
+        ) : (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
+            <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-400">Estimated Data — No Live Pipeline Connected</p>
+              <p className="text-xs text-amber-300/80 mt-0.5">Sani-Tred retail channel and order data not yet connected. Channel split, product units, and regional figures shown are estimates — connect the Sani-Tred store pipeline for real data.</p>
+            </div>
+          </motion.div>
+        )}
 
         {/* View Tabs */}
         <div className="flex gap-2 mb-8">
@@ -147,7 +168,7 @@ const SaniTredRetail = () => {
         {/* Scorecards */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {retailData.scorecards.map((kpi, idx) => (
+          {liveScoreCards.map((kpi, idx) => (
             <ScoreCard key={idx} {...kpi} />
           ))}
         </motion.div>

@@ -20,6 +20,7 @@ from app.models.metrics import (
     DashboardSnapshot,
     GA4Metric,
     GoogleAdMetric,
+    GoogleSheetMetric,
     HubSpotMetric,
     MetaAdMetric,
 )
@@ -1722,4 +1723,169 @@ async def get_marketing_data(
         },
         "platforms": platforms,
         "spendByPeriod": spend_by_period,
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Retail Breakdown — Google Sheets (Sani-Tred Order Export)
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/retail",
+    summary="Get retail metrics from Google Sheets pipeline with live-data detection",
+    responses={
+        200: {"description": "Retail metrics with hasLiveData flag"},
+        401: {"description": "Unauthorized"},
+    },
+)
+async def get_retail_data(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    division: str = Query("sanitred", description="Division slug: sanitred"),
+    date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+) -> dict:
+    """
+    Return retail data from the Google Sheets pipeline for a division.
+
+    Follows the same hasLiveData pattern as /marketing and /web-analytics:
+    - ``hasLiveData: true`` when the google_sheets pipeline has run and
+      Revenue-category metrics exist for the date range.
+    - ``hasLiveData: false`` when no pipeline has run or no retail data found.
+
+    The frontend uses this to flip from amber "Estimated" to green "Live" banner.
+    """
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    # ── 1. Check if google_sheets pipeline has ever run ──────────────
+    pipeline_ran = await _has_pipeline_run(
+        db, "google_sheets", "google_sheets_pipeline",
+    )
+
+    if not pipeline_ran:
+        from app.api.pipelines import _running_pipelines
+        for pname in ("google_sheets", "google_sheets_pipeline"):
+            info = _running_pipelines.get(pname, {})
+            if info.get("status") in ("success", "completed"):
+                pipeline_ran = True
+                break
+
+    if not pipeline_ran:
+        return {
+            "division": division,
+            "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+            "hasLiveData": False,
+            "scorecards": {},
+            "channelRevenue": [],
+            "topProducts": [],
+            "monthlyMetrics": [],
+        }
+
+    # ── 2. Aggregate revenue scorecards ──────────────────────────────
+    revenue_stmt = select(
+        func.sum(GoogleSheetMetric.metric_value).label("total_value"),
+        func.count(GoogleSheetMetric.id).label("row_count"),
+    ).where(
+        and_(
+            GoogleSheetMetric.date >= start_date,
+            GoogleSheetMetric.date <= end_date,
+            GoogleSheetMetric.category == "Revenue",
+        )
+    )
+    revenue_result = await db.execute(revenue_stmt)
+    rev = revenue_result.first()
+    total_revenue = float(rev[0] or 0)
+    has_data = (rev[1] or 0) > 0
+
+    # ── 3. Order count & AOV ─────────────────────────────────────────
+    order_stmt = select(
+        func.sum(GoogleSheetMetric.metric_value).label("total_orders"),
+    ).where(
+        and_(
+            GoogleSheetMetric.date >= start_date,
+            GoogleSheetMetric.date <= end_date,
+            GoogleSheetMetric.metric_name.ilike("%order%"),
+        )
+    )
+    order_result = await db.execute(order_stmt)
+    total_orders = float((await db.execute(order_stmt)).first()[0] or 0)
+    avg_order_value = (total_revenue / total_orders) if total_orders > 0 else 0
+
+    # ── 4. Monthly time series ───────────────────────────────────────
+    monthly_stmt = select(
+        func.date_trunc("month", GoogleSheetMetric.date).label("month"),
+        GoogleSheetMetric.metric_name,
+        func.sum(GoogleSheetMetric.metric_value).label("value"),
+    ).where(
+        and_(
+            GoogleSheetMetric.date >= start_date,
+            GoogleSheetMetric.date <= end_date,
+        )
+    ).group_by("month", GoogleSheetMetric.metric_name).order_by("month")
+
+    monthly_result = await db.execute(monthly_stmt)
+    monthly_map: dict = {}
+    for row in monthly_result.all():
+        m = row[0].strftime("%b %Y") if row[0] else "Unknown"
+        monthly_map.setdefault(m, {"month": m})
+        metric_key = (row[1] or "unknown").lower().replace(" ", "_")
+        monthly_map[m][metric_key] = float(row[2] or 0)
+
+    monthly_metrics = list(monthly_map.values())
+
+    # ── 5. Top products (by metric_name containing product info) ─────
+    product_stmt = select(
+        GoogleSheetMetric.metric_name,
+        func.sum(GoogleSheetMetric.metric_value).label("total"),
+    ).where(
+        and_(
+            GoogleSheetMetric.date >= start_date,
+            GoogleSheetMetric.date <= end_date,
+            GoogleSheetMetric.category == "Revenue",
+        )
+    ).group_by(GoogleSheetMetric.metric_name).order_by(
+        func.sum(GoogleSheetMetric.metric_value).desc()
+    ).limit(10)
+
+    product_result = await db.execute(product_stmt)
+    top_products = [
+        {"name": row[0], "revenue": float(row[1] or 0)}
+        for row in product_result.all()
+    ]
+
+    # ── 6. Channel breakdown (by sheet_name as proxy for channel) ────
+    channel_stmt = select(
+        GoogleSheetMetric.sheet_name,
+        func.sum(GoogleSheetMetric.metric_value).label("revenue"),
+    ).where(
+        and_(
+            GoogleSheetMetric.date >= start_date,
+            GoogleSheetMetric.date <= end_date,
+            GoogleSheetMetric.category == "Revenue",
+        )
+    ).group_by(GoogleSheetMetric.sheet_name)
+
+    channel_result = await db.execute(channel_stmt)
+    channel_revenue = [
+        {"channel": row[0], "revenue": float(row[1] or 0)}
+        for row in channel_result.all()
+    ]
+
+    logger.info(
+        "Retail data for %s: revenue=$%.2f, orders=%.0f, products=%d, hasLive=%s",
+        division, total_revenue, total_orders, len(top_products), has_data or pipeline_ran,
+    )
+
+    return {
+        "division": division,
+        "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+        "hasLiveData": True,
+        "scorecards": {
+            "totalRevenue": total_revenue,
+            "totalOrders": int(total_orders),
+            "avgOrderValue": round(avg_order_value, 2),
+        },
+        "channelRevenue": channel_revenue,
+        "topProducts": top_products,
+        "monthlyMetrics": monthly_metrics,
     }
