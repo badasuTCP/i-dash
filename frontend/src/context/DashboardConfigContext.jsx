@@ -70,6 +70,9 @@ export const DashboardConfigProvider = ({ children }) => {
   // Track whether we've loaded from backend at least once
   const hasFetched = useRef(false);
 
+  // Full contractor list from server (includes GA4-discovered)
+  const [serverContractors, setServerContractors] = useState(ALL_CONTRACTORS);
+
   // ── Fetch contractor visibility from backend on mount ───────────────
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +84,17 @@ export const DashboardConfigProvider = ({ children }) => {
         // Build contractor visibility map from server state
         const serverMap = {};
         data.forEach((c) => { serverMap[c.id] = c.active; });
+
+        // Merge server contractors into the full list (includes GA4-discovered)
+        const merged = [...ALL_CONTRACTORS];
+        const seenIds = new Set(ALL_CONTRACTORS.map((c) => c.id));
+        data.forEach((c) => {
+          if (!seenIds.has(c.id)) {
+            merged.push({ id: c.id, name: c.name, division: c.division || 'i-bos', active: c.active, status: c.status });
+            seenIds.add(c.id);
+          }
+        });
+        setServerContractors(merged);
 
         setConfig((prev) => ({
           ...prev,
@@ -160,8 +174,8 @@ export const DashboardConfigProvider = ({ children }) => {
   }, [config.contractors]);
 
   const getActiveContractors = useCallback(() => {
-    return ALL_CONTRACTORS.filter((c) => config.contractors?.[c.id] !== false);
-  }, [config.contractors]);
+    return serverContractors.filter((c) => config.contractors?.[c.id] !== false);
+  }, [config.contractors, serverContractors]);
 
   return (
     <DashboardConfigContext.Provider value={{
@@ -177,6 +191,7 @@ export const DashboardConfigProvider = ({ children }) => {
       isDivisionVisible:   (key) => config.divisions[key]   !== false,
       isContractorActive,
       getActiveContractors,
+      allContractors: serverContractors,
     }}>
       {children}
     </DashboardConfigContext.Provider>

@@ -1385,20 +1385,47 @@ async def list_ga4_properties(
     }
 
 
+_ga4_discover_status: dict = {"status": "idle"}
+
+
+async def _ga4_discover_bg() -> None:
+    """Run GA4 discovery in background with its own DB session."""
+    global _ga4_discover_status
+    _ga4_discover_status = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        from app.services.ga4_discovery import persist_discovered_properties
+        from app.core.database import async_session_maker
+        import asyncio
+
+        async with async_session_maker() as db:
+            result = await persist_discovered_properties(db)
+        _ga4_discover_status = {
+            "status": "completed",
+            **result,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        logger.info("GA4 background discovery completed: %s", result)
+    except Exception as exc:
+        _ga4_discover_status = {
+            "status": "failed",
+            "error": str(exc),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        logger.error("GA4 background discovery failed: %s", exc)
+
+
 @router.post(
     "/analytics/ga4-discover",
-    summary="Trigger GA4 account-level discovery and persist results",
-    responses={200: {"description": "Discovery results"}},
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Trigger GA4 account-level discovery in background",
+    responses={202: {"description": "Discovery started in background"}},
 )
 async def trigger_ga4_discovery(
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """
-    Manually trigger the GA4 account-level property discovery.
-
-    Scans all five target accounts, inserts new properties into the
-    ga4_properties table, and auto-creates contractors for DCKN properties.
+    Manually trigger GA4 account-level property discovery.
+    Runs in background to avoid HTTP timeout. Check /analytics/ga4-discover/status.
     """
     if current_user.role.value != "admin":
         raise HTTPException(
@@ -1406,9 +1433,27 @@ async def trigger_ga4_discovery(
             detail="Only admins can trigger GA4 discovery",
         )
 
-    from app.services.ga4_discovery import persist_discovered_properties
-    result = await persist_discovered_properties(db)
-    return result
+    if _ga4_discover_status.get("status") == "running":
+        return {"status": "already_running", **_ga4_discover_status}
+
+    import asyncio
+    asyncio.create_task(_ga4_discover_bg())
+
+    return {
+        "status": "accepted",
+        "message": "GA4 discovery started in background. Check /analytics/ga4-discover/status for results.",
+    }
+
+
+@router.get(
+    "/analytics/ga4-discover/status",
+    summary="Check GA4 background discovery status",
+)
+async def get_ga4_discover_status(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Return the current or most recent GA4 discovery result."""
+    return _ga4_discover_status
 
 
 @router.put(

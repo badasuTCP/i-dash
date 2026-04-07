@@ -106,10 +106,72 @@ async def list_contractors(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> List[ContractorResponse]:
-    """Return every contractor and its current visibility flag."""
+    """
+    Return every contractor and its current visibility flag.
+
+    Merges two sources:
+      1. The ``contractors`` table (seed data + Meta-discovered)
+      2. The ``ga4_properties`` table (GA4-discovered, where contractor_id is set)
+
+    GA4-discovered properties that are not yet in the contractors table are
+    included as pending_admin entries so they appear in the Admin Controls UI.
+    """
     await _ensure_seeded(db)
+
+    # 1. All contractors from the dedicated table
     result = await db.execute(select(Contractor).order_by(Contractor.name))
-    return [ContractorResponse.model_validate(row) for row in result.scalars().all()]
+    contractors = result.scalars().all()
+    seen_ids = {c.id for c in contractors}
+
+    # 2. Merge GA4-discovered contractor properties not yet in contractors table
+    try:
+        from app.models.ga4_property import GA4Property
+
+        ga4_result = await db.execute(
+            select(GA4Property)
+            .where(
+                GA4Property.contractor_id.isnot(None),
+                GA4Property.division == "ibos",
+            )
+            .order_by(GA4Property.display_name)
+        )
+        ga4_props = ga4_result.scalars().all()
+
+        for prop in ga4_props:
+            if prop.contractor_id not in seen_ids:
+                # Synthesize a ContractorResponse from the GA4 property
+                contractors.append(
+                    _ga4_prop_to_contractor(prop)
+                )
+                seen_ids.add(prop.contractor_id)
+    except Exception as exc:
+        logger.warning("Could not merge GA4 properties into contractor list: %s", exc)
+
+    # Sort combined list by name
+    contractors.sort(key=lambda c: getattr(c, 'name', '') or '')
+
+    return [ContractorResponse.model_validate(c) for c in contractors]
+
+
+def _ga4_prop_to_contractor(prop):
+    """
+    Create a lightweight Contractor-compatible object from a GA4Property row.
+    Used to surface GA4-discovered contractors in the Admin Controls UI.
+    """
+    from datetime import datetime, timezone
+
+    class _FakeContractor:
+        """Minimal object that ContractorResponse.model_validate can handle."""
+        def __init__(self, p):
+            self.id = p.contractor_id
+            self.name = p.display_name
+            self.division = "ibos"
+            self.active = p.enabled
+            self.status = p.status or "pending_admin"
+            self.meta_account_id = None
+            self.updated_at = p.updated_at
+
+    return _FakeContractor(prop)
 
 
 @router.put(
@@ -217,8 +279,10 @@ async def list_pending_contractors(
     current_user: User = Depends(get_current_user),
 ) -> List[ContractorResponse]:
     """
-    Return contractors discovered by the Meta pipeline that have not yet
+    Return contractors discovered by Meta or GA4 pipelines that have not yet
     been reviewed by a Super Admin (status == 'pending_admin').
+
+    Merges both ``contractors`` and ``ga4_properties`` tables.
     """
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
@@ -227,12 +291,36 @@ async def list_pending_contractors(
         )
 
     await _ensure_seeded(db)
+
+    # From contractors table
     result = await db.execute(
         select(Contractor)
         .where(Contractor.status == "pending_admin")
         .order_by(Contractor.updated_at.desc())
     )
-    return [ContractorResponse.model_validate(row) for row in result.scalars().all()]
+    pending = list(result.scalars().all())
+    seen_ids = {c.id for c in pending}
+
+    # From ga4_properties table
+    try:
+        from app.models.ga4_property import GA4Property
+
+        ga4_result = await db.execute(
+            select(GA4Property)
+            .where(
+                GA4Property.contractor_id.isnot(None),
+                GA4Property.status == "pending_admin",
+            )
+            .order_by(GA4Property.display_name)
+        )
+        for prop in ga4_result.scalars().all():
+            if prop.contractor_id not in seen_ids:
+                pending.append(_ga4_prop_to_contractor(prop))
+                seen_ids.add(prop.contractor_id)
+    except Exception as exc:
+        logger.warning("Could not merge GA4 pending properties: %s", exc)
+
+    return [ContractorResponse.model_validate(row) for row in pending]
 
 
 @router.get(
@@ -243,15 +331,38 @@ async def pending_count(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict:
-    """Quick count for the admin notification badge."""
+    """Quick count for the admin notification badge (contractors + GA4 properties)."""
     if current_user.role != UserRole.ADMIN:
         return {"count": 0}
 
     await _ensure_seeded(db)
+
+    # Count from contractors table
     result = await db.execute(
         select(Contractor).where(Contractor.status == "pending_admin")
     )
-    return {"count": len(result.scalars().all())}
+    contractor_ids = {c.id for c in result.scalars().all()}
+    count = len(contractor_ids)
+
+    # Count from ga4_properties table (not already in contractors)
+    try:
+        from app.models.ga4_property import GA4Property
+
+        ga4_result = await db.execute(
+            select(GA4Property)
+            .where(
+                GA4Property.contractor_id.isnot(None),
+                GA4Property.status == "pending_admin",
+            )
+        )
+        for prop in ga4_result.scalars().all():
+            if prop.contractor_id not in contractor_ids:
+                count += 1
+                contractor_ids.add(prop.contractor_id)
+    except Exception:
+        pass
+
+    return {"count": count}
 
 
 @router.put(

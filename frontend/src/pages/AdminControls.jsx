@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Shield, Eye, EyeOff, RotateCcw, Database, LayoutDashboard, Building2, Users, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
-import { useDashboardConfig, ALL_CONTRACTORS } from '../context/DashboardConfigContext';
+import { useDashboardConfig, ALL_CONTRACTORS as SEED_CONTRACTORS } from '../context/DashboardConfigContext';
 import toast from 'react-hot-toast';
 
 const ToggleSwitch = ({ enabled, onChange, isDark }) => (
@@ -64,7 +64,9 @@ const ControlRow = ({ label, description, enabled, onChange, isDark }) => {
 
 const AdminControls = () => {
   const { isDark } = useTheme();
-  const { config, updatePipeline, updateSection, updateDivision, updateContractor, setAllContractors, resetToDefaults } = useDashboardConfig();
+  const { config, updatePipeline, updateSection, updateDivision, updateContractor, setAllContractors, resetToDefaults, allContractors } = useDashboardConfig();
+  // Use server-merged list (includes GA4-discovered) with fallback to seed data
+  const ALL_CONTRACTORS = allContractors || SEED_CONTRACTORS;
 
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
   const textSecondary = isDark ? 'text-slate-400' : 'text-slate-600';

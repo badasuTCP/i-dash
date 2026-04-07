@@ -104,7 +104,26 @@ class GoogleAdsPipeline(BasePipeline):
         if manager_id:
             client_config["login_customer_id"] = manager_id.replace("-", "")
 
-        self.client = GoogleAdsClient.load_from_dict(client_config)
+        # Log credential fingerprints for debugging OAuth issues
+        logger.info(
+            "Google Ads OAuth config: client_id=%s..., client_secret=%s..., "
+            "refresh_token=%s..., manager=%s, dev_token=%s...",
+            settings.GOOGLE_ADS_CLIENT_ID[:20] if settings.GOOGLE_ADS_CLIENT_ID else "(empty)",
+            settings.GOOGLE_ADS_CLIENT_SECRET[:8] if settings.GOOGLE_ADS_CLIENT_SECRET else "(empty)",
+            settings.GOOGLE_ADS_REFRESH_TOKEN[:15] if settings.GOOGLE_ADS_REFRESH_TOKEN else "(empty)",
+            manager_id or "(not set)",
+            settings.GOOGLE_ADS_DEVELOPER_TOKEN[:10] if settings.GOOGLE_ADS_DEVELOPER_TOKEN else "(empty)",
+        )
+
+        try:
+            self.client = GoogleAdsClient.load_from_dict(client_config)
+        except Exception as e:
+            logger.error(
+                "Google Ads client init failed — verify GOOGLE_ADS_CLIENT_ID and "
+                "GOOGLE_ADS_CLIENT_SECRET match the OAuth app that generated the refresh token. "
+                "Error: %s", e,
+            )
+            raise
 
         # Build the list of customer IDs to iterate
         self.customer_ids = self._build_customer_id_list()
@@ -160,17 +179,32 @@ class GoogleAdsPipeline(BasePipeline):
             )
 
             all_campaigns: List[Dict[str, Any]] = []
+            no_data_customers: List[str] = []
             for cid in self.customer_ids:
                 try:
                     data = await self._get_campaigns_by_adgroup(customer_id=cid)
-                    self.logger.info(
-                        f"Customer {cid}: fetched {len(data)} ad group records"
-                    )
-                    all_campaigns.extend(data)
+                    if data:
+                        self.logger.info(
+                            f"Customer {cid}: fetched {len(data)} ad group records"
+                        )
+                        all_campaigns.extend(data)
+                    else:
+                        no_data_customers.append(cid)
+                        self.logger.warning(
+                            "Customer %s: No Active Campaigns — 0 ad group records "
+                            "in date range %s to %s",
+                            cid, self.start_date, self.end_date,
+                        )
                 except GoogleAdsException as e:
                     self.logger.warning(f"Google Ads error for customer {cid}: {e}")
                 except Exception as e:
                     self.logger.warning(f"Error fetching customer {cid}: {e}")
+
+            if no_data_customers:
+                self.logger.info(
+                    "Customers with No Active Campaigns: %s",
+                    ", ".join(no_data_customers),
+                )
 
             self.logger.info(f"Total Google Ads records across all customers: {len(all_campaigns)}")
             return {"campaigns": all_campaigns}
