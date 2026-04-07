@@ -55,8 +55,12 @@ class GoogleAnalyticsPipeline(BasePipeline):
 
         self.start_date = start_date
         self.end_date = end_date
+
+        # Discovery mode: when no explicit property_id is passed as an argument.
+        # The env var GA4_PROPERTY_ID is only used as a fallback for
+        # single-property mode, NOT to disable discovery.
+        self.discovery_mode = property_id is None
         self.property_id = property_id or settings.GA4_PROPERTY_ID
-        self.discovery_mode = not self.property_id
 
         if not settings.GA4_CREDENTIALS_JSON:
             raise ValueError(

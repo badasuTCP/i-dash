@@ -1175,7 +1175,10 @@ async def get_web_analytics(
             "No GA4 data in DB for property %s (%s), range %s–%s",
             property_id, division, start_date, end_date,
         )
-        return _empty_web_analytics(start_date, end_date, division)
+        resp = _empty_web_analytics(start_date, end_date, division)
+        resp["property_id"] = property_id  # property exists, just no data yet
+        resp["awaiting_data"] = True
+        return resp
 
     # ── Aggregate scorecards ─────────────────────────────────────────
     total_sessions = sum(r.sessions for r in overview_rows)
