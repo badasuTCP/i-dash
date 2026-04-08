@@ -132,10 +132,10 @@ const SaniTredRetail = () => {
             {/* Customer Insight Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
               {[
-                { label: 'Repeat Customer Rate', value: `${customerInsights.repeatRate}%`, icon: '↻', color: '#10B981' },
-                { label: 'Avg Lifetime Value', value: `$${customerInsights.avgLifetimeValue}`, icon: '♦', color: '#3B82F6' },
-                { label: 'Net Promoter Score', value: customerInsights.nps, icon: '★', color: '#8B5CF6' },
-                { label: 'Avg Review Score', value: `${customerInsights.reviewScore}/5`, icon: '☆', color: '#F59E0B' },
+                { label: 'Repeat Customer Rate', value: `${customerInsights?.repeatRate ?? 0}%`, icon: '↻', color: '#10B981' },
+                { label: 'Avg Lifetime Value', value: `$${customerInsights?.avgLifetimeValue ?? 0}`, icon: '♦', color: '#3B82F6' },
+                { label: 'Net Promoter Score', value: customerInsights?.nps ?? 0, icon: '★', color: '#8B5CF6' },
+                { label: 'Avg Review Score', value: `${customerInsights?.reviewScore ?? 0}/5`, icon: '☆', color: '#F59E0B' },
               ].map((item, idx) => (
                 <motion.div key={idx} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + idx * 0.05 }}
                   className={`rounded-xl p-4 ${cardBg}`}>
@@ -178,22 +178,22 @@ const SaniTredRetail = () => {
                 <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Channel Split</h3>
                 <ResponsiveContainer width="100%" height={250}>
                   <PieChart>
-                    <Pie data={channelSplit} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
-                      {channelSplit.map((entry, idx) => (
-                        <Cell key={idx} fill={entry.color} />
+                    <Pie data={channelSplit || []} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
+                      {(channelSplit || []).map((entry, idx) => (
+                        <Cell key={idx} fill={entry?.color ?? '#94a3b8'} />
                       ))}
                     </Pie>
                     <Tooltip contentStyle={tooltipStyle} formatter={v => [`${v}%`]} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="space-y-2 mt-2">
-                  {channelSplit.map((ch, idx) => (
+                  {(channelSplit || []).map((ch, idx) => (
                     <div key={idx} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ch.color }} />
-                        <span className={textSecondary}>{ch.name}</span>
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ch?.color ?? '#94a3b8' }} />
+                        <span className={textSecondary}>{ch?.name ?? '—'}</span>
                       </div>
-                      <span className={`font-medium ${textPrimary}`}>{ch.value}%</span>
+                      <span className={`font-medium ${textPrimary}`}>{ch?.value ?? 0}%</span>
                     </div>
                   ))}
                 </div>
@@ -215,13 +215,13 @@ const SaniTredRetail = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {monthlyMetrics.map((row, idx) => (
+                    {(monthlyMetrics || []).map((row, idx) => (
                       <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
-                        <td className={`py-3 px-4 font-medium ${textPrimary}`}>{row.month}</td>
-                        <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.orders}</td>
-                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${row.revenue.toLocaleString()}</td>
-                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${row.avgOrderValue}</td>
-                        <td className={`text-right py-3 px-4 ${row.returns > 14 ? 'text-red-400' : textSecondary}`}>{row.returns}</td>
+                        <td className={`py-3 px-4 font-medium ${textPrimary}`}>{row?.month ?? '—'}</td>
+                        <td className={`text-right py-3 px-4 ${textSecondary}`}>{row?.orders ?? 0}</td>
+                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${(row?.revenue ?? 0).toLocaleString()}</td>
+                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${row?.avgOrderValue ?? 0}</td>
+                        <td className={`text-right py-3 px-4 ${(row?.returns ?? 0) > 14 ? 'text-red-400' : textSecondary}`}>{row?.returns ?? 0}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -249,18 +249,18 @@ const SaniTredRetail = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {topProducts.map((p, idx) => (
+                    {(topProducts || []).map((p, idx) => (
                       <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
                         <td className={`py-3 px-4 ${textSecondary}`}>
                           <span className={`w-6 h-6 rounded-full inline-flex items-center justify-center text-xs font-bold ${
                             idx === 0 ? 'bg-amber-500 text-white' : idx === 1 ? 'bg-slate-400 text-white' : idx === 2 ? 'bg-amber-700 text-white' : isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-600'
                           }`}>{idx + 1}</span>
                         </td>
-                        <td className={`py-3 px-4 font-medium ${textPrimary}`}>{p.name}</td>
-                        <td className={`text-right py-3 px-4 ${textSecondary}`}>{p.units.toLocaleString()}</td>
-                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${p.revenue.toLocaleString()}</td>
-                        <td className={`text-right py-3 px-4 font-semibold ${p.growth > 15 ? 'text-emerald-400' : textPrimary}`}>+{p.growth}%</td>
-                        <td className={`text-right py-3 px-4 ${textSecondary}`}>{p.channel}</td>
+                        <td className={`py-3 px-4 font-medium ${textPrimary}`}>{p?.name ?? '—'}</td>
+                        <td className={`text-right py-3 px-4 ${textSecondary}`}>{(p?.units ?? 0).toLocaleString()}</td>
+                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${(p?.revenue ?? 0).toLocaleString()}</td>
+                        <td className={`text-right py-3 px-4 font-semibold ${(p?.growth ?? 0) > 15 ? 'text-emerald-400' : textPrimary}`}>+{p?.growth ?? 0}%</td>
+                        <td className={`text-right py-3 px-4 ${textSecondary}`}>{p?.channel ?? '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -301,7 +301,7 @@ const SaniTredRetail = () => {
                     <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
                     <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${v.toLocaleString()}`]} />
                     <Bar dataKey="revenue" fill="#10B981" radius={[6, 6, 0, 0]}>
-                      {regionData.map((_, idx) => (
+                      {(regionData || []).map((_, idx) => (
                         <Cell key={idx} fill={['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#6B7280'][idx]} />
                       ))}
                     </Bar>
@@ -313,8 +313,8 @@ const SaniTredRetail = () => {
                 <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Regional Distribution</h3>
                 <ResponsiveContainer width="100%" height={250}>
                   <PieChart>
-                    <Pie data={regionData.map((r) => ({ name: r.region, value: r.pct }))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
-                      {regionData.map((_, idx) => (
+                    <Pie data={(regionData || []).map((r) => ({ name: r?.region ?? '—', value: r?.pct ?? 0 }))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
+                      {(regionData || []).map((_, idx) => (
                         <Cell key={idx} fill={['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#6B7280'][idx]} />
                       ))}
                     </Pie>
@@ -322,13 +322,13 @@ const SaniTredRetail = () => {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="space-y-2 mt-2">
-                  {regionData.map((r, idx) => (
+                  {(regionData || []).map((r, idx) => (
                     <div key={idx} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#6B7280'][idx] }} />
-                        <span className={textSecondary}>{r.region}</span>
+                        <span className={textSecondary}>{r?.region ?? '—'}</span>
                       </div>
-                      <span className={`font-medium ${textPrimary}`}>${(r.revenue / 1000).toFixed(0)}K ({r.pct}%)</span>
+                      <span className={`font-medium ${textPrimary}`}>${((r?.revenue ?? 0) / 1000).toFixed(0)}K ({r?.pct ?? 0}%)</span>
                     </div>
                   ))}
                 </div>
@@ -350,13 +350,13 @@ const SaniTredRetail = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {regionData.map((r, idx) => (
+                    {(regionData || []).map((r, idx) => (
                       <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
-                        <td className={`py-3 px-4 font-medium ${textPrimary}`}>{r.region}</td>
-                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${r.revenue.toLocaleString()}</td>
-                        <td className={`text-right py-3 px-4 ${textSecondary}`}>{r.orders.toLocaleString()}</td>
-                        <td className={`text-right py-3 px-4 font-semibold`} style={{ color: '#10B981' }}>{r.pct}%</td>
-                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${Math.round(r.revenue / r.orders)}</td>
+                        <td className={`py-3 px-4 font-medium ${textPrimary}`}>{r?.region ?? '—'}</td>
+                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${(r?.revenue ?? 0).toLocaleString()}</td>
+                        <td className={`text-right py-3 px-4 ${textSecondary}`}>{(r?.orders ?? 0).toLocaleString()}</td>
+                        <td className={`text-right py-3 px-4 font-semibold`} style={{ color: '#10B981' }}>{r?.pct ?? 0}%</td>
+                        <td className={`text-right py-3 px-4 ${textSecondary}`}>${r?.orders ? Math.round(r.revenue / r.orders) : 0}</td>
                       </tr>
                     ))}
                   </tbody>

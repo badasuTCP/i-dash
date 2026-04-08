@@ -293,7 +293,7 @@ async def list_pending_contractors(
 
     await _ensure_seeded(db)
 
-    # From contractors table
+    # From contractors table — only truly pending ones
     result = await db.execute(
         select(Contractor)
         .where(Contractor.status == "pending_admin")
@@ -302,7 +302,16 @@ async def list_pending_contractors(
     pending = list(result.scalars().all())
     seen_ids = {c.id for c in pending}
 
-    # From ga4_properties table
+    # Build set of contractor IDs that have already been reviewed
+    # (approved, rejected, active, inactive) — these must NOT reappear
+    reviewed_result = await db.execute(
+        select(Contractor.id).where(
+            Contractor.status.in_(["active", "inactive", "rejected"])
+        )
+    )
+    reviewed_ids = {row[0] for row in reviewed_result.fetchall()}
+
+    # From ga4_properties table — exclude already-reviewed contractors
     try:
         from app.models.ga4_property import GA4Property
 
@@ -315,9 +324,10 @@ async def list_pending_contractors(
             .order_by(GA4Property.display_name)
         )
         for prop in ga4_result.scalars().all():
-            if prop.contractor_id not in seen_ids:
+            cid = prop.contractor_id
+            if cid not in seen_ids and cid not in reviewed_ids:
                 pending.append(_ga4_prop_to_contractor(prop))
-                seen_ids.add(prop.contractor_id)
+                seen_ids.add(cid)
     except Exception as exc:
         logger.warning("Could not merge GA4 pending properties: %s", exc)
 
@@ -345,7 +355,15 @@ async def pending_count(
     contractor_ids = {c.id for c in result.scalars().all()}
     count = len(contractor_ids)
 
-    # Count from ga4_properties table (not already in contractors)
+    # Already-reviewed contractors must never reappear as pending
+    reviewed_result = await db.execute(
+        select(Contractor.id).where(
+            Contractor.status.in_(["active", "inactive", "rejected"])
+        )
+    )
+    reviewed_ids = {row[0] for row in reviewed_result.fetchall()}
+
+    # Count from ga4_properties table (exclude reviewed)
     try:
         from app.models.ga4_property import GA4Property
 
@@ -357,9 +375,10 @@ async def pending_count(
             )
         )
         for prop in ga4_result.scalars().all():
-            if prop.contractor_id not in contractor_ids:
+            cid = prop.contractor_id
+            if cid not in contractor_ids and cid not in reviewed_ids:
                 count += 1
-                contractor_ids.add(prop.contractor_id)
+                contractor_ids.add(cid)
     except Exception:
         pass
 
@@ -444,6 +463,18 @@ async def approve_contractor(
         contractor.name = body.name
     contractor.division = body.division
     contractor.updated_at = datetime.now(timezone.utc)
+
+    # Sync GA4 property status so it doesn't keep appearing as pending
+    try:
+        from app.models.ga4_property import GA4Property
+        ga4_props = await db.execute(
+            select(GA4Property).where(GA4Property.contractor_id == contractor_id)
+        )
+        for prop in ga4_props.scalars().all():
+            prop.status = contractor.status
+            prop.updated_at = datetime.now(timezone.utc)
+    except Exception as e:
+        logger.debug("Could not sync GA4 property status: %s", e)
 
     await db.commit()
     await db.refresh(contractor)
