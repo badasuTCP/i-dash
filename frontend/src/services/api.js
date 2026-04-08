@@ -1,25 +1,26 @@
 import axios from 'axios';
 
-// Auto-detect production backend URL when running on Railway or custom domain
-const PRODUCTION_API = 'https://i-dash-production.up.railway.app/api';
+// ── API URL resolution ──────────────────────────────────────────────────
+// Production backend (Railway). No trailing slash, no /api — appended below.
+const PRODUCTION_BACKEND = 'https://i-dash-production.up.railway.app';
 
 const resolveApiUrl = () => {
-  // 1. Explicit env var always wins
-  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL !== 'http://localhost:8000/api') {
-    return import.meta.env.VITE_API_URL;
-  }
-  // 2. Production: Railway domains or the custom domain
+  // 1. PRODUCTION FIRST — hostname detection is bulletproof, never wrong.
+  //    Any page served from these hosts MUST talk to the Railway backend.
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
     if (
-      host.endsWith('.up.railway.app') ||
-      host === 'dash.theconcreteprotector.com' ||
-      host === 'theconcreteprotector.com'
+      host.includes('theconcreteprotector.com') ||
+      host.endsWith('.up.railway.app')
     ) {
-      return PRODUCTION_API;
+      return `${PRODUCTION_BACKEND}/api`;
     }
   }
-  // 3. Fallback for local dev
+  // 2. Explicit env var for staging / preview deploys
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  // 3. Local dev fallback
   return 'http://localhost:8000/api';
 };
 

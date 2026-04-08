@@ -50,13 +50,25 @@ class Settings(BaseSettings):
         description="Allowed origins for CORS",
     )
 
+    # Origins that MUST always be allowed regardless of env var
+    _REQUIRED_ORIGINS = {
+        "https://dash.theconcreteprotector.com",
+        "https://strong-vitality-production-371a.up.railway.app",
+    }
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v):
-        """Accept both comma-separated string and list."""
+        """Accept both comma-separated string and list, always include production origins."""
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+            origins = [origin.strip() for origin in v.split(",") if origin.strip()]
+        else:
+            origins = list(v) if v else []
+        # Guarantee production domains are never accidentally excluded
+        for required in cls._REQUIRED_ORIGINS:
+            if required not in origins:
+                origins.append(required)
+        return origins
 
     # HubSpot API configuration
     HUBSPOT_API_KEY: str = Field(
