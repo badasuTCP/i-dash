@@ -60,10 +60,16 @@ class HubSpotPipeline(BasePipeline):
         self.start_date = start_date
         self.end_date = end_date
 
-        if not settings.HUBSPOT_API_KEY:
-            raise ValueError("HUBSPOT_API_KEY not configured")
+        # Accept either HUBSPOT_ACCESS_TOKEN (preferred) or HUBSPOT_API_KEY
+        hubspot_token = (
+            getattr(settings, "HUBSPOT_ACCESS_TOKEN", "") or settings.HUBSPOT_API_KEY
+        )
+        if not hubspot_token:
+            raise ValueError(
+                "HubSpot not configured — set HUBSPOT_ACCESS_TOKEN or HUBSPOT_API_KEY"
+            )
 
-        self.client = Client(access_token=settings.HUBSPOT_API_KEY)
+        self.client = Client(access_token=hubspot_token)
 
     async def extract(self) -> Dict[str, Any]:
         """
@@ -120,155 +126,55 @@ class HubSpotPipeline(BasePipeline):
             self.logger.error(f"Error extracting HubSpot data: {str(e)}")
             raise
 
-    async def _get_contacts(self) -> List[SimplePublicObject]:
-        """Fetch all contacts from HubSpot."""
-        contacts = []
+    async def _paginate(self, api, properties: List[str]) -> List[SimplePublicObject]:
+        """Generic paginator for HubSpot CRM basic_api.get_page()."""
+        results = []
         try:
-            contacts_api = self.client.crm.contacts
-            all_contacts = contacts_api.get_page(
-                limit=100,
-                properties=["hs_lead_status", "createdate", "lifecyclestage"],
-            )
-
-            # Handle pagination
-            while all_contacts:
-                contacts.extend(all_contacts.results or [])
-                if all_contacts.paging and all_contacts.paging.next:
-                    all_contacts = contacts_api.get_page(
+            page = api.basic_api.get_page(limit=100, properties=properties)
+            while page:
+                results.extend(page.results or [])
+                if page.paging and page.paging.next:
+                    page = api.basic_api.get_page(
                         limit=100,
-                        after=all_contacts.paging.next.after,
-                        properties=["hs_lead_status", "createdate", "lifecyclestage"],
+                        after=page.paging.next.after,
+                        properties=properties,
                     )
                 else:
                     break
-
         except Exception as e:
-            self.logger.warning(f"Error fetching contacts: {str(e)}")
+            self.logger.warning(f"Error paginating {api}: {str(e)}")
+        return results
 
-        return contacts
+    async def _get_contacts(self) -> List[SimplePublicObject]:
+        return await self._paginate(
+            self.client.crm.contacts,
+            ["hs_lead_status", "createdate", "lifecyclestage"],
+        )
 
     async def _get_deals(self) -> List[SimplePublicObject]:
-        """Fetch all deals from HubSpot."""
-        deals = []
-        try:
-            deals_api = self.client.crm.deals
-            all_deals = deals_api.get_page(
-                limit=100,
-                properties=[
-                    "dealname",
-                    "dealstage",
-                    "amount",
-                    "closedate",
-                    "hs_analytics_num_visits",
-                    "createdate",
-                ],
-            )
-
-            # Handle pagination
-            while all_deals:
-                deals.extend(all_deals.results or [])
-                if all_deals.paging and all_deals.paging.next:
-                    all_deals = deals_api.get_page(
-                        limit=100,
-                        after=all_deals.paging.next.after,
-                        properties=[
-                            "dealname",
-                            "dealstage",
-                            "amount",
-                            "closedate",
-                            "hs_analytics_num_visits",
-                            "createdate",
-                        ],
-                    )
-                else:
-                    break
-
-        except Exception as e:
-            self.logger.warning(f"Error fetching deals: {str(e)}")
-
-        return deals
+        return await self._paginate(
+            self.client.crm.deals,
+            ["dealname", "dealstage", "amount", "closedate",
+             "hs_analytics_num_visits", "createdate"],
+        )
 
     async def _get_meetings(self) -> List[SimplePublicObject]:
-        """Fetch all meetings from HubSpot."""
-        meetings = []
-        try:
-            engagements_api = self.client.crm.objects.meetings
-            all_meetings = engagements_api.get_page(
-                limit=100,
-                properties=["hs_timestamp", "engagement_type"],
-            )
-
-            # Handle pagination
-            while all_meetings:
-                meetings.extend(all_meetings.results or [])
-                if all_meetings.paging and all_meetings.paging.next:
-                    all_meetings = engagements_api.get_page(
-                        limit=100,
-                        after=all_meetings.paging.next.after,
-                        properties=["hs_timestamp", "engagement_type"],
-                    )
-                else:
-                    break
-
-        except Exception as e:
-            self.logger.warning(f"Error fetching meetings: {str(e)}")
-
-        return meetings
+        return await self._paginate(
+            self.client.crm.objects.meetings,
+            ["hs_timestamp", "engagement_type"],
+        )
 
     async def _get_emails(self) -> List[SimplePublicObject]:
-        """Fetch all emails from HubSpot."""
-        emails = []
-        try:
-            # Using engagements endpoint for emails
-            engagements_api = self.client.crm.objects.emails
-            all_emails = engagements_api.get_page(
-                limit=100,
-                properties=["hs_timestamp", "engagement_type"],
-            )
-
-            # Handle pagination
-            while all_emails:
-                emails.extend(all_emails.results or [])
-                if all_emails.paging and all_emails.paging.next:
-                    all_emails = engagements_api.get_page(
-                        limit=100,
-                        after=all_emails.paging.next.after,
-                        properties=["hs_timestamp", "engagement_type"],
-                    )
-                else:
-                    break
-
-        except Exception as e:
-            self.logger.warning(f"Error fetching emails: {str(e)}")
-
-        return emails
+        return await self._paginate(
+            self.client.crm.objects.emails,
+            ["hs_timestamp", "engagement_type"],
+        )
 
     async def _get_tasks(self) -> List[SimplePublicObject]:
-        """Fetch all tasks from HubSpot."""
-        tasks = []
-        try:
-            tasks_api = self.client.crm.objects.tasks
-            all_tasks = tasks_api.get_page(
-                limit=100,
-                properties=["hs_task_status", "hs_timestamp"],
-            )
-
-            # Handle pagination
-            while all_tasks:
-                tasks.extend(all_tasks.results or [])
-                if all_tasks.paging and all_tasks.paging.next:
-                    all_tasks = tasks_api.get_page(
-                        limit=100,
-                        after=all_tasks.paging.next.after,
-                        properties=["hs_task_status", "hs_timestamp"],
-                    )
-                else:
-                    break
-
-        except Exception as e:
-            self.logger.warning(f"Error fetching tasks: {str(e)}")
-
-        return tasks
+        return await self._paginate(
+            self.client.crm.objects.tasks,
+            ["hs_task_status", "hs_timestamp"],
+        )
 
     async def transform(self, raw_data: Dict[str, Any]) -> List[HubSpotMetric]:
         """

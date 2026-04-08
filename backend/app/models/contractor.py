@@ -28,9 +28,10 @@ class Contractor(Base):
         name: Human-readable display name.
         division: Parent division ('i-bos', 'cp', 'sanitred').
         active: Whether the contractor is visible on dashboards.
-        status: Lifecycle status — 'active', 'inactive', or 'pending_admin'.
+        status: Lifecycle status — 'active', 'inactive', 'pending_admin', or 'rejected'.
                 Contractors discovered by the Meta pipeline start as
                 'pending_admin' and must be approved by a Super Admin.
+                Rejected contractors are kept for audit — never deleted.
         meta_account_id: Meta Business API ad-account ID (e.g. 'act_123456').
                          NULL for contractors not yet linked to a Meta account.
         updated_at: Last time any field was changed.

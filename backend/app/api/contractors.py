@@ -68,8 +68,9 @@ class BulkVisibilityUpdate(BaseModel):
 
 
 class ApproveContractorUpdate(BaseModel):
-    """Body for approving a pending contractor (sets status → active)."""
+    """Body for approving or rejecting a pending contractor."""
     active: bool = True
+    reject: bool = False  # Set True to reject instead of approve
     name: Optional[str] = None  # Allow admin to rename on approval
     division: str = "i-bos"
 
@@ -365,6 +366,37 @@ async def pending_count(
     return {"count": count}
 
 
+@router.get(
+    "/rejected",
+    response_model=List[ContractorResponse],
+    summary="List rejected contractors (audit trail)",
+)
+async def list_rejected_contractors(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> List[ContractorResponse]:
+    """
+    Return contractors that were rejected by an admin.
+    These are never deleted — kept for audit and recovery.
+    An admin can re-approve a rejected contractor via the /approve endpoint.
+    """
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can view rejected contractors.",
+        )
+
+    await _ensure_seeded(db)
+
+    result = await db.execute(
+        select(Contractor)
+        .where(Contractor.status == "rejected")
+        .order_by(Contractor.updated_at.desc())
+    )
+    rejected = list(result.scalars().all())
+    return [ContractorResponse.model_validate(row) for row in rejected]
+
+
 @router.put(
     "/{contractor_id}/approve",
     response_model=ContractorResponse,
@@ -400,8 +432,14 @@ async def approve_contractor(
             detail=f"Contractor '{contractor_id}' not found.",
         )
 
-    contractor.active = body.active
-    contractor.status = "active" if body.active else "inactive"
+    if body.reject:
+        # Reject: keep the record for audit, mark as rejected
+        contractor.active = False
+        contractor.status = "rejected"
+    else:
+        contractor.active = body.active
+        contractor.status = "active" if body.active else "inactive"
+
     if body.name:
         contractor.name = body.name
     contractor.division = body.division
@@ -411,10 +449,10 @@ async def approve_contractor(
     await db.refresh(contractor)
 
     logger.info(
-        "User %s approved contractor %s (active=%s, status=%s)",
+        "User %s %s contractor %s (status=%s)",
         current_user.email,
+        "rejected" if body.reject else "approved",
         contractor_id,
-        body.active,
         contractor.status,
     )
     return ContractorResponse.model_validate(contractor)

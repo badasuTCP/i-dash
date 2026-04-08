@@ -487,8 +487,30 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
 
         result["discovered"] = len(meta_accounts)
 
-        # 2. Compare against DB
+        # 2. Compare against DB and log to discovery_audit
         async with async_session_maker() as session:
+            # Log every discovered account to the audit table
+            try:
+                from app.models.discovery_audit import DiscoveryAudit
+                for acct in meta_accounts:
+                    existing_audit = await session.execute(
+                        select(DiscoveryAudit).where(
+                            DiscoveryAudit.platform == "meta",
+                            DiscoveryAudit.account_id == acct["id"],
+                        )
+                    )
+                    if not existing_audit.scalar_one_or_none():
+                        session.add(DiscoveryAudit(
+                            platform="meta",
+                            account_id=acct["id"],
+                            account_name=acct["name"],
+                            portfolio=acct.get("portfolio", ""),
+                            status="discovered",
+                        ))
+                await session.flush()
+            except Exception as e:
+                logger.debug("Discovery audit logging skipped: %s", e)
+
             # Get all existing meta_account_ids
             db_result = await session.execute(select(Contractor))
             existing = db_result.scalars().all()

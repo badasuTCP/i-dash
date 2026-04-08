@@ -5,6 +5,7 @@ Exports all database models for easy importing.
 """
 
 from app.models.contractor import Contractor
+from app.models.discovery_audit import DiscoveryAudit
 from app.models.ga4_property import GA4Property
 from app.models.metrics import (
     DashboardSnapshot,
@@ -19,6 +20,7 @@ from app.models.user import User, UserDepartment, UserRole
 
 __all__ = [
     "Contractor",
+    "DiscoveryAudit",
     "GA4Property",
     "User",
     "UserRole",
