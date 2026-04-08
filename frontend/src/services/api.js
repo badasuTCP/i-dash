@@ -1,14 +1,23 @@
 import axios from 'axios';
 
-// Auto-detect production backend URL when running on Railway
+// Auto-detect production backend URL when running on Railway or custom domain
+const PRODUCTION_API = 'https://i-dash-production.up.railway.app/api';
+
 const resolveApiUrl = () => {
   // 1. Explicit env var always wins
   if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL !== 'http://localhost:8000/api') {
     return import.meta.env.VITE_API_URL;
   }
-  // 2. If running on Railway (*.up.railway.app), use the production backend
-  if (typeof window !== 'undefined' && window.location.hostname.endsWith('.up.railway.app')) {
-    return 'https://i-dash-production.up.railway.app/api';
+  // 2. Production: Railway domains or the custom domain
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (
+      host.endsWith('.up.railway.app') ||
+      host === 'dash.theconcreteprotector.com' ||
+      host === 'theconcreteprotector.com'
+    ) {
+      return PRODUCTION_API;
+    }
   }
   // 3. Fallback for local dev
   return 'http://localhost:8000/api';
