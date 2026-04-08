@@ -476,6 +476,32 @@ async def approve_contractor(
     except Exception as e:
         logger.debug("Could not sync GA4 property status: %s", e)
 
+    # Persist decision to discovery_audit for permanent audit trail
+    try:
+        from app.models.discovery_audit import DiscoveryAudit
+        audit_status = "rejected" if body.reject else "approved"
+        # Check if entry exists
+        existing = await db.execute(
+            select(DiscoveryAudit).where(
+                DiscoveryAudit.account_id == (contractor.meta_account_id or contractor_id),
+            )
+        )
+        audit_row = existing.scalar_one_or_none()
+        if audit_row:
+            audit_row.status = audit_status
+            audit_row.updated_at = datetime.now(timezone.utc)
+        else:
+            db.add(DiscoveryAudit(
+                platform="meta" if contractor.meta_account_id else "ga4",
+                account_id=contractor.meta_account_id or contractor_id,
+                account_name=contractor.name,
+                division=contractor.division,
+                status=audit_status,
+                contractor_id=contractor_id,
+            ))
+    except Exception as e:
+        logger.debug("Could not write discovery audit: %s", e)
+
     await db.commit()
     await db.refresh(contractor)
 

@@ -19,6 +19,23 @@ from app.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
+# ── Custom closed-won / closed-lost stage IDs across all pipelines ────────
+# These are fetched from HubSpot Pipeline settings — numeric IDs are custom stages.
+CLOSED_WON_STAGES = {
+    "closedwon",           # default HubSpot slug
+    "1097046920",          # BDR #1 SALES PIPELINE → Closed Won
+    "1330496638",          # DEAL ?: Delight Customer → Closed Won
+    "1330254373",          # DEAL ?: Remote Training Deal → Closed Won
+    "1099300428",          # Ecommerce Pipeline → Completed
+    "1063609686",          # DealerPro Onboarding → Initial Invoice Paid
+}
+CLOSED_LOST_STAGES = {
+    "closedlost",          # default HubSpot slug
+    "1097046921",          # BDR #1 SALES PIPELINE → Closed Lost
+    "1330254374",          # DEAL ?: Remote Training Deal → Closed Lost
+    "1099300429",          # Ecommerce Pipeline → Refunded/Cancelled
+}
+
 
 class HubSpotPipeline(BasePipeline):
     """
@@ -230,11 +247,11 @@ class HubSpotPipeline(BasePipeline):
                         if date_key in metrics_by_date:
                             metrics_by_date[date_key]["deals_created"] += 1
 
-                    # Check deal stage
-                    stage = self._extract_property(deal, "dealstage")
+                    # Check deal stage against custom pipeline stage IDs
+                    stage = self._extract_property(deal, "dealstage") or ""
                     close_date = self._extract_date(deal, "closedate")
 
-                    if stage == "closedwon" and close_date:
+                    if stage in CLOSED_WON_STAGES and close_date:
                         if self.start_date <= close_date <= self.end_date:
                             date_key = close_date.isoformat()
                             if date_key in metrics_by_date:
@@ -247,14 +264,14 @@ class HubSpotPipeline(BasePipeline):
                                         amount
                                     )
 
-                    elif stage == "closedlost" and close_date:
+                    elif stage in CLOSED_LOST_STAGES and close_date:
                         if self.start_date <= close_date <= self.end_date:
                             date_key = close_date.isoformat()
                             if date_key in metrics_by_date:
                                 metrics_by_date[date_key]["deals_lost"] += 1
 
                     # Pipeline value for open deals
-                    elif stage not in ["closedwon", "closedlost"]:
+                    elif stage not in CLOSED_WON_STAGES and stage not in CLOSED_LOST_STAGES:
                         amount = self._extract_property_float(deal, "amount")
                         if amount and close_date:
                             if self.start_date <= close_date <= self.end_date:

@@ -520,6 +520,19 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
             }
             existing_slugs: Set[str] = {c.id for c in existing}
 
+            # Build set of account_ids already approved/rejected in discovery_audit
+            # — these must NEVER be re-inserted as pending
+            already_decided: Set[str] = set()
+            try:
+                decided_result = await session.execute(
+                    select(DiscoveryAudit.account_id).where(
+                        DiscoveryAudit.status.in_(["approved", "rejected"])
+                    )
+                )
+                already_decided = {row[0] for row in decided_result.fetchall()}
+            except Exception:
+                pass
+
             new_count = 0
             now = datetime.now(timezone.utc)
 
@@ -527,8 +540,8 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                 meta_id = acct["id"]
                 meta_name = acct["name"]
 
-                # Already tracked?
-                if meta_id in existing_meta_ids:
+                # Already tracked or already decided (approved/rejected)?
+                if meta_id in existing_meta_ids or meta_id in already_decided:
                     continue
 
                 # Generate a unique slug
