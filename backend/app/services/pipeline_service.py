@@ -56,7 +56,7 @@ class PipelineService:
             ("meta_ads", lambda: MetaAdsPipeline()),
             ("google_ads", lambda: GoogleAdsPipeline()),
             ("google_analytics", lambda: GoogleAnalyticsPipeline()),
-            ("google_sheets", lambda: GoogleSheetsPipeline(sheet_id="")),
+            ("google_sheets", lambda: GoogleSheetsPipeline()),
             ("snapshot", lambda: SnapshotPipeline()),
         ]
 

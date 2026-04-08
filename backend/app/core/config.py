@@ -131,6 +131,10 @@ class Settings(BaseSettings):
         default="",
         description="GA4 property ID for I-BOS website",
     )
+    GA4_PROPERTY_ID_IBOS_SLG: str = Field(
+        default="",
+        description="GA4 property ID for I-BOS SLG contractor website",
+    )
 
     # Meta Ads - per division (optional ad account IDs)
     META_AD_ACCOUNT_ID_CP: str = Field(
@@ -163,11 +167,23 @@ class Settings(BaseSettings):
         default="",
         description="Google Ads customer ID for I-BOS campaigns (comma-separated for multiple)",
     )
+    GOOGLE_ADS_CUSTOMER_ID_IBOS_2: str = Field(
+        default="2957400868",
+        description="Google Ads second customer ID for I-BOS campaigns (CID 2957400868)",
+    )
 
     # Google Sheets configuration
     GOOGLE_SHEETS_CREDENTIALS_FILE: str = Field(
         default="",
         description="Google Sheets service account credentials (JSON string or file path)",
+    )
+    SHEET_ID_A: str = Field(
+        default="",
+        description="Google Sheets ID for Sheet A (retail/contractor heuristic pipeline)",
+    )
+    SHEET_ID_B: str = Field(
+        default="",
+        description="Google Sheets ID for Sheet B (retail/contractor heuristic pipeline)",
     )
 
     # Groq API configuration

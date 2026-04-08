@@ -144,6 +144,7 @@ class GoogleAdsPipeline(BasePipeline):
         for field in (
             "GOOGLE_ADS_CUSTOMER_ID_SANITRED",
             "GOOGLE_ADS_CUSTOMER_ID_IBOS",
+            "GOOGLE_ADS_CUSTOMER_ID_IBOS_2",
             "GOOGLE_ADS_CUSTOMER_ID_CP",
         ):
             val = getattr(settings, field, "")

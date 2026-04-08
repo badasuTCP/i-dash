@@ -20,82 +20,36 @@ const CHANNELS = [
   { id: 'phone', name: 'Phone Orders', color: '#3B82F6' },
 ];
 
-const retailData = {
+// Zero-fallback: show $0.00 / empty state when no 2026 live data exists
+const ZERO_FALLBACK = {
   scorecards: [
-    { label: 'Total Retail Revenue', value: 2070000, change: 11.2, color: 'emerald', format: 'currency', sparkData: [1650000, 1720000, 1790000, 1860000, 1930000, 2000000, 2070000] },
-    { label: 'Online Orders', value: 3180, change: 18.4, color: 'blue', format: 'number', sparkData: [2200, 2400, 2600, 2800, 2950, 3080, 3180] },
-    { label: 'Phone Orders', value: 1100, change: 4.2, color: 'violet', format: 'number', sparkData: [980, 1000, 1020, 1040, 1060, 1080, 1100] },
-    { label: 'Avg Order Value', value: 483, change: 6.8, color: 'amber', format: 'currency', sparkData: [420, 435, 445, 455, 465, 475, 483] },
+    { label: 'Total Retail Revenue', value: 0, change: 0, color: 'emerald', format: 'currency', sparkData: [] },
+    { label: 'Online Orders',        value: 0, change: 0, color: 'blue',    format: 'number',   sparkData: [] },
+    { label: 'Phone Orders',         value: 0, change: 0, color: 'violet',  format: 'number',   sparkData: [] },
+    { label: 'Avg Order Value',      value: 0, change: 0, color: 'amber',   format: 'currency', sparkData: [] },
   ],
-  channelRevenue: [
-    { month: 'Jul', direct: 145000, amazon: 52000, homedepot: 48000, phone: 65000 },
-    { month: 'Aug', direct: 152000, amazon: 58000, homedepot: 50000, phone: 65000 },
-    { month: 'Sep', direct: 160000, amazon: 62000, homedepot: 52000, phone: 66000 },
-    { month: 'Oct', direct: 172000, amazon: 68000, homedepot: 55000, phone: 70000 },
-    { month: 'Nov', direct: 180000, amazon: 75000, homedepot: 58000, phone: 67000 },
-    { month: 'Dec', direct: 205000, amazon: 85000, homedepot: 62000, phone: 68000 },
-    { month: 'Jan', direct: 160000, amazon: 60000, homedepot: 55000, phone: 70000 },
-    { month: 'Feb', direct: 168000, amazon: 65000, homedepot: 57000, phone: 70000 },
-    { month: 'Mar', direct: 185000, amazon: 72000, homedepot: 60000, phone: 78000 },
-  ],
-  channelSplit: [
-    { name: 'Direct / Website', value: 48, color: '#10B981' },
-    { name: 'Amazon', value: 22, color: '#FF9900' },
-    { name: 'Home Depot', value: 15, color: '#F26522' },
-    { name: 'Phone Orders', value: 15, color: '#3B82F6' },
-  ],
-  topProducts: [
-    { name: 'Sani-Tred PermaFlex', units: 2840, revenue: 480000, growth: 14.2, channel: 'Direct' },
-    { name: 'TAV Liquid Rubber', units: 2100, revenue: 380000, growth: 8.5, channel: 'Multi' },
-    { name: 'PermaSeal Coating', units: 1650, revenue: 310000, growth: 12.1, channel: 'Direct' },
-    { name: 'Basement Waterproof Kit', units: 1200, revenue: 250000, growth: 22.4, channel: 'Amazon' },
-    { name: 'PermaFlex Primer', units: 1450, revenue: 180000, growth: 5.8, channel: 'Direct' },
-    { name: 'Crack Repair System', units: 980, revenue: 145000, growth: 18.6, channel: 'Home Depot' },
-    { name: 'Moisture Barrier Kit', units: 820, revenue: 118000, growth: 28.3, channel: 'Amazon' },
-    { name: 'Floor Coating System', units: 680, revenue: 98000, growth: 15.2, channel: 'Direct' },
-  ],
-  customerInsights: {
-    repeatRate: 34,
-    avgLifetimeValue: 1420,
-    nps: 72,
-    reviewScore: 4.6,
-  },
-  monthlyMetrics: [
-    { month: 'Jul', orders: 420, revenue: 310000, returns: 14, avgOrderValue: 738 },
-    { month: 'Aug', orders: 445, revenue: 325000, returns: 12, avgOrderValue: 730 },
-    { month: 'Sep', orders: 465, revenue: 340000, returns: 15, avgOrderValue: 731 },
-    { month: 'Oct', orders: 510, revenue: 365000, returns: 11, avgOrderValue: 716 },
-    { month: 'Nov', orders: 525, revenue: 380000, returns: 13, avgOrderValue: 724 },
-    { month: 'Dec', orders: 580, revenue: 420000, returns: 16, avgOrderValue: 724 },
-    { month: 'Jan', orders: 470, revenue: 345000, returns: 10, avgOrderValue: 734 },
-    { month: 'Feb', orders: 490, revenue: 360000, returns: 11, avgOrderValue: 735 },
-    { month: 'Mar', orders: 535, revenue: 395000, returns: 12, avgOrderValue: 738 },
-  ],
-  regionData: [
-    { region: 'Southeast', revenue: 520000, orders: 1280, pct: 25 },
-    { region: 'Northeast', revenue: 415000, orders: 1020, pct: 20 },
-    { region: 'Midwest', revenue: 395000, orders: 960, pct: 19 },
-    { region: 'Southwest', revenue: 350000, orders: 850, pct: 17 },
-    { region: 'West Coast', revenue: 248000, orders: 610, pct: 12 },
-    { region: 'Other', revenue: 142000, orders: 360, pct: 7 },
-  ],
-};
-
-// Static fallback data used when no live pipeline data is available
-const STATIC_FALLBACK = {
-  scorecards: retailData.scorecards,
-  channelRevenue: retailData.channelRevenue,
-  topProducts: retailData.topProducts,
-  monthlyMetrics: retailData.monthlyMetrics,
-  channelSplit: retailData.channelSplit,
-  customerInsights: retailData.customerInsights,
-  regionData: retailData.regionData,
+  channelRevenue: [],
+  topProducts: [],
+  monthlyMetrics: [],
+  channelSplit: [],
+  customerInsights: { repeatRate: 0, avgLifetimeValue: 0, nps: 0, reviewScore: 0 },
+  regionData: [],
 };
 
 const SaniTredRetail = () => {
   const { isDark } = useTheme();
   const { isFiltered, clearFilter } = useDashboardDateFilter();
-  const { hasLiveData, loading: retailLoading, scorecards: liveScoreCards } = useRetailData('sanitred', STATIC_FALLBACK);
+  const {
+    hasLiveData,
+    loading: retailLoading,
+    scorecards: liveScoreCards,
+    channelRevenue,
+    topProducts,
+    monthlyMetrics,
+    channelSplit,
+    customerInsights,
+    regionData,
+  } = useRetailData('sanitred', ZERO_FALLBACK);
   const [activeView, setActiveView] = useState('overview');
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
@@ -178,10 +132,10 @@ const SaniTredRetail = () => {
             {/* Customer Insight Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
               {[
-                { label: 'Repeat Customer Rate', value: `${retailData.customerInsights.repeatRate}%`, icon: '↻', color: '#10B981' },
-                { label: 'Avg Lifetime Value', value: `$${retailData.customerInsights.avgLifetimeValue}`, icon: '♦', color: '#3B82F6' },
-                { label: 'Net Promoter Score', value: retailData.customerInsights.nps, icon: '★', color: '#8B5CF6' },
-                { label: 'Avg Review Score', value: `${retailData.customerInsights.reviewScore}/5`, icon: '☆', color: '#F59E0B' },
+                { label: 'Repeat Customer Rate', value: `${customerInsights.repeatRate}%`, icon: '↻', color: '#10B981' },
+                { label: 'Avg Lifetime Value', value: `$${customerInsights.avgLifetimeValue}`, icon: '♦', color: '#3B82F6' },
+                { label: 'Net Promoter Score', value: customerInsights.nps, icon: '★', color: '#8B5CF6' },
+                { label: 'Avg Review Score', value: `${customerInsights.reviewScore}/5`, icon: '☆', color: '#F59E0B' },
               ].map((item, idx) => (
                 <motion.div key={idx} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + idx * 0.05 }}
                   className={`rounded-xl p-4 ${cardBg}`}>
@@ -199,7 +153,7 @@ const SaniTredRetail = () => {
               <motion.div className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
                 <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Revenue by Channel (Monthly)</h3>
                 <ResponsiveContainer width="100%" height={320}>
-                  <AreaChart data={retailData.channelRevenue}>
+                  <AreaChart data={channelRevenue}>
                     <defs>
                       {CHANNELS.map((ch) => (
                         <linearGradient key={ch.id} id={`grad-${ch.id}`} x1="0" y1="0" x2="0" y2="1">
@@ -224,8 +178,8 @@ const SaniTredRetail = () => {
                 <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Channel Split</h3>
                 <ResponsiveContainer width="100%" height={250}>
                   <PieChart>
-                    <Pie data={retailData.channelSplit} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
-                      {retailData.channelSplit.map((entry, idx) => (
+                    <Pie data={channelSplit} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
+                      {channelSplit.map((entry, idx) => (
                         <Cell key={idx} fill={entry.color} />
                       ))}
                     </Pie>
@@ -233,7 +187,7 @@ const SaniTredRetail = () => {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="space-y-2 mt-2">
-                  {retailData.channelSplit.map((ch, idx) => (
+                  {channelSplit.map((ch, idx) => (
                     <div key={idx} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ch.color }} />
@@ -261,7 +215,7 @@ const SaniTredRetail = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {retailData.monthlyMetrics.map((row, idx) => (
+                    {monthlyMetrics.map((row, idx) => (
                       <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
                         <td className={`py-3 px-4 font-medium ${textPrimary}`}>{row.month}</td>
                         <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.orders}</td>
@@ -295,7 +249,7 @@ const SaniTredRetail = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {retailData.topProducts.map((p, idx) => (
+                    {topProducts.map((p, idx) => (
                       <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
                         <td className={`py-3 px-4 ${textSecondary}`}>
                           <span className={`w-6 h-6 rounded-full inline-flex items-center justify-center text-xs font-bold ${
@@ -318,13 +272,13 @@ const SaniTredRetail = () => {
             <div className={`rounded-xl p-6 ${cardBg}`}>
               <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Revenue by Product</h3>
               <ResponsiveContainer width="100%" height={350}>
-                <BarChart data={retailData.topProducts} layout="vertical">
+                <BarChart data={topProducts} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
                   <XAxis type="number" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
                   <YAxis dataKey="name" type="category" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} width={160} tick={{ fontSize: 11 }} />
                   <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${v.toLocaleString()}`]} />
                   <Bar dataKey="revenue" fill="#10B981" radius={[0, 6, 6, 0]}>
-                    {retailData.topProducts.map((_, idx) => (
+                    {topProducts.map((_, idx) => (
                       <Cell key={idx} fill={idx < 3 ? '#10B981' : idx < 5 ? '#3B82F6' : '#8B5CF6'} />
                     ))}
                   </Bar>
@@ -341,13 +295,13 @@ const SaniTredRetail = () => {
               <div className={`rounded-xl p-6 ${cardBg}`}>
                 <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Revenue by Region</h3>
                 <ResponsiveContainer width="100%" height={320}>
-                  <BarChart data={retailData.regionData}>
+                  <BarChart data={regionData}>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
                     <XAxis dataKey="region" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tick={{ fontSize: 11 }} />
                     <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
                     <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${v.toLocaleString()}`]} />
                     <Bar dataKey="revenue" fill="#10B981" radius={[6, 6, 0, 0]}>
-                      {retailData.regionData.map((_, idx) => (
+                      {regionData.map((_, idx) => (
                         <Cell key={idx} fill={['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#6B7280'][idx]} />
                       ))}
                     </Bar>
@@ -359,8 +313,8 @@ const SaniTredRetail = () => {
                 <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Regional Distribution</h3>
                 <ResponsiveContainer width="100%" height={250}>
                   <PieChart>
-                    <Pie data={retailData.regionData.map((r) => ({ name: r.region, value: r.pct }))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
-                      {retailData.regionData.map((_, idx) => (
+                    <Pie data={regionData.map((r) => ({ name: r.region, value: r.pct }))} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
+                      {regionData.map((_, idx) => (
                         <Cell key={idx} fill={['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#6B7280'][idx]} />
                       ))}
                     </Pie>
@@ -368,7 +322,7 @@ const SaniTredRetail = () => {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="space-y-2 mt-2">
-                  {retailData.regionData.map((r, idx) => (
+                  {regionData.map((r, idx) => (
                     <div key={idx} className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-2">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#6B7280'][idx] }} />
@@ -396,7 +350,7 @@ const SaniTredRetail = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {retailData.regionData.map((r, idx) => (
+                    {regionData.map((r, idx) => (
                       <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
                         <td className={`py-3 px-4 font-medium ${textPrimary}`}>{r.region}</td>
                         <td className={`text-right py-3 px-4 ${textSecondary}`}>${r.revenue.toLocaleString()}</td>

@@ -1,85 +1,48 @@
 import React, { useMemo } from 'react';
 import MarketingDashboardTemplate from '../templates/MarketingDashboard';
 import { useDashboardConfig } from '../../context/DashboardConfigContext';
+import { useMarketingData } from '../../hooks/useMarketingData';
 
-// ── All contractors with marketing data (paid + organic) ────────────────────
-const ALL_PERFORMANCE_SUMMARY = [
-  // ── Paid media contractors ──
-  { division: 'Beckley Concrete Decor',     spend: '$37.7K', revenue: '$392.5K', roas: '10.4x',   conversions: '290', cpl: '$130.17', contractorId: 'beckley' },
-  { division: 'Tailored Concrete Coatings', spend: '$15.9K', revenue: '—',       roas: '—',       conversions: '275', cpl: '$57.77',  contractorId: 'tailored' },
-  { division: 'SLG Concrete Coatings',      spend: '$11.3K', revenue: '$47.8K',  roas: '4.2x',    conversions: '42',  cpl: '$269.72', contractorId: 'slg' },
-  { division: 'Columbus Concrete Coatings', spend: '$5.2K',  revenue: '$113.7K', roas: '21.9x',   conversions: '10',  cpl: '$518.00', contractorId: 'columbus' },
-  { division: 'TVS Coatings',               spend: '$4.5K',  revenue: '—',       roas: '—',       conversions: '16',  cpl: '$281.36', contractorId: 'tvs' },
-  // ── Organic-only contractors ──
-  { division: 'Eminence',                   spend: 'Organic', revenue: '$330.8K', roas: 'Organic', conversions: '3',   cpl: 'Organic', contractorId: 'eminence' },
-  { division: 'PermaSurface',               spend: 'Organic', revenue: '$156.3K', roas: 'Organic', conversions: '2',   cpl: 'Organic', contractorId: 'permasurface' },
-  { division: 'Diamond Topcoat',            spend: 'Organic', revenue: '$113.7K', roas: 'Organic', conversions: '89',  cpl: 'Organic', contractorId: 'diamond' },
-  { division: 'Floor Warriors',             spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'floorwarriors' },
-  { division: 'Graber Design Coatings',     spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'graber' },
-  { division: 'Decorative Concrete Idaho',  spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'decorative' },
-  { division: 'Reeves Concrete Solutions',  spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'reeves' },
-  { division: 'Elite Pool Coatings',        spend: 'Organic', revenue: '—',       roas: '—',       conversions: '0',   cpl: 'Organic', contractorId: 'elitepool' },
-];
-
-// ── Per-period metrics for seamless scorecard filtering ──────────────────────
-const METRICS_PER_PERIOD = {
-  'Q2 2025': { spend: 15200,  leads: 168, cpl: 90.48  },
-  'Q3 2025': { spend: 14800,  leads: 185, cpl: 80.00  },
-  'Q4 2025': { spend: 18200,  leads: 182, cpl: 100.00 },
-  'Q1 2026': { spend: 26446,  leads: 192, cpl: 137.74 },
+// Zero-fallback: show $0.00 / empty state when no 2026 live data exists
+const ZERO_FALLBACK = {
+  scorecards: [
+    { label: 'Marketing Spend',      value: 0, change: 0, color: 'amber',   format: 'currency', metricKey: 'spend',  sparkData: [] },
+    { label: 'Total Clicks',         value: 0, change: 0, color: 'blue',    format: 'number',                        sparkData: [] },
+    { label: 'Total Distinct Leads', value: 0, change: 0, color: 'emerald', format: 'number',   metricKey: 'leads',  sparkData: [] },
+    { label: 'Avg Cost Per Lead',    value: 0, change: 0, color: 'violet',  format: 'currency', metricKey: 'cpl',    sparkData: [] },
+  ],
+  performanceSummary: [],
+  spendByPeriod: [],
 };
 
 const IBOSSMarketing = () => {
   const { isContractorActive } = useDashboardConfig();
+  const { scorecards, performanceSummary, spendByPeriod } = useMarketingData('ibos', ZERO_FALLBACK);
 
-  const performanceSummary = useMemo(
-    () => ALL_PERFORMANCE_SUMMARY.filter((row) => isContractorActive(row.contractorId)),
-    [isContractorActive]
+  const filteredPerformance = useMemo(
+    () => performanceSummary.filter((row) =>
+      row.contractorId ? isContractorActive(row.contractorId) : true
+    ),
+    [performanceSummary, isContractorActive],
   );
 
   return (
     <MarketingDashboardTemplate
       title="I-BOS Marketing Campaign"
-      subtitle="Contractor Division — 13 contractors · 5 paid media · 8 organic · $74.65K spend · 727 leads"
+      subtitle="Contractor Division — live data from Meta Ads & Google Ads"
       accentColor="#F59E0B"
       pageInsights={[
-        'Tailored achieves best CPL at $57.77 — efficiency benchmark for the division',
-        'Columbus shows highest revenue value ($11.4K rev/lead) despite high CPL of $518',
-        'Tailored & TVS missing revenue attribution — CRM handoff audit recommended',
+        'Connect Meta Ads and Google Ads pipelines to see live campaign performance',
+        'Per-contractor spend, ROAS, and CPL will populate once the pipelines sync',
+        'Date range selector in the Header filters all metrics automatically',
       ]}
-      scorecards={[
-        { label: 'Marketing Spend',      value: 74646,   change: 4.8,   color: 'amber',   format: 'currency', metricKey: 'spend',  sparkData: [58000, 62000, 55000, 62200, 67000, 71000, 74646] },
-        { label: 'Total Clicks',         value: 228468,  change: 32.1,  color: 'blue',    format: 'number',   sparkData: [95000, 112000, 130000, 158000, 185000, 210000, 228468] },
-        { label: 'Total Distinct Leads', value: 727,     change: 22.1,  color: 'emerald', format: 'number',   metricKey: 'leads',  sparkData: [420, 480, 510, 565, 610, 670, 727] },
-        { label: 'Avg Cost Per Lead',    value: 102.68,  change: -14.5, color: 'violet',  format: 'currency', metricKey: 'cpl',    sparkData: [145, 138, 128, 120, 115, 108, 102.68] },
-      ]}
-      performanceSummary={performanceSummary}
-      spendVsRevenue={[
-        { quarter: 'Q2 2025', spend: 15200, revenue: 285000 },
-        { quarter: 'Q3 2025', spend: 14800, revenue: 295000 },
-        { quarter: 'Q4 2025', spend: 18200, revenue: 380000 },
-        { quarter: 'Q1 2026', spend: 26446, revenue: 194810 },
-      ]}
-      funnelData={[
-        { name: 'Total Clicks',        value: 228468 },
-        { name: 'Landing Page Visits', value: 109000 },
-        { name: 'Engaged Sessions',    value: 38000  },
-        { name: 'Total Leads',         value: 727    },
-        { name: 'Revenue Attributed',  value: 638    },
-      ]}
-      spendByPeriod={[
-        { period: 'Q2 2025', spend: 15200, leads: 168 },
-        { period: 'Q3 2025', spend: 14800, leads: 185 },
-        { period: 'Q4 2025', spend: 18200, leads: 182 },
-        { period: 'Q1 2026', spend: 26446, leads: 192 },
-      ]}
-      ctrData={[
-        { quarter: 'Q2 2025', meta: 2.1, google: 3.8 },
-        { quarter: 'Q3 2025', meta: 2.5, google: 4.1 },
-        { quarter: 'Q4 2025', meta: 2.8, google: 4.4 },
-        { quarter: 'Q1 2026', meta: 3.05, google: 4.8 },
-      ]}
-      metricsPerPeriod={METRICS_PER_PERIOD}
+      scorecards={scorecards}
+      performanceSummary={filteredPerformance}
+      spendVsRevenue={[]}
+      funnelData={[]}
+      spendByPeriod={spendByPeriod}
+      ctrData={[]}
+      metricsPerPeriod={{}}
     />
   );
 };

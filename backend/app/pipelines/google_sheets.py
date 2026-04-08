@@ -2,12 +2,14 @@
 Google Sheets data pipeline for I-Dash Analytics Platform.
 
 Reads tabular data from Google Sheets and transforms into GoogleSheetMetric
-records with automatic date column detection.
+records. Supports dual-sheet (SHEET_ID_A / SHEET_ID_B) with heuristic
+classification of worksheets as retail:: or contractor:: based on header
+keyword scoring.
 """
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import gspread
@@ -20,293 +22,273 @@ from app.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
+_RETAIL_KEYWORDS = {"order", "sku", "revenue", "amazon", "shipping"}
+_CONTRACTOR_KEYWORDS = {"contractor", "lead", "territory", "beckley", "job"}
+
 
 class GoogleSheetsPipeline(BasePipeline):
     """
     Extract and load data from Google Sheets.
 
-    Connects to Google Sheets via service account credentials and extracts
-    tabular data from specified worksheets. Automatically detects date columns
-    and transforms data into GoogleSheetMetric records.
+    When sheet_id is omitted the pipeline processes both SHEET_ID_A and
+    SHEET_ID_B from settings. Each worksheet is classified as retail:: or
+    contractor:: via _classify_sheet() and the prefix is prepended to
+    sheet_name in every resulting metric record.
 
     Supports:
-    - Multiple worksheets per sheet
+    - Single sheet_id or dual-sheet auto-discovery from settings
+    - Heuristic retail / contractor classification per worksheet
     - Automatic date column detection
-    - Flexible metric naming
-    - Category grouping
+    - Flexible metric naming and category inference
     """
 
     def __init__(
         self,
-        sheet_id: str,
+        sheet_id: Optional[str] = None,
         worksheet_names: List[str] = None,
         **kwargs,
     ) -> None:
-        """
-        Initialize Google Sheets pipeline.
-
-        Args:
-            sheet_id: Google Sheets ID (from the URL).
-            worksheet_names: List of worksheet names to fetch (default: all).
-            **kwargs: Additional arguments passed to BasePipeline.
-        """
         super().__init__(name="google_sheets_pipeline", **kwargs)
 
-        self.sheet_id = sheet_id
+        # If no explicit sheet_id, fall back to settings-driven dual sheets
+        if sheet_id:
+            self._sheet_ids = [sheet_id]
+        else:
+            ids = [
+                sid
+                for sid in [settings.SHEET_ID_A, settings.SHEET_ID_B]
+                if sid and sid.strip()
+            ]
+            if not ids:
+                raise ValueError(
+                    "Provide sheet_id or set SHEET_ID_A / SHEET_ID_B in settings"
+                )
+            self._sheet_ids = ids
+
         self.worksheet_names = worksheet_names
 
         if not settings.GOOGLE_SHEETS_CREDENTIALS_FILE:
             raise ValueError("GOOGLE_SHEETS_CREDENTIALS_FILE must be configured")
 
-        # Initialize gspread client - handle JSON string or file path
         try:
-            import json as _json
-
             cred_value = settings.GOOGLE_SHEETS_CREDENTIALS_FILE.strip()
             if cred_value.startswith("{"):
-                # JSON content stored directly in env var (Railway style)
-                cred_info = _json.loads(cred_value)
+                cred_info = json.loads(cred_value)
                 self.gc = gspread.service_account_from_dict(cred_info)
             else:
-                # Traditional file path
                 self.gc = gspread.service_account(filename=cred_value)
         except Exception as e:
             raise ValueError(
                 f"Failed to initialize Google Sheets client: {str(e)}"
             )
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # Extract
+    # ──────────────────────────────────────────────────────────────────────────
+
     async def extract(self) -> Dict[str, Any]:
         """
-        Extract data from Google Sheets.
-
-        Opens the specified sheet and extracts data from all worksheets
-        (or specified ones only).
+        Extract data from all configured sheets.
 
         Returns:
-            Dictionary with worksheet data:
-                - worksheets: Dict mapping worksheet names to their data
+            {"worksheets": {prefixed_sheet_name: [row_dicts, ...]}}
         """
-        try:
-            self.logger.info(f"Extracting data from sheet {self.sheet_id}")
+        all_worksheets: Dict[str, List[Dict[str, Any]]] = {}
 
-            # Open the spreadsheet
-            sheet = self.gc.open_by_key(self.sheet_id)
-            self.logger.debug(f"Opened sheet with {len(sheet.worksheets())} worksheets")
+        for sheet_id in self._sheet_ids:
+            try:
+                self.logger.info(f"Extracting data from sheet {sheet_id}")
+                sheet = self.gc.open_by_key(sheet_id)
 
-            worksheets_data = {}
+                worksheets_to_process = (
+                    [ws for ws in sheet.worksheets() if ws.title in self.worksheet_names]
+                    if self.worksheet_names
+                    else sheet.worksheets()
+                )
 
-            # Get worksheets to process
-            if self.worksheet_names:
-                worksheets_to_process = [
-                    ws
-                    for ws in sheet.worksheets()
-                    if ws.title in self.worksheet_names
-                ]
-            else:
-                worksheets_to_process = sheet.worksheets()
+                self.logger.debug(
+                    f"Sheet {sheet_id}: processing {len(worksheets_to_process)} worksheets"
+                )
 
-            self.logger.debug(
-                f"Processing {len(worksheets_to_process)} worksheets"
-            )
+                for worksheet in worksheets_to_process:
+                    try:
+                        rows = await self._extract_worksheet(worksheet)
+                        prefix = self._classify_sheet(
+                            list(rows[0].keys()) if rows else []
+                        )
+                        key = f"{prefix}{worksheet.title}"
+                        all_worksheets[key] = rows
+                        self.logger.debug(
+                            f"Extracted {len(rows)} rows from '{worksheet.title}' → {key}"
+                        )
+                    except Exception as e:
+                        self.logger.warning(
+                            f"Error extracting worksheet '{worksheet.title}': {e}"
+                        )
+                        all_worksheets[worksheet.title] = []
 
-            for worksheet in worksheets_to_process:
-                try:
-                    data = await self._extract_worksheet(worksheet)
-                    worksheets_data[worksheet.title] = data
-                    self.logger.debug(
-                        f"Extracted {len(data)} rows from "
-                        f"worksheet '{worksheet.title}'"
-                    )
-                except Exception as e:
-                    self.logger.warning(
-                        f"Error extracting worksheet '{worksheet.title}': "
-                        f"{str(e)}"
-                    )
-                    worksheets_data[worksheet.title] = []
+            except GSpreadException as e:
+                self.logger.error(f"Google Sheets API error for {sheet_id}: {e}")
+                raise
+            except Exception as e:
+                self.logger.error(f"Error extracting sheet {sheet_id}: {e}")
+                raise
 
-            return {"worksheets": worksheets_data}
-
-        except GSpreadException as e:
-            self.logger.error(f"Google Sheets API error: {str(e)}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Error extracting Google Sheets data: {str(e)}")
-            raise
+        return {"worksheets": all_worksheets}
 
     async def _extract_worksheet(self, worksheet: Worksheet) -> List[Dict[str, Any]]:
-        """Extract all data from a single worksheet."""
+        """Extract all rows from a single worksheet as a list of dicts."""
         try:
-            # Get all values
             all_values = worksheet.get_all_values()
 
             if not all_values or len(all_values) < 2:
                 self.logger.debug(f"Worksheet '{worksheet.title}' is empty")
                 return []
 
-            # First row is headers
             headers = all_values[0]
             data_rows = all_values[1:]
 
-            # Convert to list of dicts
             data = []
             for row in data_rows:
-                # Ensure row has same length as headers
                 while len(row) < len(headers):
                     row.append("")
-
-                row_dict = dict(zip(headers, row[:len(headers)]))
-                if any(row_dict.values()):  # Skip completely empty rows
+                row_dict = dict(zip(headers, row[: len(headers)]))
+                if any(row_dict.values()):
                     data.append(row_dict)
 
             return data
-
         except Exception as e:
-            self.logger.warning(f"Error extracting worksheet data: {str(e)}")
+            self.logger.warning(f"Error extracting worksheet data: {e}")
             return []
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Heuristic classification
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _classify_sheet(self, headers: List[str]) -> str:
+        """
+        Score worksheet headers against retail and contractor keyword sets.
+
+        Each header token that matches a keyword (case-insensitive substring)
+        increments that category's score. The category with the higher score
+        wins; ties default to 'retail::'.
+
+        Retail keywords : order, sku, revenue, amazon, shipping
+        Contractor keywords: contractor, lead, territory, beckley, job
+
+        Returns:
+            'retail::' or 'contractor::'
+        """
+        retail_score = 0
+        contractor_score = 0
+
+        for header in headers:
+            h_lower = header.lower()
+            for kw in _RETAIL_KEYWORDS:
+                if kw in h_lower:
+                    retail_score += 1
+            for kw in _CONTRACTOR_KEYWORDS:
+                if kw in h_lower:
+                    contractor_score += 1
+
+        return "contractor::" if contractor_score > retail_score else "retail::"
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Transform
+    # ──────────────────────────────────────────────────────────────────────────
 
     async def transform(self, raw_data: Dict[str, Any]) -> List[GoogleSheetMetric]:
         """
-        Transform Google Sheets data into metric records.
+        Transform extracted worksheet rows into GoogleSheetMetric records.
 
-        Detects date columns automatically and creates GoogleSheetMetric
-        instances for each row.
-
-        Args:
-            raw_data: Dictionary with worksheet data.
-
-        Returns:
-            List of GoogleSheetMetric instances.
+        The sheet_name stored on each metric already carries the retail:: or
+        contractor:: prefix applied during extraction.
         """
         try:
-            records = []
+            records: List[GoogleSheetMetric] = []
 
             for sheet_name, rows in raw_data.get("worksheets", {}).items():
                 try:
                     if not rows:
                         continue
 
-                    # Detect date column
-                    date_column = self._detect_date_column(rows[0].keys())
+                    date_column = self._detect_date_column(list(rows[0].keys()))
                     self.logger.debug(
-                        f"Sheet '{sheet_name}': detected date column "
-                        f"'{date_column}'"
+                        f"Sheet '{sheet_name}': date column = '{date_column}'"
                     )
 
                     for row_idx, row in enumerate(rows):
                         try:
-                            # Get date from row
                             if date_column:
-                                date_str = row.get(date_column, "")
-                                metric_date = self._parse_date(date_str)
+                                metric_date = self._parse_date(
+                                    row.get(date_column, "")
+                                )
                                 if not metric_date:
                                     self.logger.debug(
-                                        f"Skipping row {row_idx} with invalid "
-                                        f"date: {date_str}"
+                                        f"Skipping row {row_idx} — invalid date"
                                     )
                                     continue
                             else:
-                                # Use current date if no date column found
                                 metric_date = datetime.now(timezone.utc).date()
 
-                            # Process each column as a metric
                             for col_name, col_value in row.items():
-                                # Skip date column
                                 if date_column and col_name == date_column:
                                     continue
-
-                                # Skip empty values
-                                if not col_value or col_value.strip() == "":
+                                if not col_value or str(col_value).strip() == "":
                                     continue
 
-                                # Try to parse as number
                                 try:
                                     metric_value = float(col_value)
-                                except ValueError:
+                                except (ValueError, TypeError):
                                     self.logger.debug(
-                                        f"Skipping non-numeric value "
-                                        f"'{col_value}' in column '{col_name}'"
+                                        f"Skipping non-numeric '{col_value}' in '{col_name}'"
                                     )
                                     continue
 
-                                # Infer category from column name
-                                category = self._infer_category(col_name)
-
-                                record = GoogleSheetMetric(
-                                    sheet_name=sheet_name,
-                                    date=metric_date,
-                                    metric_name=col_name,
-                                    metric_value=metric_value,
-                                    category=category,
+                                records.append(
+                                    GoogleSheetMetric(
+                                        sheet_name=sheet_name,
+                                        date=metric_date,
+                                        metric_name=col_name,
+                                        metric_value=metric_value,
+                                        category=self._infer_category(col_name),
+                                    )
                                 )
-                                records.append(record)
 
                         except Exception as e:
                             self.logger.warning(
-                                f"Error processing row {row_idx} in sheet "
-                                f"'{sheet_name}': {str(e)}"
+                                f"Error processing row {row_idx} in '{sheet_name}': {e}"
                             )
                             continue
 
                 except Exception as e:
-                    self.logger.warning(
-                        f"Error processing sheet '{sheet_name}': {str(e)}"
-                    )
+                    self.logger.warning(f"Error processing sheet '{sheet_name}': {e}")
                     continue
 
-            self.logger.info(
-                f"Transformed {len(records)} Google Sheet metric records"
-            )
+            self.logger.info(f"Transformed {len(records)} Google Sheet metric records")
             return records
 
         except Exception as e:
-            self.logger.error(
-                f"Error transforming Google Sheets data: {str(e)}"
-            )
+            self.logger.error(f"Error transforming Google Sheets data: {e}")
             raise
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # Helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _detect_date_column(self, column_names: List[str]) -> Optional[str]:
-        """
-        Detect which column contains dates.
-
-        Looks for common date column names and checks if values can be parsed
-        as dates.
-
-        Args:
-            column_names: List of column header names.
-
-        Returns:
-            Name of the date column, or None if not found.
-        """
-        # Common date column names
+        """Return the first column whose name contains a common date keyword."""
         date_patterns = [
-            "date",
-            "Date",
-            "DATE",
-            "created_date",
-            "created at",
-            "timestamp",
-            "day",
-            "month",
-            "time",
+            "date", "created_date", "created at", "timestamp", "day", "month", "time"
         ]
-
         for pattern in date_patterns:
             for col_name in column_names:
                 if pattern.lower() in col_name.lower():
                     return col_name
-
         return None
 
     def _parse_date(self, date_str: str) -> Optional[datetime]:
-        """
-        Parse a date string in various formats.
-
-        Args:
-            date_str: String representation of a date.
-
-        Returns:
-            Parsed date, or None if parsing fails.
-        """
+        """Parse a date string across common formats; return None on failure."""
         if not date_str or not isinstance(date_str, str):
             return None
 
@@ -314,7 +296,6 @@ class GoogleSheetsPipeline(BasePipeline):
         if not date_str:
             return None
 
-        # Common date formats
         formats = [
             "%Y-%m-%d",
             "%m/%d/%Y",
@@ -329,15 +310,12 @@ class GoogleSheetsPipeline(BasePipeline):
 
         for fmt in formats:
             try:
-                parsed = datetime.strptime(date_str, fmt)
-                return parsed.date()
+                return datetime.strptime(date_str, fmt).date()
             except ValueError:
                 continue
 
-        # Try ISO format
         try:
-            parsed = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            return parsed.date()
+            return datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
         except (ValueError, AttributeError):
             pass
 
@@ -345,41 +323,16 @@ class GoogleSheetsPipeline(BasePipeline):
         return None
 
     def _infer_category(self, column_name: str) -> str:
-        """
-        Infer a category from column name.
-
-        Args:
-            column_name: Name of the column.
-
-        Returns:
-            Inferred category string.
-        """
-        # Map common patterns to categories
+        """Infer a metric category from a column name."""
         name_lower = column_name.lower()
-
-        if any(
-            keyword in name_lower
-            for keyword in ["revenue", "sales", "income", "earnings"]
-        ):
+        if any(kw in name_lower for kw in ["revenue", "sales", "income", "earnings"]):
             return "Revenue"
-        elif any(
-            keyword in name_lower for keyword in ["cost", "spend", "expense"]
-        ):
+        if any(kw in name_lower for kw in ["cost", "spend", "expense"]):
             return "Cost"
-        elif any(
-            keyword in name_lower
-            for keyword in ["lead", "signup", "registration"]
-        ):
+        if any(kw in name_lower for kw in ["lead", "signup", "registration"]):
             return "Lead"
-        elif any(
-            keyword in name_lower for keyword in ["conversion", "customer"]
-        ):
+        if any(kw in name_lower for kw in ["conversion", "customer"]):
             return "Conversion"
-        elif any(
-            keyword in name_lower
-            for keyword in ["impression", "click", "engagement"]
-        ):
+        if any(kw in name_lower for kw in ["impression", "click", "engagement"]):
             return "Engagement"
-        else:
-            # Use first word of column name
-            return column_name.split("_")[0].split(" ")[0].title()
+        return column_name.split("_")[0].split(" ")[0].title()
