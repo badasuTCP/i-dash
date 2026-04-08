@@ -86,100 +86,117 @@ class MetaAdsPipeline(BasePipeline):
 
     async def extract(self) -> Dict[str, Any]:
         """
-        Extract campaign performance data from Meta Ads API.
+        Extract campaign performance data from ALL Meta Ad Accounts.
 
-        Fetches insights for campaigns within the date range using the Insights API
-        with proper field selection and aggregation.
-
-        Returns:
-            Dictionary with campaign data:
-                - campaigns: List of campaign insight records
+        Uses Business-level auto-discovery to find every ad account under
+        META_BUSINESS_ID, then pulls insights from each one. Falls back to
+        the single META_AD_ACCOUNT_ID if discovery fails.
         """
         try:
             self.logger.info(
                 f"Extracting Meta Ads data from {self.start_date} to {self.end_date}"
             )
 
-            campaigns_data = await self._get_campaigns()
-            self.logger.debug(f"Fetched {len(campaigns_data)} campaign records")
+            # Discover all ad accounts under the Business portfolio
+            accounts = await fetch_meta_ad_accounts()
+            if not accounts:
+                self.logger.warning("No Meta ad accounts discovered — nothing to extract")
+                return {"campaigns": []}
 
-            return {"campaigns": campaigns_data}
+            self.logger.info(
+                f"Meta multi-account discovery: {len(accounts)} account(s) — "
+                + ", ".join(f"{a['name']} ({a['id']})" for a in accounts[:10])
+            )
 
-        except FacebookRequestError as e:
-            self.logger.error(f"Meta Ads API error: {str(e)}")
-            raise
+            all_campaigns: List[Dict[str, Any]] = []
+            for acct in accounts:
+                try:
+                    data = await self._get_account_insights(acct["id"])
+                    if data:
+                        # Tag each row with the account for traceability
+                        for row in data:
+                            row["_account_id"] = acct["id"]
+                            row["_account_name"] = acct["name"]
+                        all_campaigns.extend(data)
+                        self.logger.info(
+                            f"  {acct['name']} ({acct['id']}): {len(data)} insight rows"
+                        )
+                    else:
+                        self.logger.debug(
+                            f"  {acct['name']} ({acct['id']}): 0 rows (no spend in range)"
+                        )
+                except Exception as e:
+                    self.logger.warning(
+                        f"  {acct['name']} ({acct['id']}): error — {e}"
+                    )
+
+            self.logger.info(
+                f"Meta Ads total: {len(all_campaigns)} insight rows across {len(accounts)} accounts"
+            )
+            return {"campaigns": all_campaigns}
+
         except Exception as e:
             self.logger.error(f"Error extracting Meta Ads data: {str(e)}")
             raise
 
-    async def _get_campaigns(self) -> List[Dict[str, Any]]:
-        """Fetch campaign insights from Meta Ads API."""
-        campaigns = []
+    async def _get_account_insights(self, account_id: str) -> List[Dict[str, Any]]:
+        """Fetch campaign insights for a single ad account."""
+        if not account_id.startswith("act_"):
+            account_id = f"act_{account_id}"
+
+        ad_account = AdAccount(account_id)
+
+        fields = [
+            "campaign_id",
+            "campaign_name",
+            "adset_id",
+            "adset_name",
+            "date_start",
+            "impressions",
+            "clicks",
+            "spend",
+            "actions",
+            "action_values",
+            "reach",
+            "frequency",
+            "cpp",
+            "cpc",
+            "cpm",
+            "ctr",
+        ]
 
         try:
-            # Get the ad account
-            account_id = (
-                settings.META_AD_ACCOUNT_ID
-                or settings.META_AD_ACCOUNT_ID_CP
-                or settings.META_APP_ID
-            )
-            if not account_id.startswith("act_"):
-                account_id = f"act_{account_id}"
-
-            ad_account = AdAccount(account_id)
-
-            # Define fields to fetch
-            fields = [
-                "campaign_id",
-                "campaign_name",
-                "adset_id",
-                "adset_name",
-                "date_start",
-                "impressions",
-                "clicks",
-                "spend",
-                "actions",
-                "action_values",
-                "reach",
-                "frequency",
-                "cpp",
-                "cpc",
-                "cpm",
-                "ctr",
-            ]
-
-            # Get campaign insights
             insights = ad_account.get_insights(
                 fields=fields,
                 params={
-                    "date_preset": "custom",
                     "time_range": {
                         "since": self.start_date.isoformat(),
                         "until": self.end_date.isoformat(),
                     },
-                    "level": "adset",
-                    "limit": 100,
+                    "level": "campaign",
+                    "time_increment": 1,
+                    "limit": 500,
                 },
             )
 
-            # Handle pagination
+            results = []
             for insight in insights:
                 insight_dict = dict(insight)
 
-                # Filter by campaign IDs if specified
                 if self.campaign_ids:
-                    campaign_id = insight_dict.get("campaign_id")
-                    if campaign_id not in self.campaign_ids:
+                    if insight_dict.get("campaign_id") not in self.campaign_ids:
                         continue
 
-                campaigns.append(insight_dict)
+                results.append(insight_dict)
+
+            return results
 
         except FacebookRequestError as e:
-            self.logger.warning(f"Error fetching campaign insights: {str(e)}")
-        except Exception as e:
-            self.logger.warning(f"Error fetching campaigns: {str(e)}")
-
-        return campaigns
+            self.logger.warning(
+                f"Meta API error for {account_id}: code={e.api_error_code()} "
+                f"msg={e.api_error_message()}"
+            )
+            return []
 
     async def transform(self, raw_data: Dict[str, Any]) -> List[MetaAdMetric]:
         """

@@ -212,20 +212,24 @@ class GoogleAdsPipeline(BasePipeline):
             raise
 
     async def _get_campaigns_by_adgroup(self, customer_id: str = None) -> List[Dict[str, Any]]:
-        """Fetch campaign and ad group metrics using GAQL."""
+        """
+        Fetch campaign-level metrics using GAQL.
+
+        Uses the 'campaign' resource (not 'ad_group_ad') to capture all
+        campaign types including Performance Max, which has no traditional
+        ad groups.
+        """
         cid = customer_id or self.customer_id
         campaigns = []
 
         try:
             ga_service = self.client.get_service("GoogleAdsService")
 
-            # Build GAQL query
             query = f"""
             SELECT
                 campaign.id,
                 campaign.name,
-                ad_group.id,
-                ad_group.name,
+                campaign.advertising_channel_type,
                 segments.date,
                 metrics.impressions,
                 metrics.clicks,
@@ -235,11 +239,11 @@ class GoogleAdsPipeline(BasePipeline):
                 metrics.ctr,
                 metrics.average_cpc,
                 metrics.average_cpm
-            FROM ad_group_ad
+            FROM campaign
             WHERE segments.date BETWEEN '{self.start_date}' AND '{self.end_date}'
+              AND campaign.status != 'REMOVED'
             """
 
-            # Add campaign filter if specified
             if self.campaign_ids:
                 campaign_filter = ", ".join(
                     f'"{c}"' for c in self.campaign_ids
@@ -248,15 +252,13 @@ class GoogleAdsPipeline(BasePipeline):
 
             query += " ORDER BY segments.date DESC"
 
-            # Execute query
             results = ga_service.search(customer_id=cid, query=query)
 
-            # Process results
             for row in results:
                 campaign_data = {
                     "campaign_id": str(row.campaign.id),
                     "campaign_name": row.campaign.name,
-                    "ad_group_name": row.ad_group.name,
+                    "ad_group_name": str(row.campaign.advertising_channel_type.name),
                     "date": str(row.segments.date),
                     "impressions": int(row.metrics.impressions),
                     "clicks": int(row.metrics.clicks),
@@ -272,10 +274,10 @@ class GoogleAdsPipeline(BasePipeline):
 
         except GoogleAdsException as e:
             self.logger.warning(
-                f"Error fetching ad group metrics: {str(e)}"
+                f"Error fetching campaign metrics for {cid}: {str(e)}"
             )
         except Exception as e:
-            self.logger.warning(f"Error fetching campaigns: {str(e)}")
+            self.logger.warning(f"Error fetching campaigns for {cid}: {str(e)}")
 
         return campaigns
 
