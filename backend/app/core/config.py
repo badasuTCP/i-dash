@@ -50,12 +50,6 @@ class Settings(BaseSettings):
         description="Allowed origins for CORS",
     )
 
-    # Origins that MUST always be allowed regardless of env var
-    _REQUIRED_ORIGINS = {
-        "https://dash.theconcreteprotector.com",
-        "https://strong-vitality-production-371a.up.railway.app",
-    }
-
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v):
@@ -65,7 +59,10 @@ class Settings(BaseSettings):
         else:
             origins = list(v) if v else []
         # Guarantee production domains are never accidentally excluded
-        for required in cls._REQUIRED_ORIGINS:
+        for required in (
+            "https://dash.theconcreteprotector.com",
+            "https://strong-vitality-production-371a.up.railway.app",
+        ):
             if required not in origins:
                 origins.append(required)
         return origins
