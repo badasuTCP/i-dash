@@ -63,6 +63,10 @@ class Settings(BaseSettings):
         default="",
         description="HubSpot private app access token",
     )
+    HUBSPOT_ACCESS_TOKEN: str = Field(
+        default="",
+        description="HubSpot private app access token (alias)",
+    )
 
     # Meta (Facebook) API configuration
     META_APP_ID: str = Field(

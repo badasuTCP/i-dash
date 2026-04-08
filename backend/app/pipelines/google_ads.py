@@ -91,8 +91,8 @@ class GoogleAdsPipeline(BasePipeline):
                 "(GOOGLE_ADS_CUSTOMER_ID or per-division variants)"
             )
 
-        # MCC (manager) login_customer_id — required when querying
-        # sub-accounts under a manager account
+        # OAuth client config — sub-accounts are accessed directly (not
+        # through the MCC) so login_customer_id is intentionally omitted.
         client_config = {
             "developer_token": settings.GOOGLE_ADS_DEVELOPER_TOKEN,
             "client_id": settings.GOOGLE_ADS_CLIENT_ID,
@@ -100,9 +100,6 @@ class GoogleAdsPipeline(BasePipeline):
             "refresh_token": settings.GOOGLE_ADS_REFRESH_TOKEN,
             "use_proto_plus": True,
         }
-        manager_id = getattr(settings, "GOOGLE_ADS_MANAGER_CUSTOMER_ID", "")
-        if manager_id:
-            client_config["login_customer_id"] = manager_id.replace("-", "")
 
         # Log credential fingerprints for debugging OAuth issues
         logger.info(
@@ -111,7 +108,7 @@ class GoogleAdsPipeline(BasePipeline):
             settings.GOOGLE_ADS_CLIENT_ID[:20] if settings.GOOGLE_ADS_CLIENT_ID else "(empty)",
             settings.GOOGLE_ADS_CLIENT_SECRET[:8] if settings.GOOGLE_ADS_CLIENT_SECRET else "(empty)",
             settings.GOOGLE_ADS_REFRESH_TOKEN[:15] if settings.GOOGLE_ADS_REFRESH_TOKEN else "(empty)",
-            manager_id or "(not set)",
+            getattr(settings, "GOOGLE_ADS_MANAGER_CUSTOMER_ID", "") or "(not set)",
             settings.GOOGLE_ADS_DEVELOPER_TOKEN[:10] if settings.GOOGLE_ADS_DEVELOPER_TOKEN else "(empty)",
         )
 
@@ -234,11 +231,10 @@ class GoogleAdsPipeline(BasePipeline):
                 metrics.clicks,
                 metrics.cost_micros,
                 metrics.conversions,
-                metrics.conversion_value,
+                metrics.all_conversions_value,
                 metrics.ctr,
-                metrics.avg_cpc,
-                metrics.cpm,
-                metrics.search_impression_share
+                metrics.average_cpc,
+                metrics.average_cpm
             FROM ad_group_ad
             WHERE segments.date BETWEEN '{self.start_date}' AND '{self.end_date}'
             """
@@ -253,12 +249,7 @@ class GoogleAdsPipeline(BasePipeline):
             query += " ORDER BY segments.date DESC"
 
             # Execute query
-            search_request = {
-                "customer_id": cid,
-                "query": query,
-            }
-
-            results = ga_service.search(search_request)
+            results = ga_service.search(customer_id=cid, query=query)
 
             # Process results
             for row in results:
@@ -266,20 +257,16 @@ class GoogleAdsPipeline(BasePipeline):
                     "campaign_id": str(row.campaign.id),
                     "campaign_name": row.campaign.name,
                     "ad_group_name": row.ad_group.name,
-                    "date": row.segments.date.strftime("%Y-%m-%d"),
+                    "date": str(row.segments.date),
                     "impressions": int(row.metrics.impressions),
                     "clicks": int(row.metrics.clicks),
                     "cost_micros": int(row.metrics.cost_micros),
                     "conversions": float(row.metrics.conversions),
-                    "conversion_value": float(row.metrics.conversion_value),
+                    "conversion_value": float(row.metrics.all_conversions_value),
                     "ctr": float(row.metrics.ctr),
-                    "cpc": float(row.metrics.avg_cpc) / 1_000_000,
-                    "cpm": float(row.metrics.cpm),
-                    "search_impression_share": (
-                        float(row.metrics.search_impression_share) * 100
-                    )
-                    if row.metrics.search_impression_share
-                    else 0.0,
+                    "cpc": float(row.metrics.average_cpc) / 1_000_000,
+                    "cpm": float(row.metrics.average_cpm),
+                    "search_impression_share": 0.0,
                 }
                 campaigns.append(campaign_data)
 
