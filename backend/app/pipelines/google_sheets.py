@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 _RETAIL_KEYWORDS = {"order", "sku", "revenue", "amazon", "shipping"}
 _CONTRACTOR_KEYWORDS = {"contractor", "lead", "territory", "beckley", "job"}
 
+# Tabs containing these keywords are skipped — Meta data must come from the
+# direct API pipeline, not the old Coupler-to-Sheets sync.
+_BLACKLISTED_TAB_KEYWORDS = {"meta", "facebook", "coupler"}
+
 
 class GoogleSheetsPipeline(BasePipeline):
     """
@@ -111,6 +115,16 @@ class GoogleSheetsPipeline(BasePipeline):
                 )
 
                 for worksheet in worksheets_to_process:
+                    # Skip tabs that contain Meta/Facebook/Coupler data —
+                    # Meta metrics must come from the direct API pipeline only.
+                    title_lower = worksheet.title.lower()
+                    if any(kw in title_lower for kw in _BLACKLISTED_TAB_KEYWORDS):
+                        self.logger.info(
+                            f"Skipping blacklisted tab '{worksheet.title}' "
+                            f"(Meta data sourced from direct API)"
+                        )
+                        continue
+
                     try:
                         rows = await self._extract_worksheet(worksheet)
                         prefix = self._classify_sheet(

@@ -22,12 +22,16 @@ The Google Sheets pipeline (`backend/app/pipelines/google_sheets.py`) reads from
 
 The category with the higher score wins. Ties default to `retail::`. The prefix is stored in the `sheet_name` field of every `GoogleSheetMetric` record.
 
-### Current Classification (36,119 records)
+### Tab Blacklist (Meta Source-of-Truth)
+
+Tabs containing `Meta`, `Facebook`, or `Coupler` in their name are **automatically skipped** during extraction. Meta campaign data must come exclusively from the direct Meta Ads API pipeline — not from the legacy Coupler-to-Sheets sync.
+
+### Current Classification (33,517 records)
 
 | Type | Worksheets | Records | Examples |
 |------|-----------|--------:|---------|
-| `retail::` | 23 | 28,425 | Retail_ROAS_Final, Exec Master, Google Ads Summary |
-| `contractor::` | 11 | 7,694 | ContractorLeads_MarketingSpend, Contractors Revenue |
+| `retail::` | 23 | 28,460 | Retail_ROAS_Final, Exec Master, Google Ads Summary |
+| `contractor::` | 10 | 5,057 | ContractorLeads_MarketingSpend, Contractors Revenue |
 
 ## GA4 Property Coverage
 
