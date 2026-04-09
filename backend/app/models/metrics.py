@@ -56,6 +56,26 @@ class HubSpotMetric(Base):
         return f"<HubSpotMetric(date={self.date}, revenue_won={self.revenue_won})>"
 
 
+class HubSpotDeal(Base):
+    """Individual deal record for per-rep aggregation."""
+
+    __tablename__ = "hubspot_deals"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    deal_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(64), index=True, nullable=True)
+    stage: Mapped[str] = mapped_column(String(64), nullable=True)
+    amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    deal_name: Mapped[str] = mapped_column(String(256), nullable=True)
+    created_date: Mapped[datetime] = mapped_column(Date, nullable=True)
+    close_date: Mapped[datetime] = mapped_column(Date, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class MetaAdMetric(Base):
     """
     Meta (Facebook) Ads metrics by campaign and date.

@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -691,61 +691,76 @@ async def get_sales_intelligence(
         "contacts": int(agg[8] or 0),
     }
 
-    # ── 4. Rep leaderboard — whitelist + heuristic revenue ──────────────
-    HEURISTIC_WON_VALUE = 2500.0   # per closed-won deal
-    HEURISTIC_OPEN_VALUE = 1500.0  # per open pipeline deal
+    # ── 4. Rep leaderboard from live hubspot_deals table ─────────────────
+    from app.pipelines.hubspot import CLOSED_WON_STAGES, CLOSED_LOST_STAGES
 
-    # Hard-mapped rep profiles: owner_id → (name, initials, total_deals, won_deals)
-    # From HubSpot owner API + full deal count analysis
-    REP_PROFILES = {
-        "78942506": ("Brett Pettiford",  "BP", 3055, 42),
-        "78942505": ("Kathy Fowler",     "KF", 2344, 35),
-        "78361095": ("Tony Phillips",    "TP", 2155, 28),
-        "86256389": ("Nakoiya Dotson",   "ND",  180,  3),
-        "88346795": ("Darian Booth",     "DB",  125,  1),
-    }
+    HEURISTIC_WON_VALUE = 2500.0
+    HEURISTIC_OPEN_VALUE = 1500.0
 
+    SALES_REP_IDS = {"78942506", "78942505", "78361095", "86256389", "88346795"}
+
+    # Query deal counts per owner from the DB (zero API calls)
     reps_data = []
     total_rep_revenue = 0.0
     total_rep_pipeline = 0.0
 
-    for owner_id, (name, initials, total_deals, won_deals) in REP_PROFILES.items():
-        rep_revenue = won_deals * HEURISTIC_WON_VALUE
-        open_deals = total_deals - won_deals
-        rep_pipeline = open_deals * HEURISTIC_OPEN_VALUE
-        total_rep_revenue += rep_revenue
-        total_rep_pipeline += rep_pipeline
+    try:
+        won_stages_str = ",".join(f"'{s}'" for s in CLOSED_WON_STAGES)
+        lost_stages_str = ",".join(f"'{s}'" for s in CLOSED_LOST_STAGES)
 
-        win_rate = round(won_deals / max(won_deals + (total_deals - won_deals), 1) * 100)
+        rep_query = await db.execute(text(f"""
+            SELECT
+                owner_id,
+                COUNT(*) AS total_deals,
+                COUNT(*) FILTER (WHERE stage IN ({won_stages_str})) AS won,
+                COUNT(*) FILTER (WHERE stage IN ({lost_stages_str})) AS lost,
+                COALESCE(SUM(CASE WHEN stage IN ({won_stages_str}) THEN amount ELSE 0 END), 0) AS won_amount,
+                COALESCE(SUM(CASE WHEN stage NOT IN ({won_stages_str}) AND stage NOT IN ({lost_stages_str}) THEN amount ELSE 0 END), 0) AS pipeline_amount
+            FROM hubspot_deals
+            WHERE owner_id IS NOT NULL AND owner_id IN ({",".join(f"'{i}'" for i in SALES_REP_IDS)})
+            GROUP BY owner_id
+            ORDER BY COUNT(*) DESC
+        """))
 
-        reps_data.append({
-            "id": owner_id,
-            "name": name,
-            "avatar": initials,
-            "deals_won": won_deals,
-            "deals_lost": 0,
-            "revenue": rep_revenue,
-            "avg_days": 14,
-            "calls": total_deals // 10,
-            "emails": 0,
-            "meetings": total_deals // 20,
-            "prospecting": min(100, total_deals // 30),
-            "closing": win_rate,
-            "nurturing": min(100, total_deals // 50),
-            "quota": 0,
-            "pipeline_value": rep_pipeline,
-        })
+        for row in rep_query.fetchall():
+            oid, total_deals, won, lost, won_amount, pipeline_amount = row
+            info = owners.get(oid, {})
+            name = f"{info.get('first', '')} {info.get('last', '')}".strip() or f"Rep {oid}"
+            initials = (info.get("first", "?")[0] + (info.get("last", "?")[0] if info.get("last") else "")).upper() if info.get("first") else "??"
 
-    # Sort by revenue descending
+            rep_revenue = max(won_amount, won * HEURISTIC_WON_VALUE) if won > 0 else 0.0
+            open_deals = total_deals - won - lost
+            rep_pipeline = max(pipeline_amount, open_deals * HEURISTIC_OPEN_VALUE) if open_deals > 0 else 0.0
+            total_rep_revenue += rep_revenue
+            total_rep_pipeline += rep_pipeline
+
+            reps_data.append({
+                "id": oid,
+                "name": name,
+                "avatar": initials,
+                "deals_won": won,
+                "deals_lost": lost,
+                "revenue": rep_revenue,
+                "avg_days": 14,
+                "calls": total_deals // 10,
+                "emails": 0,
+                "meetings": total_deals // 20,
+                "prospecting": min(100, total_deals // 30),
+                "closing": round(won / max(won + lost, 1) * 100),
+                "nurturing": min(100, total_deals // 50),
+                "quota": 0,
+                "pipeline_value": rep_pipeline,
+            })
+    except Exception as e:
+        logger.warning("hubspot_deals query failed (table may not exist yet): %s", e)
+
     reps_data.sort(key=lambda r: r["revenue"], reverse=True)
 
-    # Override totals with heuristic values
-    totals["revenue_won"] = total_rep_revenue
-    totals["pipeline_value"] = total_rep_pipeline
+    totals["revenue_won"] = total_rep_revenue or totals["revenue_won"]
+    totals["pipeline_value"] = total_rep_pipeline or totals["pipeline_value"]
 
-    # Pipeline waterfall from heuristic totals
-    rev = total_rep_revenue
-    pipe = total_rep_pipeline
+    rev = totals["revenue_won"]
+    pipe = totals["pipeline_value"]
     pipeline_waterfall = [
         {"name": "Starting Pipeline", "value": pipe + rev, "fill": "#6366F1"},
         {"name": "New Deals (+)", "value": pipe, "fill": "#22D3EE"},

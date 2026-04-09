@@ -12,6 +12,7 @@ from app.models.metrics import (
     GA4Metric,
     GoogleAdMetric,
     GoogleSheetMetric,
+    HubSpotDeal,
     HubSpotMetric,
     MetaAdMetric,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "User",
     "UserRole",
     "UserDepartment",
+    "HubSpotDeal",
     "HubSpotMetric",
     "MetaAdMetric",
     "GoogleAdMetric",

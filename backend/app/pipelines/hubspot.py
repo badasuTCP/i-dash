@@ -125,6 +125,9 @@ class HubSpotPipeline(BasePipeline):
             tasks = await self._get_tasks()
             self.logger.info(f"Fetched {len(tasks)} tasks")
 
+            # Sync individual deals to hubspot_deals table (best-effort)
+            await self._sync_deals_table(deals)
+
             return {
                 "contacts": contacts,
                 "deals": deals,
@@ -139,6 +142,66 @@ class HubSpotPipeline(BasePipeline):
         except Exception as e:
             self.logger.error(f"Error extracting HubSpot data: {str(e)}")
             raise
+
+    async def _sync_deals_table(self, deals: list) -> None:
+        """Upsert individual deals into hubspot_deals for per-rep aggregation."""
+        try:
+            from app.models.metrics import HubSpotDeal
+            from app.core.database import async_session_maker
+            from sqlalchemy import text
+
+            async with async_session_maker() as session:
+                # Clear and reload (simplest upsert for bulk data)
+                await session.execute(text("DELETE FROM hubspot_deals"))
+
+                count = 0
+                for deal in deals:
+                    props = deal.properties if hasattr(deal, 'properties') else {}
+                    if not props:
+                        continue
+
+                    deal_id = str(deal.id) if hasattr(deal, 'id') else props.get('hs_object_id', '')
+                    if not deal_id:
+                        continue
+
+                    # Parse dates safely
+                    created = None
+                    closed = None
+                    try:
+                        cd = props.get('createdate', '')
+                        if cd:
+                            created = datetime.fromisoformat(cd.replace('Z', '+00:00')).date()
+                    except Exception:
+                        pass
+                    try:
+                        cd = props.get('closedate', '')
+                        if cd:
+                            closed = datetime.fromisoformat(cd.replace('Z', '+00:00')).date()
+                    except Exception:
+                        pass
+
+                    amount = 0.0
+                    try:
+                        amount = float(props.get('amount') or 0)
+                    except (ValueError, TypeError):
+                        pass
+
+                    session.add(HubSpotDeal(
+                        deal_id=deal_id,
+                        owner_id=props.get('hubspot_owner_id'),
+                        stage=props.get('dealstage', ''),
+                        amount=amount,
+                        deal_name=props.get('dealname', '')[:256] if props.get('dealname') else '',
+                        created_date=created,
+                        close_date=closed,
+                    ))
+                    count += 1
+
+                await session.commit()
+                self.logger.info(f"Synced {count:,} deals to hubspot_deals table")
+
+        except Exception as e:
+            self.logger.warning(f"Deal sync to hubspot_deals failed (non-fatal): {e}")
 
     async def _paginate(self, api, properties: List[str]) -> List[SimplePublicObject]:
         """Generic paginator for HubSpot CRM basic_api.get_page()."""
