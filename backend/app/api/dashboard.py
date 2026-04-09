@@ -746,9 +746,11 @@ async def get_sales_intelligence(
                        COUNT(*) FILTER (WHERE is_training_lead = 1) AS training_leads,
                        COUNT(*) FILTER (WHERE is_training_lead = 0 AND num_forms > 0) AS form_leads
                 FROM hubspot_contacts
+                WHERE created_date >= '{start_date}' AND created_date <= '{end_date}'
                 GROUP BY owner_id
             ) c ON c.owner_id = d.owner_id
             WHERE d.owner_id IN ({','.join(SALES_REP_IDS)})
+              AND d.created_date >= '{start_date}' AND d.created_date <= '{end_date}'
             GROUP BY d.owner_id, c.total_contacts, c.training_leads, c.form_leads
             ORDER BY COUNT(*) DESC
         """))

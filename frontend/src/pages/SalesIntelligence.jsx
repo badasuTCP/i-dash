@@ -29,6 +29,7 @@ import {
   ArrowUpRight, ArrowDownRight, Flame, Eye, Loader2, RefreshCw,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { useGlobalDate } from '../context/GlobalDateContext';
 import { dashboardAPI } from '../services/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -189,6 +190,7 @@ function generateInsights(reps, stalledDeals, selectedRep) {
 
 const SalesIntelligence = () => {
   const { isDark } = useTheme();
+  const { dateFrom, dateTo } = useGlobalDate();
   const [selectedRep, setSelectedRep] = useState(null);
   const [apiData, setApiData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -201,19 +203,19 @@ const SalesIntelligence = () => {
   const gridColor = isDark ? 'rgba(71,85,105,0.15)' : 'rgba(203,213,225,0.4)';
   const axisColor = isDark ? 'rgba(148,163,184,0.3)' : 'rgba(148,163,184,0.5)';
 
-  // ── Fetch live data ───────────────────────────────────────────────────────
+  // ── Fetch live data (re-fetches when global date changes) ─────────────────
   const fetchSalesData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await dashboardAPI.getSalesIntelligence();
+      const { data } = await dashboardAPI.getSalesIntelligence(dateFrom, dateTo);
       setApiData(data);
     } catch (err) {
       setError(err?.response?.data?.detail || 'Failed to load sales data');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dateFrom, dateTo]);
 
   useEffect(() => {
     fetchSalesData();
