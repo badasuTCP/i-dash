@@ -61,9 +61,10 @@ export const brands = [
 // ────────────────────────────────────────────────────────────────
 export const brandPages = {
   cp: [
-    { to: '/dashboard/cp',                label: 'Dashboard',          icon: LayoutDashboard },
-    { to: '/dashboard/cp/web-analytics',  label: 'Web Analytics',      icon: Globe },
-    { to: '/dashboard/cp/marketing',      label: 'Marketing Campaign', icon: Megaphone },
+    { to: '/dashboard/cp',                     label: 'Dashboard',          icon: LayoutDashboard },
+    { to: '/dashboard/cp/web-analytics',       label: 'Web Analytics',      icon: Globe },
+    { to: '/dashboard/cp/marketing',           label: 'Marketing Campaign', icon: Megaphone },
+    { to: '/dashboard/sales-intelligence',     label: 'Sales Intelligence', icon: TrendingUp },
   ],
   sanitred: [
     { to: '/dashboard/sanitred',                label: 'Dashboard',          icon: LayoutDashboard },
@@ -89,12 +90,8 @@ export const executiveLink = {
   roles: ['executive', 'data-analyst'],
 };
 
-export const salesIntelligenceLink = {
-  to: '/dashboard/sales-intelligence',
-  label: 'Sales Intelligence',
-  icon: TrendingUp,
-  roles: ['executive', 'data-analyst'],
-};
+// Sales Intelligence is now under CP brand pages (above)
+export const salesIntelligenceLink = null;
 
 // ────────────────────────────────────────────────────────────────
 // Admin & Tools section

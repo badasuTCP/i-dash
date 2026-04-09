@@ -691,17 +691,22 @@ async def get_sales_intelligence(
         "contacts": int(agg[8] or 0),
     }
 
-    # ── 4. Rep leaderboard from cached owner map (NO live API calls) ────
-    # The pipeline already synced deals into hubspot_metrics.
-    # Owner names come from the cached owner map (10-min TTL).
-    # This keeps the response under 1 second with zero memory spikes.
+    # ── 4. Rep leaderboard — whitelist + heuristic revenue ──────────────
+    # Only show active sales reps. Admin/general owners are excluded.
+    SALES_REP_WHITELIST = {
+        "Kathy Fowler", "Tony Phillips", "Brett Pettiford",
+        "Nakoiya Dotson", "Darian Booth",
+    }
+
+    # Heuristic: $2,500 average deal value when HubSpot amount is $0/NULL
+    HEURISTIC_DEAL_VALUE = 2500.0
+
     reps_data = []
     for owner_id, info in owners.items():
-        name = f"{info.get('first', '')} {info.get('last', '')}".strip() or info.get("email", "Unknown Rep")
-        initials = (
-            (info.get("first", "?")[0] + (info.get("last", "?")[0] if info.get("last") else "")).upper()
-            if info.get("first") else "??"
-        )
+        name = f"{info.get('first', '')} {info.get('last', '')}".strip()
+        if not name or name not in SALES_REP_WHITELIST:
+            continue
+        initials = (info.get("first", "?")[0] + (info.get("last", "?")[0] if info.get("last") else "")).upper()
         reps_data.append({
             "id": owner_id,
             "name": name,
@@ -720,9 +725,20 @@ async def get_sales_intelligence(
             "pipeline_value": 0.0,
         })
 
-    # Pipeline waterfall from DB totals
-    rev = totals["revenue_won"]
-    pipe = totals["pipeline_value"]
+    # Apply heuristic revenue: if DB revenue is near-zero but deals exist,
+    # estimate based on $2,500 per won deal.
+    deals_won = totals["deals_won"]
+    actual_rev = totals["revenue_won"]
+    heuristic_rev = max(actual_rev, deals_won * HEURISTIC_DEAL_VALUE) if deals_won > 0 else actual_rev
+    heuristic_pipeline = max(totals["pipeline_value"], totals["deals_created"] * HEURISTIC_DEAL_VALUE * 0.3)
+
+    # Override totals with heuristic values
+    totals["revenue_won"] = heuristic_rev
+    totals["pipeline_value"] = heuristic_pipeline
+
+    # Pipeline waterfall from heuristic totals
+    rev = heuristic_rev
+    pipe = heuristic_pipeline
     pipeline_waterfall = [
         {"name": "Starting Pipeline", "value": pipe + rev, "fill": "#6366F1"},
         {"name": "New Deals (+)", "value": pipe, "fill": "#22D3EE"},

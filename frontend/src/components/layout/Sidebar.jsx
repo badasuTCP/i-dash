@@ -218,18 +218,7 @@ const Sidebar = () => {
           </div>
         )}
 
-        {/* Sales Intelligence */}
-        {salesIntelligenceLink.roles.includes(userRole) && (
-          <div className={collapsed ? 'px-2' : 'px-3'}>
-            <NavItem
-              to={salesIntelligenceLink.to}
-              label={salesIntelligenceLink.label}
-              icon={salesIntelligenceLink.icon}
-              accent="#06B6D4"
-              collapsed={collapsed}
-            />
-          </div>
-        )}
+        {/* Sales Intelligence — now under CP brand pages */}
 
         {/* ── Brand Switcher ──────────────────────────────────────── */}
         <SectionLabel collapsed={collapsed}>Brand</SectionLabel>
