@@ -4,14 +4,29 @@ Main FastAPI application for I-Dash Analytics Platform.
 Configures routes, middleware, startup/shutdown events, and core application settings.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+class TimeoutMiddleware(BaseHTTPMiddleware):
+    """Abort any request that takes longer than 15 seconds."""
+
+    async def dispatch(self, request: Request, call_next):
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=15.0)
+        except asyncio.TimeoutError:
+            return JSONResponse(
+                status_code=504,
+                content={"detail": "Request timed out (15s limit)"},
+            )
 
 from app.api import (
     ai_router,
@@ -168,6 +183,9 @@ app = FastAPI(
     redoc_url="/api/redoc",
     lifespan=lifespan,
 )
+
+# 15-second request timeout — prevents memory spikes from heavy queries
+app.add_middleware(TimeoutMiddleware)
 
 # CORS — wide open. Railway Firewall handles restriction.
 app.add_middleware(

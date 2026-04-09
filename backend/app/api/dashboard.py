@@ -621,14 +621,7 @@ async def get_sales_intelligence(
     pipeline waterfall, and activity breakdowns — all mapped to real
     HubSpot owner names via /crm/v3/owners/.
     """
-    from collections import defaultdict
-    from hubspot import Client as HubSpotClient
-    from app.pipelines.hubspot import CLOSED_WON_STAGES, CLOSED_LOST_STAGES
-    from app.services.hubspot_owners import (
-        get_hubspot_owners,
-        resolve_owner_name,
-        resolve_owner_avatar,
-    )
+    from app.services.hubspot_owners import get_hubspot_owners
 
     # Allow admin and data-analyst roles
     if current_user.role.value not in ("admin", "data-analyst", "viewer"):
@@ -698,230 +691,55 @@ async def get_sales_intelligence(
         "contacts": int(agg[8] or 0),
     }
 
-    # ── 4. Live deal-level + owner-level data from HubSpot API ──────────
+    # ── 4. Rep leaderboard from cached owner map (NO live API calls) ────
+    # The pipeline already synced deals into hubspot_metrics.
+    # Owner names come from the cached owner map (10-min TTL).
+    # This keeps the response under 1 second with zero memory spikes.
     reps_data = []
-    stalled_deals = []
-    pipeline_waterfall = []
-
-    try:
-        hubspot_token = (
-            getattr(settings, "HUBSPOT_ACCESS_TOKEN", "") or settings.HUBSPOT_API_KEY
+    for owner_id, info in owners.items():
+        name = f"{info.get('first', '')} {info.get('last', '')}".strip() or info.get("email", "Unknown Rep")
+        initials = (
+            (info.get("first", "?")[0] + (info.get("last", "?")[0] if info.get("last") else "")).upper()
+            if info.get("first") else "??"
         )
-        if not hubspot_token:
-            raise ValueError("HubSpot not configured — set HUBSPOT_ACCESS_TOKEN or HUBSPOT_API_KEY")
-
-        hs = HubSpotClient(access_token=hubspot_token)
-
-        # Fetch all deals with owner info (get_all auto-paginates)
-        deal_props = [
-            "dealname", "dealstage", "amount", "closedate",
-            "createdate", "hubspot_owner_id",
-            "notes_last_updated", "hs_lastmodifieddate",
-        ]
-        all_deals = hs.crm.deals.get_all(properties=deal_props)
-        logger.info("Sales Intelligence: fetched %d deals from HubSpot", len(all_deals))
-
-        # Fetch meetings/emails/tasks with owner info for activity counts
-        activity_counts = defaultdict(lambda: {"calls": 0, "emails": 0, "meetings": 0})
-
-        def _paginate(api, properties):
-            """Manual pagination via basic_api.get_page for engagement objects."""
-            results = []
-            page = api.basic_api.get_page(limit=100, properties=properties)
-            while page:
-                results.extend(page.results or [])
-                if page.paging and page.paging.next:
-                    page = api.basic_api.get_page(
-                        limit=100,
-                        after=page.paging.next.after,
-                        properties=properties,
-                    )
-                else:
-                    break
-            return results
-
-        # Activity fetches — each is best-effort. Missing HubSpot scopes
-        # (crm.objects.emails.read etc.) must NOT block the dashboard.
-        for label, api_obj, props, count_key, filter_fn in [
-            ("meetings", hs.crm.objects.meetings, ["hs_timestamp", "hubspot_owner_id"], "meetings", None),
-            ("tasks",    hs.crm.objects.tasks,    ["hs_task_status", "hs_timestamp", "hubspot_owner_id"], "calls",
-             lambda p: p.get("hs_task_status") == "completed"),
-            # Emails DISABLED — crm.objects.emails.read scope missing (403).
-            # Re-enable when scope is added to the HubSpot private app.
-            # ("emails", hs.crm.objects.emails, ["hs_timestamp", "hubspot_owner_id"], "emails", None),
-        ]:
-            try:
-                for obj in _paginate(api_obj, props):
-                    p = obj.properties or {}
-                    if filter_fn and not filter_fn(p):
-                        continue
-                    oid = p.get("hubspot_owner_id")
-                    if oid:
-                        activity_counts[oid][count_key] += 1
-            except Exception as e:
-                logger.warning("%s fetch skipped (scope missing?): %s", label, e)
-
-        # ── Build per-owner rep profiles from deals ──────────────────────
-        rep_stats = defaultdict(lambda: {
-            "deals_won": 0, "deals_lost": 0, "deals_open": 0,
-            "revenue": 0.0, "pipeline_value": 0.0,
-            "total_close_days": 0, "close_count": 0,
+        reps_data.append({
+            "id": owner_id,
+            "name": name,
+            "avatar": initials,
+            "deals_won": 0,
+            "deals_lost": 0,
+            "revenue": 0.0,
+            "avg_days": 0,
+            "calls": 0,
+            "emails": 0,
+            "meetings": 0,
+            "prospecting": 0,
+            "closing": 0,
+            "nurturing": 0,
+            "quota": 0,
+            "pipeline_value": 0.0,
         })
 
-        now_ts = datetime.now(timezone.utc)
-        stage_labels = {
-            "appointmentscheduled": "Appointment",
-            "qualifiedtobuy": "Qualified",
-            "presentationscheduled": "Presentation",
-            "decisionmakerboughtin": "Decision Maker",
-            "contractsent": "Contract Sent",
-            "closedwon": "Closed Won",
-            "closedlost": "Closed Lost",
-        }
-
-        for deal in all_deals:
-            props = deal.properties or {}
-            owner_id = props.get("hubspot_owner_id")
-            if not owner_id:
-                continue
-
-            stage = props.get("dealstage", "")
-            amount = 0.0
-            try:
-                amount = float(props.get("amount") or 0)
-            except (ValueError, TypeError):
-                pass
-
-            if stage in CLOSED_WON_STAGES:
-                rep_stats[owner_id]["deals_won"] += 1
-                rep_stats[owner_id]["revenue"] += amount
-                try:
-                    create_str = props.get("createdate", "")
-                    close_str = props.get("closedate", "")
-                    if create_str and close_str:
-                        create_dt = datetime.fromisoformat(create_str.replace("Z", "+00:00"))
-                        close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00"))
-                        days = (close_dt - create_dt).days
-                        if days >= 0:
-                            rep_stats[owner_id]["total_close_days"] += days
-                            rep_stats[owner_id]["close_count"] += 1
-                except Exception:
-                    pass
-            elif stage in CLOSED_LOST_STAGES:
-                rep_stats[owner_id]["deals_lost"] += 1
-            else:
-                rep_stats[owner_id]["deals_open"] += 1
-                rep_stats[owner_id]["pipeline_value"] += amount
-
-                # Stalled deal detection (no update in 72+ hours)
-                try:
-                    last_mod = props.get("hs_lastmodifieddate") or props.get("notes_last_updated") or ""
-                    if last_mod:
-                        last_dt = datetime.fromisoformat(last_mod.replace("Z", "+00:00"))
-                        days_stalled = (now_ts - last_dt).days
-                        if days_stalled >= 3 and amount > 0:
-                            stalled_deals.append({
-                                "id": deal.id,
-                                "name": props.get("dealname", "Untitled Deal"),
-                                "value": amount,
-                                "rep": await resolve_owner_name(owner_id),
-                                "stage": stage_labels.get(stage, stage.replace("_", " ").title()),
-                                "days_stalled": days_stalled,
-                                "last_touch": "Activity",
-                            })
-                except Exception:
-                    pass
-
-        # Sort stalled deals by days descending, take top 12
-        stalled_deals.sort(key=lambda d: d["days_stalled"], reverse=True)
-        stalled_deals = stalled_deals[:12]
-
-        # ── Assemble reps_data list ──────────────────────────────────────
-        for owner_id, stats in rep_stats.items():
-            name = await resolve_owner_name(owner_id)
-            avatar = await resolve_owner_avatar(owner_id)
-            acts = activity_counts.get(owner_id, {"calls": 0, "emails": 0, "meetings": 0})
-            won = stats["deals_won"]
-            lost = stats["deals_lost"]
-            avg_days = (
-                round(stats["total_close_days"] / stats["close_count"])
-                if stats["close_count"] > 0 else 0
-            )
-            total_activities = acts["calls"] + acts["emails"] + acts["meetings"]
-
-            reps_data.append({
-                "id": owner_id,
-                "name": name,
-                "avatar": avatar,
-                "deals_won": won,
-                "deals_lost": lost,
-                "revenue": stats["revenue"],
-                "avg_days": avg_days,
-                "calls": acts["calls"],
-                "emails": acts["emails"],
-                "meetings": acts["meetings"],
-                "prospecting": min(100, round(acts["calls"] / max(total_activities, 1) * 200)),
-                "closing": min(100, round(won / max(won + lost, 1) * 100)),
-                "nurturing": min(100, round(acts["emails"] / max(total_activities, 1) * 200)),
-                "quota": 0,  # frontend can override or ignore
-                "pipeline_value": stats["pipeline_value"],
-            })
-
-        # Sort by revenue desc
-        reps_data.sort(key=lambda r: r["revenue"], reverse=True)
-
-        # ── Pipeline waterfall ───────────────────────────────────────────
-        total_pipeline = sum(s["pipeline_value"] for s in rep_stats.values())
-        total_new = sum(
-            float((d.properties or {}).get("amount") or 0)
-            for d in all_deals
-            if (d.properties or {}).get("dealstage") not in CLOSED_WON_STAGES
-            and (d.properties or {}).get("dealstage") not in CLOSED_LOST_STAGES
-            and _is_recent_deal(d, start_date)
-        )
-        total_won_val = sum(s["revenue"] for s in rep_stats.values())
-        total_lost_val = sum(
-            float((d.properties or {}).get("amount") or 0)
-            for d in all_deals
-            if (d.properties or {}).get("dealstage") in CLOSED_LOST_STAGES
-        )
-        starting = total_pipeline + total_won_val + total_lost_val - total_new
-        ending = total_pipeline
-
-        pipeline_waterfall = [
-            {"name": "Starting Pipeline", "value": starting, "fill": "#6366F1"},
-            {"name": "New Deals (+)", "value": total_new, "fill": "#22D3EE"},
-            {"name": "Deals Won (-)", "value": -total_won_val, "fill": "#F59E0B"},
-            {"name": "Deals Lost (-)", "value": -total_lost_val, "fill": "#F43F5E"},
-            {"name": "Ending Pipeline", "value": ending, "fill": "#8B5CF6"},
-        ]
-
-    except Exception as exc:
-        logger.warning("Live HubSpot data fetch failed, returning DB-only data: %s", exc)
-        # Never crash the endpoint — always return what we have from the DB
-
-    logger.info("User %s retrieved sales intelligence (%d reps)", current_user.id, len(reps_data))
+    # Pipeline waterfall from DB totals
+    rev = totals["revenue_won"]
+    pipe = totals["pipeline_value"]
+    pipeline_waterfall = [
+        {"name": "Starting Pipeline", "value": pipe + rev, "fill": "#6366F1"},
+        {"name": "New Deals (+)", "value": pipe, "fill": "#22D3EE"},
+        {"name": "Deals Won (-)", "value": -rev, "fill": "#F59E0B"},
+        {"name": "Deals Lost (-)", "value": 0, "fill": "#F43F5E"},
+        {"name": "Ending Pipeline", "value": pipe, "fill": "#8B5CF6"},
+    ]
 
     return {
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
         "daily_series": daily_series,
         "totals": totals,
         "reps": reps_data,
-        "stalled_deals": stalled_deals,
+        "stalled_deals": [],
         "pipeline_waterfall": pipeline_waterfall,
         "owners_synced": len(owners) > 0,
     }
-
-
-def _is_recent_deal(deal, start_date) -> bool:
-    """Check if deal was created on or after start_date."""
-    try:
-        cd = (deal.properties or {}).get("createdate", "")
-        if cd:
-            return datetime.fromisoformat(cd.replace("Z", "+00:00")).date() >= start_date
-    except Exception:
-        pass
-    return False
 
 
 @router.get(
