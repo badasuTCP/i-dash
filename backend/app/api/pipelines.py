@@ -345,3 +345,34 @@ async def get_pipeline_history(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve pipeline history",
         )
+
+
+@router.get(
+    "/system/recent-errors",
+    summary="Recent pipeline errors for admin system log viewer",
+)
+async def get_recent_errors(
+    current_user: User = Depends(get_current_user),
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """Return the most recent failed pipeline executions across all pipelines."""
+    from sqlalchemy import desc, select
+
+    result = await db.execute(
+        select(PipelineLog)
+        .where(PipelineLog.status == PipelineStatus.FAILED)
+        .order_by(desc(PipelineLog.started_at))
+        .limit(limit)
+    )
+    logs = result.scalars().all()
+
+    return [
+        {
+            "pipeline": log.pipeline_name,
+            "started_at": log.started_at.isoformat() if log.started_at else None,
+            "error": log.error_message,
+            "duration_seconds": log.duration_seconds,
+        }
+        for log in logs
+    ]

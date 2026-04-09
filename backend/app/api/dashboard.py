@@ -623,6 +623,7 @@ async def get_sales_intelligence(
     """
     from collections import defaultdict
     from hubspot import Client as HubSpotClient
+    from app.pipelines.hubspot import CLOSED_WON_STAGES, CLOSED_LOST_STAGES
     from app.services.hubspot_owners import (
         get_hubspot_owners,
         resolve_owner_name,
@@ -709,10 +710,13 @@ async def get_sales_intelligence(
     pipeline_waterfall = []
 
     try:
-        if not settings.HUBSPOT_API_KEY:
-            raise ValueError("HUBSPOT_API_KEY not configured")
+        hubspot_token = (
+            getattr(settings, "HUBSPOT_ACCESS_TOKEN", "") or settings.HUBSPOT_API_KEY
+        )
+        if not hubspot_token:
+            raise ValueError("HubSpot not configured — set HUBSPOT_ACCESS_TOKEN or HUBSPOT_API_KEY")
 
-        hs = HubSpotClient(access_token=settings.HUBSPOT_API_KEY)
+        hs = HubSpotClient(access_token=hubspot_token)
 
         # Fetch all deals with owner info (get_all auto-paginates)
         deal_props = [
@@ -801,10 +805,9 @@ async def get_sales_intelligence(
             except (ValueError, TypeError):
                 pass
 
-            if stage == "closedwon":
+            if stage in CLOSED_WON_STAGES:
                 rep_stats[owner_id]["deals_won"] += 1
                 rep_stats[owner_id]["revenue"] += amount
-                # Calculate days to close
                 try:
                     create_str = props.get("createdate", "")
                     close_str = props.get("closedate", "")
@@ -817,7 +820,7 @@ async def get_sales_intelligence(
                             rep_stats[owner_id]["close_count"] += 1
                 except Exception:
                     pass
-            elif stage == "closedlost":
+            elif stage in CLOSED_LOST_STAGES:
                 rep_stats[owner_id]["deals_lost"] += 1
             else:
                 rep_stats[owner_id]["deals_open"] += 1
@@ -885,14 +888,15 @@ async def get_sales_intelligence(
         total_new = sum(
             float((d.properties or {}).get("amount") or 0)
             for d in all_deals
-            if (d.properties or {}).get("dealstage") not in ("closedwon", "closedlost")
+            if (d.properties or {}).get("dealstage") not in CLOSED_WON_STAGES
+            and (d.properties or {}).get("dealstage") not in CLOSED_LOST_STAGES
             and _is_recent_deal(d, start_date)
         )
         total_won_val = sum(s["revenue"] for s in rep_stats.values())
         total_lost_val = sum(
             float((d.properties or {}).get("amount") or 0)
             for d in all_deals
-            if (d.properties or {}).get("dealstage") == "closedlost"
+            if (d.properties or {}).get("dealstage") in CLOSED_LOST_STAGES
         )
         starting = total_pipeline + total_won_val + total_lost_val - total_new
         ending = total_pipeline
