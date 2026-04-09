@@ -120,19 +120,28 @@ async def lifespan(app: FastAPI):
     - Stop scheduler
     - Close database connections
     """
-    # Startup
+    # Startup — the server MUST stay online even if optional services fail.
+    # Only a database failure is truly fatal.
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
 
     try:
         await _initialize_database()
-        await _create_default_admin()
-        await _start_scheduler()
-
-        logger.info("Application startup completed successfully")
-
     except Exception as e:
-        logger.error(f"Critical error during startup: {str(e)}")
-        raise
+        logger.critical(f"DATABASE FAILURE — cannot start: {e}")
+        raise  # DB is the only hard dependency
+
+    # Everything below is best-effort — failures are logged, not fatal.
+    try:
+        await _create_default_admin()
+    except Exception as e:
+        logger.warning(f"Admin user creation skipped: {e}")
+
+    try:
+        await _start_scheduler()
+    except Exception as e:
+        logger.warning(f"Scheduler startup skipped: {e}")
+
+    logger.info("Application startup completed")
 
     yield
 
@@ -308,12 +317,13 @@ async def root() -> dict:
 
 
 if __name__ == "__main__":
+    import os
     import uvicorn
 
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
+        port=int(os.environ.get("PORT", 8000)),
         reload=settings.DEBUG,
         log_level="info" if not settings.DEBUG else "debug",
     )

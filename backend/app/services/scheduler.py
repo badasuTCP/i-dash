@@ -90,7 +90,7 @@ class SchedulerService:
 
         except Exception as e:
             self.logger.error(f"Error starting scheduler: {str(e)}")
-            raise
+            # Don't raise — the app must stay online without the scheduler
 
     async def stop(self) -> None:
         """

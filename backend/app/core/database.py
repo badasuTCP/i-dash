@@ -46,8 +46,9 @@ engine = create_async_engine(
     echo=settings.DEBUG,
     future=True,
     pool_pre_ping=True,
-    pool_size=20,
+    pool_size=5,
     max_overflow=10,
+    pool_recycle=300,
     connect_args=_connect_args,
 )
 
