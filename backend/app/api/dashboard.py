@@ -1032,10 +1032,31 @@ async def get_web_analytics(
     Granularity "auto" uses daily when the range is ≤ 90 days, monthly otherwise.
     """
     start_date, end_date = _get_date_range(date_from, date_to)
-    property_id = await _resolve_ga4_property(division, db=db, property_id_override=property_id)
 
-    # If no property is configured at all, return empty / no-live-data
-    if not property_id:
+    # ── Resolve which property IDs to query ──────────────────────────
+    # If a specific property_id is provided (Property Switcher), use it alone.
+    # Otherwise, query ALL enabled properties for the division (aggregated view).
+    single_property = property_id  # from query param
+    if single_property:
+        property_ids = [single_property]
+    else:
+        # Get all enabled properties for this division
+        try:
+            from app.models.ga4_property import GA4Property
+            props_result = await db.execute(
+                select(GA4Property.property_id)
+                .where(and_(GA4Property.division == division, GA4Property.enabled == True))
+            )
+            property_ids = [row[0] for row in props_result.fetchall()]
+        except Exception:
+            property_ids = []
+
+        # Fallback to single resolved property if no DB entries
+        if not property_ids:
+            resolved = await _resolve_ga4_property(division, db=db, property_id_override=None)
+            property_ids = [resolved] if resolved else []
+
+    if not property_ids:
         logger.info("No GA4 property configured for division '%s'", division)
         return _empty_web_analytics(start_date, end_date, division)
 
@@ -1049,7 +1070,7 @@ async def get_web_analytics(
         select(GA4Metric)
         .where(
             and_(
-                GA4Metric.property_id == property_id,
+                GA4Metric.property_id.in_(property_ids),
                 GA4Metric.date >= start_date,
                 GA4Metric.date <= end_date,
                 GA4Metric.channel == "(all)",
@@ -1064,11 +1085,11 @@ async def get_web_analytics(
 
     if not overview_rows:
         logger.info(
-            "No GA4 data in DB for property %s (%s), range %s–%s",
-            property_id, division, start_date, end_date,
+            "No GA4 data in DB for %s (%d properties), range %s–%s",
+            division, len(property_ids), start_date, end_date,
         )
         resp = _empty_web_analytics(start_date, end_date, division)
-        resp["property_id"] = property_id  # property exists, just no data yet
+        resp["property_ids"] = property_ids
         resp["awaiting_data"] = True
         return resp
 
@@ -1096,7 +1117,7 @@ async def get_web_analytics(
         )
         .where(
             and_(
-                GA4Metric.property_id == property_id,
+                GA4Metric.property_id.in_(property_ids),
                 GA4Metric.date >= prev_start,
                 GA4Metric.date <= prev_end,
                 GA4Metric.channel == "(all)",
@@ -1146,7 +1167,7 @@ async def get_web_analytics(
         )
         .where(
             and_(
-                GA4Metric.property_id == property_id,
+                GA4Metric.property_id.in_(property_ids),
                 GA4Metric.date >= start_date,
                 GA4Metric.date <= end_date,
                 GA4Metric.source != "(all)",
@@ -1177,7 +1198,7 @@ async def get_web_analytics(
         )
         .where(
             and_(
-                GA4Metric.property_id == property_id,
+                GA4Metric.property_id.in_(property_ids),
                 GA4Metric.date >= start_date,
                 GA4Metric.date <= end_date,
                 GA4Metric.device != "(all)",
@@ -1193,17 +1214,57 @@ async def get_web_analytics(
         for row in device_rows
     ]
 
+    # ── Website breakdown by property (for "All Properties" mode) ─────
+    website_breakdown = []
+    if len(property_ids) > 1:
+        try:
+            from app.models.ga4_property import GA4Property
+            breakdown_stmt = (
+                select(
+                    GA4Property.display_name,
+                    GA4Property.property_id,
+                    func.sum(GA4Metric.total_users).label("users"),
+                )
+                .join(GA4Property, GA4Property.property_id == GA4Metric.property_id)
+                .where(
+                    and_(
+                        GA4Metric.property_id.in_(property_ids),
+                        GA4Metric.date >= start_date,
+                        GA4Metric.date <= end_date,
+                        GA4Metric.channel == "(all)",
+                        GA4Metric.source == "(all)",
+                        GA4Metric.device == "(all)",
+                    )
+                )
+                .group_by(GA4Property.display_name, GA4Property.property_id)
+                .order_by(func.sum(GA4Metric.total_users).desc())
+            )
+            breakdown_result = await db.execute(breakdown_stmt)
+            _colors = ["#3B82F6", "#8B5CF6", "#10B981", "#F59E0B", "#EF4444",
+                        "#06B6D4", "#EC4899", "#F97316", "#14B8A6", "#6366F1"]
+            for i, row in enumerate(breakdown_result.all()):
+                website_breakdown.append({
+                    "name": row.display_name,
+                    "value": int(row.users or 0),
+                    "color": _colors[i % len(_colors)],
+                    "propertyId": row.property_id,
+                })
+        except Exception as e:
+            logger.warning("Website breakdown query failed: %s", e)
+
     logger.info(
-        "User %s fetched GA4 web analytics for %s (%d overview rows)",
-        current_user.id, division, len(overview_rows),
+        "User %s fetched GA4 web analytics for %s (%d overview rows, %d properties)",
+        current_user.id, division, len(overview_rows), len(property_ids),
     )
 
     return {
         "division": division,
-        "property_id": property_id,
+        "property_id": single_property or "all",
+        "property_count": len(property_ids),
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
         "granularity": granularity,
         "hasLiveData": True,
+        "websiteBreakdown": website_breakdown,
         "scorecards": {
             "totalVisits": total_sessions,
             "totalVisitsChange": _pct(total_sessions, prev_sessions),

@@ -203,19 +203,25 @@ const SalesIntelligence = () => {
   const gridColor = isDark ? 'rgba(71,85,105,0.15)' : 'rgba(203,213,225,0.4)';
   const axisColor = isDark ? 'rgba(148,163,184,0.3)' : 'rgba(148,163,184,0.5)';
 
-  // ── Fetch live data (re-fetches when global date changes) ─────────────────
+  // ── YTD default: Jan 1 of current year → today ────────────────────────────
+  const ytdStart = useMemo(() => `${new Date().getFullYear()}-01-01`, []);
+  const ytdEnd = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const effectiveDateFrom = dateFrom || ytdStart;
+  const effectiveDateTo = dateTo || ytdEnd;
+
+  // ── Fetch live data (re-fetches when global date or YTD changes) ──────────
   const fetchSalesData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await dashboardAPI.getSalesIntelligence(dateFrom, dateTo);
+      const { data } = await dashboardAPI.getSalesIntelligence(effectiveDateFrom, effectiveDateTo);
       setApiData(data);
     } catch (err) {
       setError(err?.response?.data?.detail || 'Failed to load sales data');
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo]);
+  }, [effectiveDateFrom, effectiveDateTo]);
 
   useEffect(() => {
     fetchSalesData();
