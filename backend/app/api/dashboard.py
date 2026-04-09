@@ -759,6 +759,47 @@ async def get_sales_intelligence(
     totals["revenue_won"] = total_rep_revenue or totals["revenue_won"]
     totals["pipeline_value"] = total_rep_pipeline or totals["pipeline_value"]
 
+    # ── 5. Training & form submission metrics from hubspot_contacts ────
+    training_submissions = {"total": 0, "training_leads": 0, "new_leads": 0, "per_rep": []}
+    try:
+        contact_query = await db.execute(text(f"""
+            SELECT
+                owner_id,
+                COUNT(*) AS total_contacts,
+                COUNT(*) FILTER (WHERE is_training_lead = 1) AS training_leads,
+                COUNT(*) FILTER (WHERE is_training_lead = 0 AND num_forms > 0) AS form_leads
+            FROM hubspot_contacts
+            WHERE owner_id IN ({",".join(f"'{i}'" for i in SALES_REP_IDS)})
+            GROUP BY owner_id
+            ORDER BY COUNT(*) DESC
+        """))
+        for row in contact_query.fetchall():
+            oid, total_c, training_c, form_c = row
+            info = owners.get(oid, {})
+            name = f"{info.get('first', '')} {info.get('last', '')}".strip() or f"Rep {oid}"
+            training_submissions["per_rep"].append({
+                "owner_id": oid,
+                "name": name,
+                "total_contacts": total_c,
+                "training_leads": training_c,
+                "form_leads": form_c,
+            })
+            training_submissions["total"] += total_c
+            training_submissions["training_leads"] += training_c
+            training_submissions["new_leads"] += form_c
+
+            # Enrich rep data with form follow-ups
+            for rep in reps_data:
+                if rep["id"] == oid:
+                    rep["training_leads"] = training_c
+                    rep["form_followups"] = form_c
+                    break
+    except Exception as e:
+        logger.warning("hubspot_contacts query failed (table may not exist yet): %s", e)
+
+    totals["training_signups"] = training_submissions["training_leads"]
+    totals["form_submissions"] = training_submissions["total"]
+
     rev = totals["revenue_won"]
     pipe = totals["pipeline_value"]
     pipeline_waterfall = [
@@ -776,6 +817,7 @@ async def get_sales_intelligence(
         "reps": reps_data,
         "stalled_deals": [],
         "pipeline_waterfall": pipeline_waterfall,
+        "training_submissions": training_submissions,
         "owners_synced": len(owners) > 0,
     }
 

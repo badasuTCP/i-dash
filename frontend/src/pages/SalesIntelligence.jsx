@@ -281,12 +281,12 @@ const SalesIntelligence = () => {
 
     const avg = (key) => Math.round(target.reduce((s, r) => s + (r[key] || 0), 0) / target.length);
     return [
-      { metric: 'Prospecting', value: avg('prospecting'), fullMark: 100 },
-      { metric: 'Closing',     value: avg('closing'),     fullMark: 100 },
-      { metric: 'Nurturing',   value: avg('nurturing'),   fullMark: 100 },
-      { metric: 'Calls',       value: Math.min(100, Math.round(avg('calls') / Math.max(1, allReps.length) * 2)), fullMark: 100 },
-      { metric: 'Emails',      value: Math.min(100, Math.round(avg('emails') / Math.max(1, allReps.length))), fullMark: 100 },
-      { metric: 'Meetings',    value: Math.min(100, Math.round(avg('meetings') / Math.max(1, allReps.length) * 3)), fullMark: 100 },
+      { metric: 'Prospecting',    value: avg('prospecting'), fullMark: 100 },
+      { metric: 'Closing',        value: avg('closing'),     fullMark: 100 },
+      { metric: 'Nurturing',      value: avg('nurturing'),   fullMark: 100 },
+      { metric: 'Calls',          value: Math.min(100, Math.round(avg('calls') / Math.max(1, allReps.length) * 2)), fullMark: 100 },
+      { metric: 'Form Follow-ups', value: Math.min(100, Math.round(avg('form_followups') / Math.max(1, allReps.length) * 2)), fullMark: 100 },
+      { metric: 'Meetings',       value: Math.min(100, Math.round(avg('meetings') / Math.max(1, allReps.length) * 3)), fullMark: 100 },
     ];
   }, [allReps, selectedRep]);
 
@@ -831,8 +831,9 @@ const SalesIntelligence = () => {
             { label: 'Emails Sent', value: apiData?.totals?.emails || reps.reduce((s, r) => s + (r.emails || 0), 0), icon: Mail, color: 'text-violet-400', bg: 'from-violet-500/10 to-violet-600/5' },
             { label: 'Meetings', value: apiData?.totals?.meetings || reps.reduce((s, r) => s + (r.meetings || 0), 0), icon: Calendar, color: 'text-cyan-400', bg: 'from-cyan-500/10 to-cyan-600/5' },
             { label: 'Deals Won', value: apiData?.totals?.deals_won || totalWon, icon: Target, color: 'text-emerald-400', bg: 'from-emerald-500/10 to-emerald-600/5' },
-            { label: 'Deals Lost', value: apiData?.totals?.deals_lost || totalLost, icon: X, color: 'text-rose-400', bg: 'from-rose-500/10 to-rose-600/5' },
-            { label: 'Contacts', value: apiData?.totals?.contacts || 0, icon: Users, color: 'text-amber-400', bg: 'from-amber-500/10 to-amber-600/5' },
+            { label: 'Training Signups', value: apiData?.totals?.training_signups || 0, icon: Award, color: 'text-orange-400', bg: 'from-orange-500/10 to-orange-600/5' },
+            { label: 'New Leads', value: (apiData?.totals?.contacts || 0) - (apiData?.totals?.training_signups || 0), icon: Users, color: 'text-amber-400', bg: 'from-amber-500/10 to-amber-600/5' },
+            { label: 'Form Submissions', value: apiData?.totals?.form_submissions || 0, icon: Zap, color: 'text-violet-400', bg: 'from-violet-500/10 to-violet-600/5' },
           ].map((item, i) => (
             <motion.div
               key={item.label}

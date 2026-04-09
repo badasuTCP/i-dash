@@ -56,6 +56,27 @@ class HubSpotMetric(Base):
         return f"<HubSpotMetric(date={self.date}, revenue_won={self.revenue_won})>"
 
 
+class HubSpotContact(Base):
+    """Individual contact record for form/training attribution."""
+
+    __tablename__ = "hubspot_contacts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    contact_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(64), index=True, nullable=True)
+    lifecycle_stage: Mapped[str] = mapped_column(String(64), nullable=True)
+    recent_form: Mapped[str] = mapped_column(String(256), nullable=True)
+    num_forms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    training_class: Mapped[str] = mapped_column(String(128), nullable=True)
+    is_training_lead: Mapped[bool] = mapped_column(Integer, default=False, nullable=False)
+    created_date: Mapped[datetime] = mapped_column(Date, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class HubSpotDeal(Base):
     """Individual deal record for per-rep aggregation."""
 

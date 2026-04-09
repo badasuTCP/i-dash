@@ -125,8 +125,9 @@ class HubSpotPipeline(BasePipeline):
             tasks = await self._get_tasks()
             self.logger.info(f"Fetched {len(tasks)} tasks")
 
-            # Sync individual deals to hubspot_deals table (best-effort)
+            # Sync individual deals + contacts to tables (best-effort)
             await self._sync_deals_table(deals)
+            await self._sync_contacts_table(contacts)
 
             return {
                 "contacts": contacts,
@@ -203,6 +204,66 @@ class HubSpotPipeline(BasePipeline):
         except Exception as e:
             self.logger.warning(f"Deal sync to hubspot_deals failed (non-fatal): {e}")
 
+    async def _sync_contacts_table(self, contacts: list) -> None:
+        """Upsert contacts into hubspot_contacts for training/form attribution."""
+        try:
+            from app.models.metrics import HubSpotContact
+            from app.core.database import async_session_maker
+            from sqlalchemy import text
+
+            TRAINING_KEYWORDS = {"training", "class signup", "2-day", "3-day", "rustic concrete wood training"}
+
+            async with async_session_maker() as session:
+                await session.execute(text("DELETE FROM hubspot_contacts"))
+
+                count = 0
+                for contact in contacts:
+                    props = contact.properties if hasattr(contact, 'properties') else {}
+                    if not props:
+                        continue
+
+                    cid = str(contact.id) if hasattr(contact, 'id') else ''
+                    if not cid:
+                        continue
+
+                    recent_form = props.get('recent_conversion_event_name', '') or ''
+                    training_class = props.get('training_class', '') or ''
+                    num_forms = 0
+                    try:
+                        num_forms = int(props.get('num_conversion_events') or 0)
+                    except (ValueError, TypeError):
+                        pass
+
+                    is_training = bool(training_class) or any(
+                        kw in recent_form.lower() for kw in TRAINING_KEYWORDS
+                    )
+
+                    created = None
+                    try:
+                        cd = props.get('createdate', '')
+                        if cd:
+                            created = datetime.fromisoformat(cd.replace('Z', '+00:00')).date()
+                    except Exception:
+                        pass
+
+                    session.add(HubSpotContact(
+                        contact_id=cid,
+                        owner_id=props.get('hubspot_owner_id'),
+                        lifecycle_stage=props.get('lifecyclestage', ''),
+                        recent_form=recent_form[:256],
+                        num_forms=num_forms,
+                        training_class=training_class[:128] if training_class else None,
+                        is_training_lead=is_training,
+                        created_date=created,
+                    ))
+                    count += 1
+
+                await session.commit()
+                self.logger.info(f"Synced {count:,} contacts to hubspot_contacts table")
+
+        except Exception as e:
+            self.logger.warning(f"Contact sync to hubspot_contacts failed (non-fatal): {e}")
+
     async def _paginate(self, api, properties: List[str]) -> List[SimplePublicObject]:
         """Generic paginator for HubSpot CRM basic_api.get_page()."""
         results = []
@@ -225,7 +286,8 @@ class HubSpotPipeline(BasePipeline):
     async def _get_contacts(self) -> List[SimplePublicObject]:
         return await self._paginate(
             self.client.crm.contacts,
-            ["hs_lead_status", "createdate", "lifecyclestage"],
+            ["hs_lead_status", "createdate", "lifecyclestage", "hubspot_owner_id",
+             "recent_conversion_event_name", "num_conversion_events", "training_class"],
         )
 
     async def _get_deals(self) -> List[SimplePublicObject]:
