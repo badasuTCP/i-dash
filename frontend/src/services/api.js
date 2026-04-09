@@ -1,103 +1,40 @@
 import axios from 'axios';
 
-// ── API URL resolution ──────────────────────────────────────────────────
-// Production backend (Railway). No trailing slash, no /api — appended below.
-const PRODUCTION_BACKEND = 'https://i-dash-production.up.railway.app';
-
-const resolveApiUrl = () => {
-  // 1. PRODUCTION FIRST — hostname detection is bulletproof, never wrong.
-  //    Any page served from these hosts MUST talk to the Railway backend.
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname;
-    if (
-      host.includes('theconcreteprotector.com') ||
-      host.endsWith('.up.railway.app')
-    ) {
-      return `${PRODUCTION_BACKEND}/api`;
-    }
-  }
-  // 2. Explicit env var for staging / preview deploys
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
-  }
-  // 3. Local dev fallback
-  return 'http://localhost:8000/api';
-};
-
-const API_BASE_URL = resolveApiUrl();
+// ── Hardcoded production backend URL ────────────────────────────────────
+const API_BASE_URL =
+  typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+    ? 'https://i-dash-production.up.railway.app/api'
+    : 'http://localhost:8000/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  timeout: 30000,
+  headers: { 'Content-Type': 'application/json' },
 });
 
-// Storage keys — must match AuthContext
 const STORAGE_KEY_TOKEN = 'idash_token';
 const STORAGE_KEY_REFRESH = 'idash_refresh_token';
 
-// Request interceptor - add auth token
-// Demo tokens (demo-token-*) are local-only and must never be sent to the backend
-// — the backend's JWT lib will reject them and crash the exception handler
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem(STORAGE_KEY_TOKEN);
-    if (token && !token.startsWith('demo-')) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+// Request: attach token
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem(STORAGE_KEY_TOKEN);
+  if (token && !token.startsWith('demo-')) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
-// Response interceptor — retry on network errors (cold-start), handle 401
+// Response: on 401 clear token and go to login
 apiClient.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
-
-    // Retry once on network error (Railway cold-start / deploy gap)
-    if (!error.response && !originalRequest._networkRetry) {
-      originalRequest._networkRetry = true;
-      console.warn('[API] Network error — retrying in 3s (cold-start?)');
-      await new Promise((r) => setTimeout(r, 3000));
-      return apiClient(originalRequest);
-    }
-
-    // Handle 401/403 — stale or invalid token → force fresh login
-    const status = error.response?.status;
-    if ((status === 401 || status === 403) && !originalRequest._retry) {
-      originalRequest._retry = true;
-
-      // Try refresh first on 401
-      if (status === 401) {
-        try {
-          const refreshToken = localStorage.getItem(STORAGE_KEY_REFRESH);
-          if (refreshToken) {
-            const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-              refresh_token: refreshToken,
-            });
-            const { access_token } = response.data;
-            localStorage.setItem(STORAGE_KEY_TOKEN, access_token);
-            apiClient.defaults.headers.common.Authorization = `Bearer ${access_token}`;
-            return apiClient(originalRequest);
-          }
-        } catch (_) {
-          // refresh failed — fall through to logout
-        }
-      }
-
-      // Clear everything and force login
+  (error) => {
+    if (error.response?.status === 401) {
       localStorage.removeItem(STORAGE_KEY_TOKEN);
       localStorage.removeItem(STORAGE_KEY_REFRESH);
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
-      return Promise.reject(error);
     }
-
     return Promise.reject(error);
   }
 );

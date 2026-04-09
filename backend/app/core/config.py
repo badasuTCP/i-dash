@@ -37,7 +37,7 @@ class Settings(BaseSettings):
         description="Secret key for JWT signing",
     )
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 hours
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
 
     # CORS configuration
     CORS_ORIGINS: Union[str, List[str]] = Field(

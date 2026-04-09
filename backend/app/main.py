@@ -169,14 +169,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS middleware
+# CORS — wide open. Railway Firewall handles restriction.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Trust proxy headers from Railway / Cloudflare
+try:
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+except ImportError:
+    pass
 
 
 # Health check endpoint
