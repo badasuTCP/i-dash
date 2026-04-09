@@ -691,48 +691,80 @@ async def get_sales_intelligence(
         "contacts": int(agg[8] or 0),
     }
 
-    # ── 4. Rep leaderboard from live hubspot_deals table ─────────────────
-    from app.pipelines.hubspot import CLOSED_WON_STAGES, CLOSED_LOST_STAGES
+    # ── 4. SQL-Driven Rep Analytics Engine ───────────────────────────────
+    #
+    # Stage mapping discovered from live data (2026-04-09):
+    #   WON (revenue events):
+    #     1294734621 = Training Interest (expressed intent)
+    #     1301977206 = Deposit Received ($2,500 training fee)
+    #     1329928825 = L-1 Training Certification (completed)
+    #     1063609686 = DealerPro Initial Invoice Paid
+    #     1099300428 = Ecommerce Completed
+    #   LOST:
+    #     1295465102 = Exited Deal
+    #   PROGRESSION (pipeline value):
+    #     Everything else that isn't pre-launch (1297784895)
+    #
+    WON_STAGES = (
+        "'1294734621'", "'1301977206'", "'1329928825'",
+        "'1063609686'", "'1099300428'", "'closedwon'",
+        "'1097046920'", "'1330496638'", "'1330254373'",
+    )
+    LOST_STAGES = ("'1295465102'", "'closedlost'", "'1097046921'", "'1330254374'", "'1099300429'")
+    PRE_LAUNCH = "'1297784895'"
+    DEPOSIT_VALUE = 2500.0  # Training deposit per won deal
 
-    HEURISTIC_WON_VALUE = 2500.0
-    HEURISTIC_OPEN_VALUE = 1500.0
+    SALES_REP_IDS = ("'78942506'", "'78942505'", "'78361095'", "'86256389'", "'88346795'")
 
-    SALES_REP_IDS = {"78942506", "78942505", "78361095", "86256389", "88346795"}
-
-    # Query deal counts per owner from the DB (zero API calls)
     reps_data = []
     total_rep_revenue = 0.0
     total_rep_pipeline = 0.0
 
     try:
-        won_stages_str = ",".join(f"'{s}'" for s in CLOSED_WON_STAGES)
-        lost_stages_str = ",".join(f"'{s}'" for s in CLOSED_LOST_STAGES)
-
         rep_query = await db.execute(text(f"""
             SELECT
-                owner_id,
+                d.owner_id,
                 COUNT(*) AS total_deals,
-                COUNT(*) FILTER (WHERE stage IN ({won_stages_str})) AS won,
-                COUNT(*) FILTER (WHERE stage IN ({lost_stages_str})) AS lost,
-                COALESCE(SUM(CASE WHEN stage IN ({won_stages_str}) THEN amount ELSE 0 END), 0) AS won_amount,
-                COALESCE(SUM(CASE WHEN stage NOT IN ({won_stages_str}) AND stage NOT IN ({lost_stages_str}) THEN amount ELSE 0 END), 0) AS pipeline_amount
-            FROM hubspot_deals
-            WHERE owner_id IS NOT NULL AND owner_id IN ({",".join(f"'{i}'" for i in SALES_REP_IDS)})
-            GROUP BY owner_id
+                COUNT(*) FILTER (WHERE d.stage IN ({','.join(WON_STAGES)})) AS won,
+                COUNT(*) FILTER (WHERE d.stage IN ({','.join(LOST_STAGES)})) AS lost,
+                COUNT(*) FILTER (WHERE d.stage NOT IN ({','.join(WON_STAGES)})
+                                   AND d.stage NOT IN ({','.join(LOST_STAGES)})
+                                   AND d.stage != {PRE_LAUNCH}) AS progressing,
+                COALESCE(SUM(CASE WHEN d.stage IN ({','.join(WON_STAGES)})
+                    THEN GREATEST(d.amount, {DEPOSIT_VALUE}) ELSE 0 END), 0) AS won_revenue,
+                COALESCE(SUM(CASE WHEN d.stage NOT IN ({','.join(WON_STAGES)})
+                    AND d.stage NOT IN ({','.join(LOST_STAGES)})
+                    AND d.stage != {PRE_LAUNCH}
+                    THEN GREATEST(d.amount, 500) ELSE 0 END), 0) AS pipeline_value,
+                c.total_contacts,
+                c.training_leads,
+                c.form_leads
+            FROM hubspot_deals d
+            LEFT JOIN (
+                SELECT owner_id,
+                       COUNT(*) AS total_contacts,
+                       COUNT(*) FILTER (WHERE is_training_lead = 1) AS training_leads,
+                       COUNT(*) FILTER (WHERE is_training_lead = 0 AND num_forms > 0) AS form_leads
+                FROM hubspot_contacts
+                GROUP BY owner_id
+            ) c ON c.owner_id = d.owner_id
+            WHERE d.owner_id IN ({','.join(SALES_REP_IDS)})
+            GROUP BY d.owner_id, c.total_contacts, c.training_leads, c.form_leads
             ORDER BY COUNT(*) DESC
         """))
 
         for row in rep_query.fetchall():
-            oid, total_deals, won, lost, won_amount, pipeline_amount = row
+            oid = row[0]
+            total_deals, won, lost, progressing = row[1], row[2], row[3], row[4]
+            won_revenue, pipeline_val = float(row[5]), float(row[6])
+            contacts, training, forms = int(row[7] or 0), int(row[8] or 0), int(row[9] or 0)
+
             info = owners.get(oid, {})
             name = f"{info.get('first', '')} {info.get('last', '')}".strip() or f"Rep {oid}"
             initials = (info.get("first", "?")[0] + (info.get("last", "?")[0] if info.get("last") else "")).upper() if info.get("first") else "??"
 
-            rep_revenue = max(won_amount, won * HEURISTIC_WON_VALUE) if won > 0 else 0.0
-            open_deals = total_deals - won - lost
-            rep_pipeline = max(pipeline_amount, open_deals * HEURISTIC_OPEN_VALUE) if open_deals > 0 else 0.0
-            total_rep_revenue += rep_revenue
-            total_rep_pipeline += rep_pipeline
+            total_rep_revenue += won_revenue
+            total_rep_pipeline += pipeline_val
 
             reps_data.append({
                 "id": oid,
@@ -740,65 +772,38 @@ async def get_sales_intelligence(
                 "avatar": initials,
                 "deals_won": won,
                 "deals_lost": lost,
-                "revenue": rep_revenue,
+                "deals_progressing": progressing,
+                "revenue": won_revenue,
                 "avg_days": 14,
                 "calls": total_deals // 10,
                 "emails": 0,
                 "meetings": total_deals // 20,
-                "prospecting": min(100, total_deals // 30),
+                "training_leads": training,
+                "form_followups": forms,
+                "prospecting": min(100, round(progressing / max(total_deals, 1) * 100)),
                 "closing": round(won / max(won + lost, 1) * 100),
-                "nurturing": min(100, total_deals // 50),
+                "nurturing": min(100, round(contacts / max(total_deals, 1) * 50)),
                 "quota": 0,
-                "pipeline_value": rep_pipeline,
+                "pipeline_value": pipeline_val,
             })
+
     except Exception as e:
-        logger.warning("hubspot_deals query failed (table may not exist yet): %s", e)
+        logger.warning("SQL analytics query failed: %s", e)
 
     reps_data.sort(key=lambda r: r["revenue"], reverse=True)
 
     totals["revenue_won"] = total_rep_revenue or totals["revenue_won"]
     totals["pipeline_value"] = total_rep_pipeline or totals["pipeline_value"]
+    totals["training_signups"] = sum(r.get("training_leads", 0) for r in reps_data)
+    totals["form_submissions"] = sum(r.get("form_followups", 0) for r in reps_data)
 
-    # ── 5. Training & form submission metrics from hubspot_contacts ────
-    training_submissions = {"total": 0, "training_leads": 0, "new_leads": 0, "per_rep": []}
-    try:
-        contact_query = await db.execute(text(f"""
-            SELECT
-                owner_id,
-                COUNT(*) AS total_contacts,
-                COUNT(*) FILTER (WHERE is_training_lead = 1) AS training_leads,
-                COUNT(*) FILTER (WHERE is_training_lead = 0 AND num_forms > 0) AS form_leads
-            FROM hubspot_contacts
-            WHERE owner_id IN ({",".join(f"'{i}'" for i in SALES_REP_IDS)})
-            GROUP BY owner_id
-            ORDER BY COUNT(*) DESC
-        """))
-        for row in contact_query.fetchall():
-            oid, total_c, training_c, form_c = row
-            info = owners.get(oid, {})
-            name = f"{info.get('first', '')} {info.get('last', '')}".strip() or f"Rep {oid}"
-            training_submissions["per_rep"].append({
-                "owner_id": oid,
-                "name": name,
-                "total_contacts": total_c,
-                "training_leads": training_c,
-                "form_leads": form_c,
-            })
-            training_submissions["total"] += total_c
-            training_submissions["training_leads"] += training_c
-            training_submissions["new_leads"] += form_c
-
-            # Enrich rep data with form follow-ups
-            for rep in reps_data:
-                if rep["id"] == oid:
-                    rep["training_leads"] = training_c
-                    rep["form_followups"] = form_c
-                    break
-    except Exception as e:
-        logger.warning("hubspot_contacts query failed (table may not exist yet): %s", e)
-
-    totals["training_signups"] = training_submissions["training_leads"]
-    totals["form_submissions"] = training_submissions["total"]
+    training_submissions = {
+        "total": totals["form_submissions"],
+        "training_leads": totals["training_signups"],
+        "new_leads": totals["form_submissions"] - totals["training_signups"],
+        "per_rep": [{"name": r["name"], "training_leads": r.get("training_leads", 0),
+                     "form_leads": r.get("form_followups", 0)} for r in reps_data],
+    }
 
     rev = totals["revenue_won"]
     pipe = totals["pipeline_value"]
