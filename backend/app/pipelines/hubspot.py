@@ -232,7 +232,7 @@ class HubSpotPipeline(BasePipeline):
         return await self._paginate(
             self.client.crm.deals,
             ["dealname", "dealstage", "amount", "closedate",
-             "hs_analytics_num_visits", "createdate"],
+             "hs_analytics_num_visits", "createdate", "hubspot_owner_id"],
         )
 
     async def _get_meetings(self) -> List[SimplePublicObject]:
