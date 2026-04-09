@@ -37,12 +37,13 @@ async def get_hubspot_owners(force_refresh: bool = False) -> Dict[str, Dict[str,
     if not force_refresh and _owner_cache and (time.time() - _cache_ts < _CACHE_TTL):
         return _owner_cache
 
-    if not settings.HUBSPOT_API_KEY:
-        logger.warning("HUBSPOT_API_KEY not set — cannot fetch owners")
+    hubspot_token = getattr(settings, "HUBSPOT_ACCESS_TOKEN", "") or settings.HUBSPOT_API_KEY
+    if not hubspot_token:
+        logger.warning("HubSpot not configured — cannot fetch owners")
         return _owner_cache or {}
 
     try:
-        client = Client(access_token=settings.HUBSPOT_API_KEY)
+        client = Client(access_token=hubspot_token)
         owners_map: Dict[str, Dict[str, Any]] = {}
 
         # get_all() auto-paginates through /crm/v3/owners/
