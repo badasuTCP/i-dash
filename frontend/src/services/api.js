@@ -28,7 +28,7 @@ const API_BASE_URL = resolveApiUrl();
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000,
+  timeout: 60000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -52,12 +52,21 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor - handle 401 and refresh token
+// Response interceptor — retry on network errors (cold-start), handle 401
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
 
+    // Retry once on network error (Railway cold-start / deploy gap)
+    if (!error.response && !originalRequest._networkRetry) {
+      originalRequest._networkRetry = true;
+      console.warn('[API] Network error — retrying in 3s (cold-start?)');
+      await new Promise((r) => setTimeout(r, 3000));
+      return apiClient(originalRequest);
+    }
+
+    // Handle 401 — try token refresh
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
@@ -75,7 +84,6 @@ apiClient.interceptors.response.use(
           return apiClient(originalRequest);
         }
       } catch (refreshError) {
-        // Redirect to login
         localStorage.removeItem(STORAGE_KEY_TOKEN);
         localStorage.removeItem(STORAGE_KEY_REFRESH);
         window.location.href = '/login';
