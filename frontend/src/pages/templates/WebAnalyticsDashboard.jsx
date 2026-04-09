@@ -116,34 +116,49 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
           ))}
         </motion.div>
 
-        {/* Visitor Trend — scrollable with Brush for long date ranges */}
+        {/* Visitor Trend — snaps to recent, scrollable backward */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-          className={`rounded-xl p-6 mb-8 ${cardBg}`}>
-          <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Visitor Trend</h3>
-          <div style={{ overflowX: 'auto' }}>
-            <div style={{ minWidth: Math.max(600, (vtResolved.data?.length || 0) * 14) }}>
-              <ResponsiveContainer width="100%" height={320}>
-                <AreaChart data={vtResolved.data}>
-                  <defs>
-                    <linearGradient id="visitGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />
-                      <stop offset="95%" stopColor={accentColor} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.4)'} />
-                  <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 11 }} />
-                  <YAxis stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => `${(v/1000).toFixed(1)}K`} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={v => [`${(v || 0).toLocaleString()}`]} />
-                  <Legend />
-                  <Area type="monotone" dataKey="visits" name="Total Visits" stroke={accentColor} fill="url(#visitGrad)" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: accentColor }} />
-                  <Line type="monotone" dataKey="returning" name="Returning" stroke="#8B5CF6" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                  {(vtResolved.data?.length || 0) > 14 && (
-                    <Brush dataKey="month" height={24} stroke={accentColor} fill={isDark ? '#1e293b' : '#f1f5f9'} />
-                  )}
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+          className={`rounded-xl p-6 mb-8 ${cardBg} relative`}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className={`text-lg font-semibold ${textPrimary}`}>Visitor Trend</h3>
+            {(vtResolved.data?.length || 0) > 31 && (
+              <span className={`text-[10px] px-2 py-1 rounded-full ${isDark ? 'bg-slate-700/50 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                ← Scroll for history
+              </span>
+            )}
           </div>
+          {/* Left fade hint when more data exists */}
+          {(vtResolved.data?.length || 0) > 31 && (
+            <div className="absolute left-0 top-16 bottom-4 w-8 pointer-events-none z-10"
+              style={{ background: isDark
+                ? 'linear-gradient(to right, rgba(26,29,46,0.9), transparent)'
+                : 'linear-gradient(to right, rgba(255,255,255,0.9), transparent)' }} />
+          )}
+          <ResponsiveContainer width="100%" height={340}>
+            <AreaChart data={vtResolved.data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="visitGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={accentColor} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.4)'} />
+              <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 11 }} />
+              <YAxis stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(1)}K` : v} />
+              <Tooltip contentStyle={tooltipStyle} formatter={v => [`${(v || 0).toLocaleString()}`]} animationDuration={200} />
+              <Legend />
+              <Area type="monotone" dataKey="visits" name="Total Visits" stroke={accentColor} fill="url(#visitGrad)" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: accentColor }} animationDuration={500} />
+              <Line type="monotone" dataKey="returning" name="Returning" stroke="#8B5CF6" strokeWidth={2} strokeDasharray="5 5" dot={false} animationDuration={500} />
+              {(vtResolved.data?.length || 0) > 14 && (
+                <Brush
+                  dataKey="month" height={24} stroke={accentColor}
+                  fill={isDark ? '#1e293b' : '#f1f5f9'}
+                  startIndex={Math.max(0, (vtResolved.data?.length || 0) - 30)}
+                  endIndex={(vtResolved.data?.length || 1) - 1}
+                />
+              )}
+            </AreaChart>
+          </ResponsiveContainer>
         </motion.div>
 
         {/* Website Breakdown + Device */}
@@ -151,16 +166,24 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
             className={`rounded-xl p-6 ${cardBg}`}>
             <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Website Breakdown by Users</h3>
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie data={websiteBreakdown} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value">
-                  {websiteBreakdown.map((entry, idx) => (
-                    <Cell key={idx} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={tooltipStyle} />
-              </PieChart>
-            </ResponsiveContainer>
+            {(websiteBreakdown || []).length > 0 ? (
+              <>
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart>
+                    <Pie data={websiteBreakdown} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value" animationDuration={500}>
+                      {(websiteBreakdown || []).map((entry, idx) => (
+                        <Cell key={idx} fill={entry?.color || '#94a3b8'} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`${(v || 0).toLocaleString()} users`, name]} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-[280px]">
+                <p className={`text-sm ${textSecondary}`}>Select "All Properties" to see breakdown</p>
+              </div>
+            )}
             <div className="space-y-2 mt-2">
               {websiteBreakdown.map((site, idx) => (
                 <div key={idx} className="flex items-center justify-between text-sm">

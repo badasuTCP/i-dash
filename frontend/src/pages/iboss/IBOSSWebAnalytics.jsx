@@ -22,10 +22,11 @@ const IBOSSWebAnalytics = () => {
     setSelectedPropertyName(displayName);
   };
 
-  const websiteBreakdown = useMemo(
-    () => liveBreakdown.filter((item) => isContractorActive(item.contractorId)),
-    [liveBreakdown, isContractorActive],
-  );
+  // Use contractor breakdown if available, otherwise fall back to GA4 property breakdown
+  const websiteBreakdown = useMemo(() => {
+    const filtered = liveBreakdown.filter((item) => isContractorActive(item.contractorId));
+    return filtered.length > 0 ? filtered : (ga4.websiteBreakdown || []);
+  }, [liveBreakdown, isContractorActive, ga4.websiteBreakdown]);
 
   const contractorDetails = useMemo(
     () => liveDetails.filter((row) => isContractorActive(row.contractorId)),
