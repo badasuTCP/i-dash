@@ -1137,24 +1137,28 @@ async def get_web_analytics(
             return 0 if cur == 0 else 100.0
         return round(((cur - prv) / abs(prv)) * 100, 1)
 
-    # ── Visitor trend series ─────────────────────────────────────────
+    # ── Visitor trend series (aggregated across all properties) ─────
+    from collections import OrderedDict as _OD
     visitor_trend = []
     if granularity == "daily":
+        daily_agg = _OD()
         for row in overview_rows:
-            visitor_trend.append({
-                "month": row.date.strftime("%b %d"),
-                "visits": row.sessions,
-                "returning": max(0, row.total_users - row.new_users),
-            })
+            key = row.date.strftime("%b %d")
+            if key not in daily_agg:
+                daily_agg[key] = {"visits": 0, "returning": 0}
+            daily_agg[key]["visits"] += row.sessions
+            daily_agg[key]["returning"] += max(0, row.total_users - row.new_users)
+        for label, vals in daily_agg.items():
+            visitor_trend.append({"month": label, **vals})
     else:
-        # Monthly aggregation
-        from collections import defaultdict as _dd
-        monthly = _dd(lambda: {"visits": 0, "returning": 0})
+        monthly_agg = _OD()
         for row in overview_rows:
             key = row.date.strftime("%b %Y")
-            monthly[key]["visits"] += row.sessions
-            monthly[key]["returning"] += max(0, row.total_users - row.new_users)
-        for label, vals in monthly.items():
+            if key not in monthly_agg:
+                monthly_agg[key] = {"visits": 0, "returning": 0}
+            monthly_agg[key]["visits"] += row.sessions
+            monthly_agg[key]["returning"] += max(0, row.total_users - row.new_users)
+        for label, vals in monthly_agg.items():
             visitor_trend.append({"month": label, **vals})
 
     # ── Traffic sources ──────────────────────────────────────────────

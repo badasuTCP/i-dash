@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
-  BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush,
 } from 'recharts';
 import { Filter, AlertCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
@@ -116,21 +116,34 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
           ))}
         </motion.div>
 
-        {/* Visitor Trend */}
+        {/* Visitor Trend — scrollable with Brush for long date ranges */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
           className={`rounded-xl p-6 mb-8 ${cardBg}`}>
           <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Visitor Trend</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={vtResolved.data}>
-              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
-              <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-              <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />
-              <Tooltip contentStyle={tooltipStyle} formatter={v => [`${v.toLocaleString()}`]} />
-              <Legend />
-              <Line type="monotone" dataKey="visits" name="Visits" stroke={accentColor} strokeWidth={2.5} dot={{ fill: accentColor, r: 4 }} />
-              <Line type="monotone" dataKey="returning" name="Returning" stroke="#8B5CF6" strokeWidth={2} strokeDasharray="5 5" />
-            </LineChart>
-          </ResponsiveContainer>
+          <div style={{ overflowX: 'auto' }}>
+            <div style={{ minWidth: Math.max(600, (vtResolved.data?.length || 0) * 14) }}>
+              <ResponsiveContainer width="100%" height={320}>
+                <AreaChart data={vtResolved.data}>
+                  <defs>
+                    <linearGradient id="visitGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={accentColor} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.4)'} />
+                  <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 11 }} />
+                  <YAxis stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => `${(v/1000).toFixed(1)}K`} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={v => [`${(v || 0).toLocaleString()}`]} />
+                  <Legend />
+                  <Area type="monotone" dataKey="visits" name="Total Visits" stroke={accentColor} fill="url(#visitGrad)" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: accentColor }} />
+                  <Line type="monotone" dataKey="returning" name="Returning" stroke="#8B5CF6" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+                  {(vtResolved.data?.length || 0) > 14 && (
+                    <Brush dataKey="month" height={24} stroke={accentColor} fill={isDark ? '#1e293b' : '#f1f5f9'} />
+                  )}
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </motion.div>
 
         {/* Website Breakdown + Device */}

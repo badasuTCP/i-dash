@@ -41,7 +41,7 @@ const CPWebAnalytics = () => {
       ]}
       scorecards={ga4.scorecards}
       visitorTrend={ga4.visitorTrend}
-      websiteBreakdown={[]}
+      websiteBreakdown={ga4.websiteBreakdown || []}
       deviceData={ga4.deviceData}
       trafficSources={ga4.trafficSources}
       metricsPerPeriod={ga4.metricsPerPeriod}

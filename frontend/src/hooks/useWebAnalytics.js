@@ -94,6 +94,7 @@ export function useWebAnalytics(division, fallback = {}, propertyId = null) {
     visitorTrend: liveData.visitorTrend || [],
     trafficSources: liveData.trafficSources || [],
     deviceData: liveData.deviceData || [],
+    websiteBreakdown: liveData.websiteBreakdown || [],
     metricsPerPeriod: liveMetricsPerPeriod,
     granularity: liveData.granularity || 'daily',
   };
