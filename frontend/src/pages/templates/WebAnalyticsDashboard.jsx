@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area,
@@ -9,6 +9,89 @@ import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
+
+// ── Trend Chart with contextual scroll hint ─────────────────────────────────
+const TrendChart = ({ data, accentColor, isDark, cardBg, textPrimary, tooltipStyle }) => {
+  const [hasScrolled, setHasScrolled] = useState(false);
+  const len = data?.length || 0;
+  const showBrush = len > 14;
+  const showHint = showBrush && len > 30 && !hasScrolled;
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+      className={`rounded-xl p-6 mb-8 ${cardBg} relative`}>
+      <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Visitor Trend</h3>
+
+      {/* Contextual hint — disappears permanently after first brush interaction */}
+      {showHint && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+          <motion.span
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0.4, 0.7, 0.4] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+            className={`text-[11px] uppercase tracking-widest font-medium px-4 py-2 rounded-full backdrop-blur-sm ${
+              isDark ? 'bg-slate-800/60 text-slate-400' : 'bg-white/70 text-slate-500'
+            }`}
+          >
+            ← Drag navigator to see full history
+          </motion.span>
+        </div>
+      )}
+
+      {/* Left-edge fade to hint at hidden past data */}
+      {showBrush && len > 30 && (
+        <div className="absolute left-0 top-16 bottom-12 w-6 pointer-events-none z-10 rounded-l-xl"
+          style={{ background: isDark
+            ? 'linear-gradient(to right, rgba(26,29,46,0.8), transparent)'
+            : 'linear-gradient(to right, rgba(255,255,255,0.8), transparent)' }} />
+      )}
+
+      <ResponsiveContainer width="100%" height={340}>
+        <AreaChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="visitGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={accentColor} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.4)'} />
+          <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 11 }} />
+          <YAxis stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(1)}K` : v} />
+          <Tooltip contentStyle={tooltipStyle} formatter={v => [`${(v || 0).toLocaleString()}`]} animationDuration={200} />
+          <Legend />
+          <Area type="monotone" dataKey="visits" name="Total Visits" stroke={accentColor} fill="url(#visitGrad)" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: accentColor }} animationDuration={500} />
+          <Line type="monotone" dataKey="returning" name="Returning" stroke="#8B5CF6" strokeWidth={2} strokeDasharray="5 5" dot={false} animationDuration={500} />
+          {showBrush && (
+            <Brush
+              dataKey="month" height={28} stroke={accentColor}
+              fill={isDark ? '#1e293b' : '#f1f5f9'}
+              startIndex={Math.max(0, len - 30)}
+              endIndex={len - 1}
+              onChange={() => { if (!hasScrolled) setHasScrolled(true); }}
+            />
+          )}
+        </AreaChart>
+      </ResponsiveContainer>
+
+      {/* Brush hover styling */}
+      <style>{`
+        .recharts-brush-slide { cursor: grab; }
+        .recharts-brush-slide:active { cursor: grabbing; }
+        .recharts-brush-traveller rect {
+          fill: ${accentColor};
+          rx: 3;
+          transition: fill 0.2s, opacity 0.2s;
+        }
+        .recharts-brush-traveller:hover rect {
+          fill: ${accentColor};
+          opacity: 1 !important;
+          filter: brightness(1.3);
+        }
+      `}</style>
+    </motion.div>
+  );
+};
+
 
 const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning, contractorDetails, hasLiveData, loading, apiReachable, propertyId, headerExtra }) => {
   const { isDark } = useTheme();
@@ -116,50 +199,15 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
           ))}
         </motion.div>
 
-        {/* Visitor Trend — snaps to recent, scrollable backward */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-          className={`rounded-xl p-6 mb-8 ${cardBg} relative`}>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className={`text-lg font-semibold ${textPrimary}`}>Visitor Trend</h3>
-            {(vtResolved.data?.length || 0) > 31 && (
-              <span className={`text-[10px] px-2 py-1 rounded-full ${isDark ? 'bg-slate-700/50 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
-                ← Scroll for history
-              </span>
-            )}
-          </div>
-          {/* Left fade hint when more data exists */}
-          {(vtResolved.data?.length || 0) > 31 && (
-            <div className="absolute left-0 top-16 bottom-4 w-8 pointer-events-none z-10"
-              style={{ background: isDark
-                ? 'linear-gradient(to right, rgba(26,29,46,0.9), transparent)'
-                : 'linear-gradient(to right, rgba(255,255,255,0.9), transparent)' }} />
-          )}
-          <ResponsiveContainer width="100%" height={340}>
-            <AreaChart data={vtResolved.data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="visitGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />
-                  <stop offset="95%" stopColor={accentColor} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.4)'} />
-              <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 11 }} />
-              <YAxis stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(1)}K` : v} />
-              <Tooltip contentStyle={tooltipStyle} formatter={v => [`${(v || 0).toLocaleString()}`]} animationDuration={200} />
-              <Legend />
-              <Area type="monotone" dataKey="visits" name="Total Visits" stroke={accentColor} fill="url(#visitGrad)" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: accentColor }} animationDuration={500} />
-              <Line type="monotone" dataKey="returning" name="Returning" stroke="#8B5CF6" strokeWidth={2} strokeDasharray="5 5" dot={false} animationDuration={500} />
-              {(vtResolved.data?.length || 0) > 14 && (
-                <Brush
-                  dataKey="month" height={24} stroke={accentColor}
-                  fill={isDark ? '#1e293b' : '#f1f5f9'}
-                  startIndex={Math.max(0, (vtResolved.data?.length || 0) - 30)}
-                  endIndex={(vtResolved.data?.length || 1) - 1}
-                />
-              )}
-            </AreaChart>
-          </ResponsiveContainer>
-        </motion.div>
+        {/* Visitor Trend — recent-first snap + contextual scroll hint */}
+        <TrendChart
+          data={vtResolved.data}
+          accentColor={accentColor}
+          isDark={isDark}
+          cardBg={cardBg}
+          textPrimary={textPrimary}
+          tooltipStyle={tooltipStyle}
+        />
 
         {/* Website Breakdown + Device */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
