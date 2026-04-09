@@ -66,29 +66,36 @@ apiClient.interceptors.response.use(
       return apiClient(originalRequest);
     }
 
-    // Handle 401 — try token refresh
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Handle 401/403 — stale or invalid token → force fresh login
+    const status = error.response?.status;
+    if ((status === 401 || status === 403) && !originalRequest._retry) {
       originalRequest._retry = true;
 
-      try {
-        const refreshToken = localStorage.getItem(STORAGE_KEY_REFRESH);
-        if (refreshToken) {
-          const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-            refresh_token: refreshToken,
-          });
-
-          const { access_token } = response.data;
-          localStorage.setItem(STORAGE_KEY_TOKEN, access_token);
-          apiClient.defaults.headers.common.Authorization = `Bearer ${access_token}`;
-
-          return apiClient(originalRequest);
+      // Try refresh first on 401
+      if (status === 401) {
+        try {
+          const refreshToken = localStorage.getItem(STORAGE_KEY_REFRESH);
+          if (refreshToken) {
+            const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+              refresh_token: refreshToken,
+            });
+            const { access_token } = response.data;
+            localStorage.setItem(STORAGE_KEY_TOKEN, access_token);
+            apiClient.defaults.headers.common.Authorization = `Bearer ${access_token}`;
+            return apiClient(originalRequest);
+          }
+        } catch (_) {
+          // refresh failed — fall through to logout
         }
-      } catch (refreshError) {
-        localStorage.removeItem(STORAGE_KEY_TOKEN);
-        localStorage.removeItem(STORAGE_KEY_REFRESH);
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
       }
+
+      // Clear everything and force login
+      localStorage.removeItem(STORAGE_KEY_TOKEN);
+      localStorage.removeItem(STORAGE_KEY_REFRESH);
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+      return Promise.reject(error);
     }
 
     return Promise.reject(error);

@@ -910,14 +910,8 @@ async def get_sales_intelligence(
         ]
 
     except Exception as exc:
-        # Surface HubSpot 403 to the frontend so the scope-hint banner appears
-        hs_status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
-        if hs_status == 403:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="HubSpot returned 403 Forbidden — the private app is missing required scopes (crm.objects.owners.read, crm.objects.deals.read)",
-            )
         logger.warning("Live HubSpot data fetch failed, returning DB-only data: %s", exc)
+        # Never crash the endpoint — always return what we have from the DB
 
     logger.info("User %s retrieved sales intelligence (%d reps)", current_user.id, len(reps_data))
 
