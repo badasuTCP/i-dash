@@ -630,26 +630,20 @@ async def get_sales_intelligence(
         resolve_owner_avatar,
     )
 
-    # Admin-only for now (super-admin role)
-    if current_user.role.value != "admin":
+    # Allow admin and data-analyst roles
+    if current_user.role.value not in ("admin", "data-analyst", "viewer"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Sales Intelligence requires admin access",
+            detail="Sales Intelligence requires at least viewer access",
         )
 
     start_date, end_date = _get_date_range(date_from, date_to)
 
-    # ── 1. Pre-load HubSpot owner map ──────────────────────────────────
+    # ── 1. Pre-load HubSpot owner map (best-effort, never fatal) ────────
     try:
         owners = await get_hubspot_owners()
     except Exception as exc:
-        hs_status = getattr(exc, "status", None) or getattr(exc, "status_code", None)
-        if hs_status == 403:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="HubSpot returned 403 Forbidden — the private app is missing the crm.objects.owners.read scope",
-            )
-        logger.warning("HubSpot owner fetch failed (non-403): %s", exc)
+        logger.warning("HubSpot owner fetch failed: %s", exc)
         owners = {}
 
     # ── 2. Daily time-series from HubSpotMetric (date-aggregate) ───────
@@ -746,33 +740,26 @@ async def get_sales_intelligence(
                     break
             return results
 
-        # Meetings
-        try:
-            for mtg in _paginate(hs.crm.objects.meetings, ["hs_timestamp", "hubspot_owner_id"]):
-                oid = (mtg.properties or {}).get("hubspot_owner_id")
-                if oid:
-                    activity_counts[oid]["meetings"] += 1
-        except Exception as e:
-            logger.warning("Meetings fetch for SI skipped: %s", e)
-
-        # Emails
-        try:
-            for em in _paginate(hs.crm.objects.emails, ["hs_timestamp", "hubspot_owner_id"]):
-                oid = (em.properties or {}).get("hubspot_owner_id")
-                if oid:
-                    activity_counts[oid]["emails"] += 1
-        except Exception as e:
-            logger.warning("Emails fetch for SI skipped: %s", e)
-
-        # Tasks (calls proxy)
-        try:
-            for t in _paginate(hs.crm.objects.tasks, ["hs_task_status", "hs_timestamp", "hubspot_owner_id"]):
-                props = t.properties or {}
-                oid = props.get("hubspot_owner_id")
-                if oid and props.get("hs_task_status") == "completed":
-                    activity_counts[oid]["calls"] += 1
-        except Exception as e:
-            logger.warning("Tasks fetch for SI skipped: %s", e)
+        # Activity fetches — each is best-effort. Missing HubSpot scopes
+        # (crm.objects.emails.read etc.) must NOT block the dashboard.
+        for label, api_obj, props, count_key, filter_fn in [
+            ("meetings", hs.crm.objects.meetings, ["hs_timestamp", "hubspot_owner_id"], "meetings", None),
+            ("tasks",    hs.crm.objects.tasks,    ["hs_task_status", "hs_timestamp", "hubspot_owner_id"], "calls",
+             lambda p: p.get("hs_task_status") == "completed"),
+            # Emails DISABLED — crm.objects.emails.read scope missing (403).
+            # Re-enable when scope is added to the HubSpot private app.
+            # ("emails", hs.crm.objects.emails, ["hs_timestamp", "hubspot_owner_id"], "emails", None),
+        ]:
+            try:
+                for obj in _paginate(api_obj, props):
+                    p = obj.properties or {}
+                    if filter_fn and not filter_fn(p):
+                        continue
+                    oid = p.get("hubspot_owner_id")
+                    if oid:
+                        activity_counts[oid][count_key] += 1
+            except Exception as e:
+                logger.warning("%s fetch skipped (scope missing?): %s", label, e)
 
         # ── Build per-owner rep profiles from deals ──────────────────────
         rep_stats = defaultdict(lambda: {

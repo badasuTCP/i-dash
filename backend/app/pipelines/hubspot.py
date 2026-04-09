@@ -108,25 +108,22 @@ class HubSpotPipeline(BasePipeline):
                 f"Extracting HubSpot data from {self.start_date} to {self.end_date}"
             )
 
-            # Extract contacts
+            # Each fetch is independent — a 403 on one must not block others
             contacts = await self._get_contacts()
-            self.logger.debug(f"Fetched {len(contacts)} contacts")
+            self.logger.info(f"Fetched {len(contacts)} contacts")
 
-            # Extract deals
             deals = await self._get_deals()
-            self.logger.debug(f"Fetched {len(deals)} deals")
+            self.logger.info(f"Fetched {len(deals)} deals")
 
-            # Extract meetings
             meetings = await self._get_meetings()
-            self.logger.debug(f"Fetched {len(meetings)} meetings")
+            self.logger.info(f"Fetched {len(meetings)} meetings")
 
-            # Extract emails
-            emails = await self._get_emails()
-            self.logger.debug(f"Fetched {len(emails)} emails")
+            # Emails DISABLED — crm.objects.emails.read scope missing (403)
+            emails = []
+            self.logger.info("Emails fetch disabled (missing scope)")
 
-            # Extract tasks
             tasks = await self._get_tasks()
-            self.logger.debug(f"Fetched {len(tasks)} tasks")
+            self.logger.info(f"Fetched {len(tasks)} tasks")
 
             return {
                 "contacts": contacts,
