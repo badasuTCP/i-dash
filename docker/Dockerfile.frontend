@@ -41,15 +41,18 @@ RUN touch /var/run/nginx.pid && \
 # Copy built application from builder
 COPY --from=builder --chown=nginx:nginx /build/dist /usr/share/nginx/html
 
-# Switch to nginx user
-USER nginx
+# Railway assigns PORT dynamically; default to 80
+ENV PORT=80
 
-# Health check
+# Health check uses dynamic port
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:80/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Expose port
-EXPOSE 80
+EXPOSE ${PORT}
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Use envsubst to inject $PORT into nginx.conf at runtime, then start nginx.
+# Run as root for envsubst, nginx drops to worker user internally.
+USER root
+CMD envsubst '${PORT}' < /etc/nginx/conf.d/default.conf > /tmp/nginx.conf \
+    && mv /tmp/nginx.conf /etc/nginx/conf.d/default.conf \
+    && nginx -g "daemon off;"

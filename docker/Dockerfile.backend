@@ -46,21 +46,24 @@ RUN chown -R appuser:appuser /app
 # Switch to non-root user
 USER appuser
 
-# Health check
+# Railway assigns PORT dynamically; default to 8080 for compatibility
+ENV PORT=8080
+
+# Health check uses the dynamic port
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Expose port
-EXPOSE 8000
+EXPOSE ${PORT}
 
-# Start gunicorn with uvicorn workers
-CMD ["gunicorn", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--workers", "4", \
-     "--worker-tmp-dir", "/dev/shm", \
-     "--max-requests", "10000", \
-     "--timeout", "120", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "--bind", "0.0.0.0:8000", \
-     "app.main:app"]
+# Start gunicorn — bind to 0.0.0.0:$PORT so Railway's proxy can reach it.
+# Must use shell form (not exec form) for $PORT variable expansion.
+CMD gunicorn \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --workers 4 \
+    --worker-tmp-dir /dev/shm \
+    --max-requests 10000 \
+    --timeout 120 \
+    --access-logfile - \
+    --error-logfile - \
+    --bind "0.0.0.0:${PORT}" \
+    app.main:app
