@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '../context/ThemeContext';
-import { useDashboardConfig, ALL_CONTRACTORS } from '../context/DashboardConfigContext';
+import { useDashboardConfig } from '../context/DashboardConfigContext';
 import { pipelinesAPI, contractorsAPI } from '../services/api';
 import {
   Database, Activity, AlertTriangle, CheckCircle, XCircle, Clock,
@@ -110,8 +110,9 @@ const PipelinesPage = () => {
   const [pendingContractors, setPendingContractors] = useState([]);
   const [approvingId, setApprovingId] = useState(null);
 
-  // Derive contractors array with active flag from context config
-  const contractors = ALL_CONTRACTORS.map((c) => ({
+  // Derive contractors from context's live API data (not hardcoded ALL_CONTRACTORS)
+  const { allContractors } = useDashboardConfig();
+  const contractors = (allContractors || []).map((c) => ({
     ...c,
     active: config.contractors?.[c.id] !== false,
   }));
