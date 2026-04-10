@@ -103,6 +103,37 @@ async def _create_default_admin() -> None:
         logger.error(f"Error creating default admin: {str(e)}")
 
 
+async def _seed_ibos_brand_assets() -> None:
+    """Pre-populate brand_assets with known I-BOS Meta/Google Ads IDs."""
+    try:
+        from app.models.brand_asset import BrandAsset
+        async with async_session_maker() as session:
+            existing = await session.execute(select(BrandAsset).limit(1))
+            if existing.scalar_one_or_none():
+                return  # Already seeded
+
+            IBOS_ASSETS = [
+                # Meta Ads accounts (from The Concrete Protector + I-Bos 2 portfolios)
+                ("meta", "act_144305066", "Beckley Concrete Decor"),
+                ("meta", "act_673130245854523", "Diamond Topcoat"),
+                ("meta", "1366105912189047", "Floor Warriors"),
+                ("meta", "1695172861344941", "TVS Coatings"),
+                ("meta", "1621412735957179", "Graber Design Coatings"),
+                # Google Ads customer IDs
+                ("google_ads", "6754610688", "Tailored Concrete Coatings"),
+                ("google_ads", "2957400868", "SLG Concrete Coatings"),
+            ]
+            for platform, acct_id, name in IBOS_ASSETS:
+                session.add(BrandAsset(
+                    platform=platform, account_id=acct_id, account_name=name,
+                    brand="ibos", source="seed", mapped_by="system",
+                ))
+            await session.commit()
+            logger.info("Seeded %d I-BOS brand assets", len(IBOS_ASSETS))
+    except Exception as e:
+        logger.warning("I-BOS brand asset seeding failed: %s", e)
+
+
 async def _start_scheduler() -> None:
     """Start the background scheduler for pipeline execution."""
     global _scheduler
@@ -156,6 +187,11 @@ async def lifespan(app: FastAPI):
         await _create_default_admin()
     except Exception as e:
         logger.warning(f"Admin user creation skipped: {e}")
+
+    try:
+        await _seed_ibos_brand_assets()
+    except Exception as e:
+        logger.warning(f"I-BOS brand asset seeding skipped: {e}")
 
     try:
         await _start_scheduler()

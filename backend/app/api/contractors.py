@@ -73,6 +73,7 @@ class ApproveContractorUpdate(BaseModel):
     reject: bool = False  # Set True to reject instead of approve
     name: Optional[str] = None  # Allow admin to rename on approval
     division: str = "i-bos"
+    brand: str = "ibos"  # Brand assignment: cp, sanitred, ibos
 
 
 # ── Helper: ensure rows exist (auto-seed on first call) ─────────────────
@@ -502,14 +503,64 @@ async def approve_contractor(
     except Exception as e:
         logger.debug("Could not write discovery audit: %s", e)
 
+    # Create brand_asset mapping on approval
+    if not body.reject:
+        try:
+            from app.models.brand_asset import BrandAsset
+            existing_asset = await db.execute(
+                select(BrandAsset).where(
+                    BrandAsset.account_id == (contractor.meta_account_id or contractor_id)
+                )
+            )
+            if not existing_asset.scalar_one_or_none():
+                db.add(BrandAsset(
+                    platform="meta" if contractor.meta_account_id else "ga4",
+                    account_id=contractor.meta_account_id or contractor_id,
+                    account_name=contractor.name,
+                    brand=body.brand,
+                    source="admin_approval",
+                    mapped_by=current_user.email,
+                ))
+        except Exception as e:
+            logger.debug("Could not create brand asset: %s", e)
+
     await db.commit()
     await db.refresh(contractor)
 
     logger.info(
-        "User %s %s contractor %s (status=%s)",
+        "User %s %s contractor %s (status=%s, brand=%s)",
         current_user.email,
         "rejected" if body.reject else "approved",
         contractor_id,
         contractor.status,
+        body.brand,
     )
     return ContractorResponse.model_validate(contractor)
+
+
+@router.get(
+    "/brand-assets",
+    summary="List all brand-mapped platform assets",
+)
+async def list_brand_assets(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    brand: Optional[str] = None,
+) -> List[Dict]:
+    """Return brand_assets, optionally filtered by brand slug."""
+    from app.models.brand_asset import BrandAsset
+
+    stmt = select(BrandAsset).order_by(BrandAsset.brand, BrandAsset.mapped_at.desc())
+    if brand:
+        stmt = stmt.where(BrandAsset.brand == brand)
+
+    result = await db.execute(stmt)
+    return [
+        {
+            "id": a.id, "platform": a.platform, "account_id": a.account_id,
+            "account_name": a.account_name, "brand": a.brand,
+            "source": a.source, "mapped_by": a.mapped_by,
+            "mapped_at": a.mapped_at.isoformat() if a.mapped_at else None,
+        }
+        for a in result.scalars().all()
+    ]
