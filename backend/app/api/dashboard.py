@@ -40,6 +40,40 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
+@router.get("/date-bounds", summary="Earliest/latest data across all sources")
+async def get_date_bounds(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Return the min/max dates from all data tables — drives the date picker."""
+    earliest = date.today()
+    latest = date.today()
+    sources = {}
+    for tbl, col in [
+        ("ga4_metrics", "date"), ("meta_ad_metrics", "date"),
+        ("google_ad_metrics", "date"), ("hubspot_metrics", "date"),
+        ("hubspot_deals", "created_date"), ("hubspot_contacts", "created_date"),
+    ]:
+        try:
+            r = await db.execute(text(f"SELECT MIN({col}), MAX({col}) FROM {tbl} WHERE {col} IS NOT NULL"))
+            row = r.fetchone()
+            if row and row[0]:
+                sources[tbl] = {"earliest": row[0].isoformat(), "latest": row[1].isoformat()}
+                if row[0] < earliest:
+                    earliest = row[0]
+                if row[1] > latest:
+                    latest = row[1]
+        except Exception:
+            pass
+    return {
+        "earliest": earliest.isoformat(),
+        "latest": latest.isoformat(),
+        "earliest_year": earliest.year,
+        "latest_year": latest.year,
+        "sources": sources,
+    }
+
+
 def _get_date_range(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
