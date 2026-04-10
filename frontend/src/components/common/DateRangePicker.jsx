@@ -58,8 +58,9 @@ const DateRangePicker = ({ onApply, onClear }) => {
     }},
     { id: 'last90',      label: 'Last 90 Days',  getRange: () => ({ start: subDays(today, 89), end: today }) },
     { id: 'ytd',         label: 'Year to Date',  getRange: () => ({ start: startOfYear(today), end: today }) },
+    { id: 'allTime',     label: 'All Time',       getRange: () => ({ start: dateBounds ? new Date(dateBounds.earliest) : new Date(2024, 0, 1), end: today }) },
     ...yearPresets,
-  ], [today, yearPresets]);
+  ], [today, yearPresets, dateBounds]);
 
   const allPresets = presets; // single flat list
 
