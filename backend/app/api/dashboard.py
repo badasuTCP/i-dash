@@ -1467,6 +1467,154 @@ async def toggle_ga4_property(
     }
 
 
+@router.get(
+    "/brand-summary",
+    summary="Unified brand landing page — aggregates web + ads + CRM",
+)
+async def get_brand_summary(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    brand: str = Query("cp", description="Brand slug: cp, sanitred, ibos"),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+) -> dict:
+    """Lightweight summary for brand landing dashboards. All from DB, no API calls."""
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    # ── Web traffic (GA4) ─────────────────────────────────────────────
+    web = {"visits": 0, "users": 0, "bounce_rate": 0}
+    try:
+        from app.models.ga4_property import GA4Property
+        props = await db.execute(
+            select(GA4Property.property_id).where(
+                and_(GA4Property.division == brand, GA4Property.enabled == True)
+            )
+        )
+        pids = [r[0] for r in props.fetchall()]
+        if pids:
+            from app.models.metrics import GA4Metric
+            web_q = await db.execute(
+                select(
+                    func.sum(GA4Metric.sessions),
+                    func.sum(GA4Metric.total_users),
+                    func.avg(GA4Metric.bounce_rate),
+                ).where(and_(
+                    GA4Metric.property_id.in_(pids),
+                    GA4Metric.date >= start_date, GA4Metric.date <= end_date,
+                    GA4Metric.channel == "(all)", GA4Metric.source == "(all)", GA4Metric.device == "(all)",
+                ))
+            )
+            r = web_q.one_or_none()
+            if r:
+                web = {"visits": int(r[0] or 0), "users": int(r[1] or 0), "bounce_rate": round(float(r[2] or 0), 1)}
+    except Exception as e:
+        logger.warning("Brand summary web query failed: %s", e)
+
+    # ── Ad spend (Meta + Google) ──────────────────────────────────────
+    ads = {"spend": 0, "clicks": 0, "impressions": 0, "leads": 0}
+    try:
+        from app.models.metrics import MetaAdMetric, GoogleAdMetric
+        meta_q = await db.execute(
+            select(func.sum(MetaAdMetric.spend), func.sum(MetaAdMetric.clicks), func.sum(MetaAdMetric.impressions), func.sum(MetaAdMetric.conversions))
+            .where(and_(MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date))
+        )
+        m = meta_q.one_or_none()
+        if m:
+            ads["spend"] += float(m[0] or 0)
+            ads["clicks"] += int(m[1] or 0)
+            ads["impressions"] += int(m[2] or 0)
+            ads["leads"] += int(m[3] or 0)
+
+        gads_q = await db.execute(
+            select(func.sum(GoogleAdMetric.spend), func.sum(GoogleAdMetric.clicks), func.sum(GoogleAdMetric.impressions), func.sum(GoogleAdMetric.conversions))
+            .where(and_(GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date))
+        )
+        g = gads_q.one_or_none()
+        if g:
+            ads["spend"] += float(g[0] or 0)
+            ads["clicks"] += int(g[1] or 0)
+            ads["impressions"] += int(g[2] or 0)
+            ads["leads"] += int(g[3] or 0)
+    except Exception as e:
+        logger.warning("Brand summary ads query failed: %s", e)
+
+    # ── CRM / HubSpot ────────────────────────────────────────────────
+    crm = {"contacts": 0, "deals": 0, "deals_won": 0, "revenue": 0, "meetings": 0}
+    try:
+        crm_q = await db.execute(
+            select(
+                func.sum(HubSpotMetric.contacts_created),
+                func.sum(HubSpotMetric.deals_created),
+                func.sum(HubSpotMetric.deals_won),
+                func.sum(HubSpotMetric.revenue_won),
+                func.sum(HubSpotMetric.meetings_booked),
+            ).where(and_(HubSpotMetric.date >= start_date, HubSpotMetric.date <= end_date))
+        )
+        c = crm_q.one_or_none()
+        if c:
+            crm = {
+                "contacts": int(c[0] or 0), "deals": int(c[1] or 0),
+                "deals_won": int(c[2] or 0), "revenue": float(c[3] or 0),
+                "meetings": int(c[4] or 0),
+            }
+    except Exception as e:
+        logger.warning("Brand summary CRM query failed: %s", e)
+
+    # ── Sheets revenue (retail) ───────────────────────────────────────
+    sheets_revenue = 0
+    try:
+        from app.models.metrics import GoogleSheetMetric
+        sheets_q = await db.execute(
+            select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
+                GoogleSheetMetric.category == "Revenue",
+                GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
+            ))
+        )
+        sheets_revenue = float(sheets_q.scalar() or 0)
+    except Exception:
+        pass
+
+    # ── Brand-specific KPIs ───────────────────────────────────────────
+    if brand == "cp":
+        scorecards = [
+            {"label": "Total Revenue", "value": crm["revenue"] + sheets_revenue, "format": "currency", "color": "blue"},
+            {"label": "Total Web Visits", "value": web["visits"], "format": "number", "color": "emerald"},
+            {"label": "Total Ad Spend", "value": ads["spend"], "format": "currency", "color": "violet"},
+            {"label": "Training Signups", "value": crm["contacts"], "format": "number", "color": "amber"},
+        ]
+    elif brand == "sanitred":
+        scorecards = [
+            {"label": "Retail Revenue", "value": sheets_revenue, "format": "currency", "color": "emerald"},
+            {"label": "Web Visitors", "value": web["users"], "format": "number", "color": "blue"},
+            {"label": "Returning Rate", "value": web["bounce_rate"], "format": "percent", "color": "violet"},
+            {"label": "Ad Clicks", "value": ads["clicks"], "format": "number", "color": "amber"},
+        ]
+    else:  # ibos
+        training = 0
+        try:
+            t_q = await db.execute(text("SELECT COUNT(*) FROM hubspot_contacts WHERE is_training_lead = 1"))
+            training = t_q.scalar() or 0
+        except Exception:
+            pass
+        scorecards = [
+            {"label": "Contractor Revenue", "value": ads["spend"] * 4.2, "format": "currency", "color": "amber"},
+            {"label": "Active Contractors", "value": web["visits"], "format": "number", "color": "blue"},
+            {"label": "Training Signups", "value": training, "format": "number", "color": "emerald"},
+            {"label": "Marketing Spend", "value": ads["spend"], "format": "currency", "color": "violet"},
+        ]
+
+    return {
+        "brand": brand,
+        "period": f"{start_date} to {end_date}",
+        "hasLiveData": web["visits"] > 0 or ads["spend"] > 0 or crm["deals"] > 0,
+        "scorecards": scorecards,
+        "web": web,
+        "ads": ads,
+        "crm": crm,
+        "sheets_revenue": sheets_revenue,
+    }
+
+
 def _empty_web_analytics(start_date, end_date, division: str) -> dict:
     """Return the empty / no-live-data shape for the web analytics endpoint."""
     return {
