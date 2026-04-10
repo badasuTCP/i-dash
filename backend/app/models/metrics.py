@@ -6,6 +6,7 @@ HubSpot, Meta (Facebook), Google Ads, Google Sheets, and aggregated dashboards.
 """
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import Date, DateTime, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
