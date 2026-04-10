@@ -10,43 +10,55 @@ import ScoreCard from '../../components/scorecards/ScoreCard';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
+// ── Custom Brush handle — "grip" icon (three vertical dots) ─────────────────
+const GripHandle = (props) => {
+  const { x, y, width, height } = props;
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+  return (
+    <g>
+      <rect x={x} y={y} width={width} height={height} rx={4}
+        fill="#4f46e5" stroke="#6366f1" strokeWidth={1}
+        style={{ cursor: 'ew-resize', transition: 'fill 0.15s' }} />
+      {/* Three vertical dots — grip icon */}
+      <circle cx={cx} cy={cy - 5} r={1.5} fill="#c7d2fe" />
+      <circle cx={cx} cy={cy}     r={1.5} fill="#c7d2fe" />
+      <circle cx={cx} cy={cy + 5} r={1.5} fill="#c7d2fe" />
+    </g>
+  );
+};
+
 // ── Trend Chart with contextual scroll hint ─────────────────────────────────
 const TrendChart = ({ data, accentColor, isDark, cardBg, textPrimary, tooltipStyle }) => {
   const [hasScrolled, setHasScrolled] = useState(false);
   const len = data?.length || 0;
   const showBrush = len > 14;
-  const showHint = showBrush && len > 30 && !hasScrolled;
+  const isLong = len > 30;
+  const showHint = showBrush && isLong && !hasScrolled;
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
       className={`rounded-xl p-6 mb-8 ${cardBg} relative`}>
       <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Visitor Trend</h3>
 
-      {/* Contextual hint — disappears permanently after first brush interaction */}
+      {/* Floating hint — positioned over the empty brush track (left side) */}
       {showHint && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+        <div className="absolute bottom-8 left-16 right-1/2 flex items-center justify-center pointer-events-none z-20">
           <motion.span
-            initial={{ opacity: 0 }}
-            animate={{ opacity: [0.4, 0.7, 0.4] }}
-            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-            className={`text-[11px] uppercase tracking-widest font-medium px-4 py-2 rounded-full backdrop-blur-sm ${
-              isDark ? 'bg-slate-800/60 text-slate-400' : 'bg-white/70 text-slate-500'
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: [0.5, 0.8, 0.5], x: [10, 0, 10] }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            className={`text-[10px] uppercase tracking-[0.15em] font-semibold px-3 py-1.5 rounded-full ${
+              isDark ? 'bg-indigo-500/15 text-indigo-300/70 border border-indigo-500/20'
+                     : 'bg-indigo-50 text-indigo-400/80 border border-indigo-200/40'
             }`}
           >
-            ← Drag navigator to see full history
+            ← Drag to view full history
           </motion.span>
         </div>
       )}
 
-      {/* Left-edge fade to hint at hidden past data */}
-      {showBrush && len > 30 && (
-        <div className="absolute left-0 top-16 bottom-12 w-6 pointer-events-none z-10 rounded-l-xl"
-          style={{ background: isDark
-            ? 'linear-gradient(to right, rgba(26,29,46,0.8), transparent)'
-            : 'linear-gradient(to right, rgba(255,255,255,0.8), transparent)' }} />
-      )}
-
-      <ResponsiveContainer width="100%" height={340}>
+      <ResponsiveContainer width="100%" height={350}>
         <AreaChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="visitGrad" x1="0" y1="0" x2="0" y2="1">
@@ -57,36 +69,39 @@ const TrendChart = ({ data, accentColor, isDark, cardBg, textPrimary, tooltipSty
           <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.4)'} />
           <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 11 }} />
           <YAxis stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(1)}K` : v} />
-          <Tooltip contentStyle={tooltipStyle} formatter={v => [`${(v || 0).toLocaleString()}`]} animationDuration={200} />
+          <Tooltip
+            contentStyle={tooltipStyle}
+            formatter={v => [`${(v || 0).toLocaleString()}`]}
+            animationDuration={150}
+            cursor={{ stroke: '#6366f1', strokeWidth: 2, strokeDasharray: '4 2' }}
+          />
           <Legend />
-          <Area type="monotone" dataKey="visits" name="Total Visits" stroke={accentColor} fill="url(#visitGrad)" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: accentColor }} animationDuration={500} />
+          <Area type="monotone" dataKey="visits" name="Total Visits" stroke={accentColor} fill="url(#visitGrad)" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: accentColor, stroke: '#fff', strokeWidth: 2 }} animationDuration={500} />
           <Line type="monotone" dataKey="returning" name="Returning" stroke="#8B5CF6" strokeWidth={2} strokeDasharray="5 5" dot={false} animationDuration={500} />
           {showBrush && (
             <Brush
-              dataKey="month" height={28} stroke={accentColor}
-              fill={isDark ? '#1e293b' : '#f1f5f9'}
-              startIndex={Math.max(0, len - 30)}
+              dataKey="month"
+              height={30}
+              stroke={isDark ? '#4f46e5' : '#6366f1'}
+              fill={isDark ? '#0f172a' : '#f8fafc'}
+              startIndex={isLong ? len - 30 : 0}
               endIndex={len - 1}
               onChange={() => { if (!hasScrolled) setHasScrolled(true); }}
+              traveller={GripHandle}
             />
           )}
         </AreaChart>
       </ResponsiveContainer>
 
-      {/* Brush hover styling */}
+      {/* Brush track styling */}
       <style>{`
-        .recharts-brush-slide { cursor: grab; }
+        .recharts-brush-slide {
+          cursor: grab;
+          fill: ${isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.08)'};
+          stroke: ${isDark ? 'rgba(99,102,241,0.3)' : 'rgba(99,102,241,0.2)'};
+          rx: 4;
+        }
         .recharts-brush-slide:active { cursor: grabbing; }
-        .recharts-brush-traveller rect {
-          fill: ${accentColor};
-          rx: 3;
-          transition: fill 0.2s, opacity 0.2s;
-        }
-        .recharts-brush-traveller:hover rect {
-          fill: ${accentColor};
-          opacity: 1 !important;
-          filter: brightness(1.3);
-        }
       `}</style>
     </motion.div>
   );
