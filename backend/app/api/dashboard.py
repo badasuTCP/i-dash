@@ -1603,6 +1603,73 @@ async def get_brand_summary(
             {"label": "Marketing Spend", "value": ads["spend"], "format": "currency", "color": "violet"},
         ]
 
+    # ── Top websites by traffic (GA4 property breakdown) ────────────
+    top_websites = []
+    try:
+        if pids:
+            from app.models.ga4_property import GA4Property as _GP
+            tw_q = await db.execute(
+                select(_GP.display_name, func.sum(GA4Metric.total_users).label("users"))
+                .join(_GP, _GP.property_id == GA4Metric.property_id)
+                .where(and_(
+                    GA4Metric.property_id.in_(pids),
+                    GA4Metric.date >= start_date, GA4Metric.date <= end_date,
+                    GA4Metric.channel == "(all)", GA4Metric.source == "(all)", GA4Metric.device == "(all)",
+                ))
+                .group_by(_GP.display_name)
+                .order_by(func.sum(GA4Metric.total_users).desc())
+                .limit(10)
+            )
+            _clrs = ["#3B82F6","#8B5CF6","#10B981","#F59E0B","#EF4444","#06B6D4","#EC4899","#F97316","#14B8A6","#6366F1"]
+            for i, row in enumerate(tw_q.all()):
+                top_websites.append({"name": row[0], "users": int(row[1] or 0), "color": _clrs[i % len(_clrs)]})
+    except Exception:
+        pass
+
+    # ── Daily traffic trend (last 30 days, aggregated) ────────────────
+    traffic_trend = []
+    try:
+        if pids:
+            from collections import OrderedDict as _OD2
+            trend_q = await db.execute(
+                select(GA4Metric.date, func.sum(GA4Metric.sessions).label("visits"))
+                .where(and_(
+                    GA4Metric.property_id.in_(pids),
+                    GA4Metric.date >= start_date, GA4Metric.date <= end_date,
+                    GA4Metric.channel == "(all)", GA4Metric.source == "(all)", GA4Metric.device == "(all)",
+                ))
+                .group_by(GA4Metric.date)
+                .order_by(GA4Metric.date)
+            )
+            for row in trend_q.all():
+                traffic_trend.append({"date": row[0].strftime("%b %d"), "visits": int(row[1] or 0)})
+            # Keep last 30 points max
+            if len(traffic_trend) > 30:
+                traffic_trend = traffic_trend[-30:]
+    except Exception:
+        pass
+
+    # ── Top reps (from hubspot_deals — CP/ibos only) ──────────────────
+    top_reps = []
+    try:
+        from app.services.hubspot_owners import get_hubspot_owners
+        owners_map = await get_hubspot_owners()
+        reps_q = await db.execute(text("""
+            SELECT owner_id, COUNT(*) as deals
+            FROM hubspot_deals
+            WHERE owner_id IS NOT NULL
+            GROUP BY owner_id
+            ORDER BY COUNT(*) DESC
+            LIMIT 5
+        """))
+        for row in reps_q.fetchall():
+            oid = row[0]
+            info = owners_map.get(oid, {})
+            name = f"{info.get('first', '')} {info.get('last', '')}".strip() or f"Rep {oid}"
+            top_reps.append({"name": name, "deals": row[1]})
+    except Exception:
+        pass
+
     return {
         "brand": brand,
         "period": f"{start_date} to {end_date}",
@@ -1612,6 +1679,9 @@ async def get_brand_summary(
         "ads": ads,
         "crm": crm,
         "sheets_revenue": sheets_revenue,
+        "top_websites": top_websites,
+        "traffic_trend": traffic_trend,
+        "top_reps": top_reps,
     }
 
 

@@ -61,19 +61,19 @@ export const brands = [
 // ────────────────────────────────────────────────────────────────
 export const brandPages = {
   cp: [
-    { to: '/dashboard/cp',                     label: 'Dashboard',          icon: LayoutDashboard },
+    { to: '/dashboard/cp',                     label: 'Overview',           icon: LayoutDashboard },
     { to: '/dashboard/cp/web-analytics',       label: 'Web Analytics',      icon: Globe },
     { to: '/dashboard/cp/marketing',           label: 'Marketing Campaign', icon: Megaphone },
     { to: '/dashboard/sales-intelligence',     label: 'Sales Intelligence', icon: TrendingUp },
   ],
   sanitred: [
-    { to: '/dashboard/sanitred',                label: 'Dashboard',          icon: LayoutDashboard },
+    { to: '/dashboard/sanitred',                label: 'Overview',           icon: LayoutDashboard },
     { to: '/dashboard/sanitred/web-analytics',  label: 'Web Analytics',      icon: Globe },
     { to: '/dashboard/sanitred/marketing',      label: 'Marketing Campaign', icon: Megaphone },
     { to: '/dashboard/sanitred/retail',         label: 'Retail Breakdown',   icon: ShoppingBag },
   ],
   ibos: [
-    { to: '/dashboard/ibos',                label: 'Dashboard',            icon: LayoutDashboard },
+    { to: '/dashboard/ibos',                label: 'Overview',             icon: LayoutDashboard },
     { to: '/dashboard/ibos/web-analytics',  label: 'Web Analytics',        icon: Globe },
     { to: '/dashboard/ibos/marketing',      label: 'Marketing Campaign',   icon: Megaphone },
     { to: '/dashboard/ibos/contractors',    label: 'Contractor Breakdown', icon: HardHat },

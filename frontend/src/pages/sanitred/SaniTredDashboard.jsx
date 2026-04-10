@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
+import {
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
+} from 'recharts';
+import { CheckCircle2, AlertCircle, TrendingUp, ShoppingBag, Globe } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
-import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 const SaniTredDashboard = () => {
   const { isDark } = useTheme();
@@ -14,28 +18,36 @@ const SaniTredDashboard = () => {
 
   const ytdStart = `${new Date().getFullYear()}-01-01`;
   const ytdEnd = new Date().toISOString().slice(0, 10);
+  const from = dateFrom || ytdStart;
+  const to = dateTo || ytdEnd;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: d } = await dashboardAPI.getBrandSummary('sanitred', dateFrom || ytdStart, dateTo || ytdEnd);
+      const { data: d } = await dashboardAPI.getBrandSummary('sanitred', from, to);
       setData(d);
     } catch { setData(null); }
     finally { setLoading(false); }
-  }, [dateFrom, dateTo, ytdStart, ytdEnd]);
+  }, [from, to]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const textPri = isDark ? 'text-white' : 'text-slate-900';
   const textSec = isDark ? 'text-slate-400' : 'text-slate-600';
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
+  const tooltipStyle = {
+    backgroundColor: isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.95)',
+    border: `1px solid ${isDark ? 'rgba(71,85,105,0.3)' : 'rgba(203,213,225,0.5)'}`,
+    borderRadius: '8px', color: isDark ? '#e2e8f0' : '#1e293b',
+  };
+  const _clrs = ['#10B981','#3B82F6','#8B5CF6','#F59E0B','#EF4444','#06B6D4','#EC4899','#F97316'];
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-          <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Sani-Tred Dashboard</h1>
-          <p className={textSec}>Sani-Tred Retail — YTD web traffic, retail revenue & marketing performance</p>
+          <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Sani-Tred Overview</h1>
+          <p className={textSec}>Sani-Tred Retail — YTD revenue, web performance & marketing pulse</p>
         </motion.div>
 
         {data?.hasLiveData ? (
@@ -54,23 +66,74 @@ const SaniTredDashboard = () => {
           ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-sm font-semibold uppercase tracking-wide mb-3 ${textSec}`}>Retail Revenue</h3>
-            <p className={`text-3xl font-bold ${textPri}`}>${((data?.sheets_revenue || 0) / 1000000).toFixed(2)}M</p>
-            <p className={`text-sm mt-1 ${textSec}`}>from Google Sheets pipeline</p>
-          </div>
-          <div className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-sm font-semibold uppercase tracking-wide mb-3 ${textSec}`}>Web Traffic</h3>
-            <p className={`text-3xl font-bold ${textPri}`}>{(data?.web?.visits || 0).toLocaleString()}</p>
-            <p className={`text-sm mt-1 ${textSec}`}>sessions · {data?.web?.bounce_rate || 0}% bounce</p>
-          </div>
-          <div className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-sm font-semibold uppercase tracking-wide mb-3 ${textSec}`}>Marketing</h3>
-            <p className={`text-3xl font-bold ${textPri}`}>{(data?.ads?.clicks || 0).toLocaleString()}</p>
-            <p className={`text-sm mt-1 ${textSec}`}>clicks · ${((data?.ads?.spend || 0) / 1000).toFixed(1)}K spend</p>
-          </div>
+        {/* Traffic Trend + Websites */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+            className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
+            <div className="flex items-center gap-2 mb-4">
+              <Globe size={16} className="text-emerald-400" />
+              <h3 className={`text-base font-semibold ${textPri}`}>Web Traffic Trend</h3>
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={data?.traffic_trend || []}>
+                <defs>
+                  <linearGradient id="stTrendGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.3)'} />
+                <XAxis dataKey="date" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                <YAxis stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} />
+                <Tooltip contentStyle={tooltipStyle} formatter={v => [(v || 0).toLocaleString() + ' visits']} />
+                <Area type="monotone" dataKey="visits" stroke="#10B981" fill="url(#stTrendGrad)" strokeWidth={2} dot={false} animationDuration={500} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </motion.div>
+
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+            className={`rounded-xl p-6 ${cardBg}`}>
+            <div className="flex items-center gap-2 mb-4">
+              <ShoppingBag size={16} className="text-emerald-400" />
+              <h3 className={`text-base font-semibold ${textPri}`}>Revenue Summary</h3>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Sheets Revenue</p>
+                <p className={`text-2xl font-bold ${textPri}`}>${((data?.sheets_revenue || 0) / 1000000).toFixed(2)}M</p>
+              </div>
+              <div>
+                <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Ad Spend</p>
+                <p className={`text-2xl font-bold ${textPri}`}>${((data?.ads?.spend || 0) / 1000).toFixed(1)}K</p>
+              </div>
+              <div>
+                <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Web Users</p>
+                <p className={`text-2xl font-bold ${textPri}`}>{(data?.web?.users || 0).toLocaleString()}</p>
+              </div>
+            </div>
+          </motion.div>
         </div>
+
+        {/* Top Websites */}
+        {(data?.top_websites || []).length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+            className={`rounded-xl p-6 ${cardBg}`}>
+            <div className="flex items-center gap-2 mb-4">
+              <TrendingUp size={16} className="text-blue-400" />
+              <h3 className={`text-base font-semibold ${textPri}`}>Top Sani-Tred Properties by Users</h3>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={data.top_websites} layout="vertical">
+                <XAxis type="number" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} />
+                <YAxis dataKey="name" type="category" width={180} stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={tooltipStyle} formatter={v => [(v || 0).toLocaleString() + ' users']} />
+                <Bar dataKey="users" radius={[0, 6, 6, 0]} animationDuration={500}>
+                  {data.top_websites.map((_, i) => <Cell key={i} fill={_clrs[i % _clrs.length]} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </motion.div>
+        )}
       </div>
     </motion.div>
   );
