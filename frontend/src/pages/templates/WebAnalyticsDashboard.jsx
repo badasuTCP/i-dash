@@ -153,33 +153,18 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
         {/* Page Insights */}
         <PageInsight insights={pageInsights} />
 
-        {/* Status banner — context-aware based on GA4 connection state */}
-        {hasLiveData && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-3 rounded-lg flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
+        {/* Simple two-state banner: green when data exists, blue when empty */}
+        {!loading && hasLiveData && (
+          <div className="mb-6 p-3 rounded-lg flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Live GA4 Data Connected{propertyId ? ` · Property ${propertyId}` : ''}
-          </motion.div>
+            Live GA4 Data Connected
+          </div>
         )}
-        {!hasLiveData && !loading && apiReachable && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-blue-500/10 border border-blue-500/30">
-            <AlertCircle size={16} className="text-blue-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-blue-400">No Data for Selected Period</p>
-              <p className="text-xs text-blue-300/80 mt-0.5">No web analytics data found for the selected date range. Try selecting a different period or run the GA4 pipeline to sync data.</p>
-            </div>
-          </motion.div>
-        )}
-        {!hasLiveData && !loading && !apiReachable && dataWarning && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
-            <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-amber-400">⚠ Estimated Data</p>
-              <p className="text-xs text-amber-300/80 mt-0.5">{dataWarning}</p>
-            </div>
-          </motion.div>
+        {!loading && !hasLiveData && (
+          <div className="mb-6 p-3 rounded-lg flex items-center gap-2 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium">
+            <AlertCircle size={14} />
+            No data for selected period — try a different date range or run GA4 pipeline
+          </div>
         )}
 
         {/* Date filtering handled server-side — no client-side "no records" message */}

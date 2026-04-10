@@ -17,7 +17,7 @@ const ZERO_FALLBACK = {
 
 const IBOSSMarketing = () => {
   const { isContractorActive } = useDashboardConfig();
-  const { scorecards, performanceSummary, spendByPeriod } = useMarketingData('ibos', ZERO_FALLBACK);
+  const { hasLiveData, scorecards, performanceSummary, spendByPeriod } = useMarketingData('ibos', ZERO_FALLBACK);
 
   const filteredPerformance = useMemo(
     () => performanceSummary.filter((row) =>
@@ -30,6 +30,7 @@ const IBOSSMarketing = () => {
     <MarketingDashboardTemplate
       title="I-BOS Marketing Campaign"
       subtitle="Contractor Division — live data from Meta Ads & Google Ads"
+      hasLiveData={hasLiveData}
       accentColor="#F59E0B"
       pageInsights={[
         'Connect Meta Ads and Google Ads pipelines to see live campaign performance',
