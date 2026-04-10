@@ -302,6 +302,8 @@ class MetaAdsPipeline(BasePipeline):
 
                     # Create record
                     record = MetaAdMetric(
+                        account_id=campaign_insight.get("_account_id", ""),
+                        account_name=campaign_insight.get("_account_name", ""),
                         date=metric_date,
                         campaign_id=campaign_id,
                         campaign_name=campaign_name,

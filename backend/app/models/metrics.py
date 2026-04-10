@@ -124,6 +124,8 @@ class MetaAdMetric(Base):
     __tablename__ = "meta_ad_metrics"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    account_id: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
+    account_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     date: Mapped[datetime] = mapped_column(Date, index=True, nullable=False)
     campaign_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     campaign_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -179,6 +181,7 @@ class GoogleAdMetric(Base):
     __tablename__ = "google_ad_metrics"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    customer_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
     date: Mapped[datetime] = mapped_column(Date, index=True, nullable=False)
     campaign_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     campaign_name: Mapped[str] = mapped_column(String(255), nullable=False)

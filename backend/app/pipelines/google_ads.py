@@ -256,6 +256,7 @@ class GoogleAdsPipeline(BasePipeline):
 
             for row in results:
                 campaign_data = {
+                    "customer_id": cid,
                     "campaign_id": str(row.campaign.id),
                     "campaign_name": row.campaign.name,
                     "ad_group_name": str(row.campaign.advertising_channel_type.name),
@@ -353,6 +354,7 @@ class GoogleAdsPipeline(BasePipeline):
 
                     # Create record
                     record = GoogleAdMetric(
+                        customer_id=campaign.get("customer_id"),
                         date=metric_date,
                         campaign_id=campaign_id,
                         campaign_name=campaign_name,

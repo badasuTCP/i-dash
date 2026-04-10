@@ -1835,7 +1835,42 @@ async def get_marketing_data(
             "spendByPeriod": [],
         }
 
-    # ── 2. Meta Ads aggregates ────────────────────────────────────────
+    # ── 2. Resolve brand-specific ad account filters ────────────────
+    # CP = only internal training account (act_144305066)
+    # I-BOS = only I-BOS mapped accounts from brand_assets
+    # Sani-Tred = Sani-Tred Google Ads CID (2823564937)
+    meta_account_filter = None
+    gads_customer_filter = None
+    if division == "cp":
+        meta_account_filter = ["act_144305066"]
+    elif division == "ibos":
+        try:
+            from app.models.brand_asset import BrandAsset
+            ba_q = await db.execute(
+                select(BrandAsset.account_id).where(
+                    and_(BrandAsset.brand == "ibos", BrandAsset.platform == "meta")
+                )
+            )
+            ibos_meta = [r[0] for r in ba_q.fetchall()]
+            if ibos_meta:
+                meta_account_filter = ibos_meta
+            ba_g = await db.execute(
+                select(BrandAsset.account_id).where(
+                    and_(BrandAsset.brand == "ibos", BrandAsset.platform == "google_ads")
+                )
+            )
+            ibos_gads = [r[0] for r in ba_g.fetchall()]
+            if ibos_gads:
+                gads_customer_filter = ibos_gads
+        except Exception:
+            pass
+    elif division == "sanitred":
+        gads_customer_filter = ["2823564937"]
+
+    # ── 3. Meta Ads aggregates (filtered by brand) ────────────────────
+    meta_where = [MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date]
+    if meta_account_filter:
+        meta_where.append(MetaAdMetric.account_id.in_(meta_account_filter))
     meta_stmt = select(
         func.sum(MetaAdMetric.impressions).label("impressions"),
         func.sum(MetaAdMetric.clicks).label("clicks"),
@@ -1844,16 +1879,14 @@ async def get_marketing_data(
         func.sum(MetaAdMetric.conversion_value).label("conversion_value"),
         func.avg(MetaAdMetric.ctr).label("avg_ctr"),
         func.avg(MetaAdMetric.roas).label("avg_roas"),
-    ).where(
-        and_(
-            MetaAdMetric.date >= start_date,
-            MetaAdMetric.date <= end_date,
-        )
-    )
+    ).where(and_(*meta_where))
     meta_result = await db.execute(meta_stmt)
     meta = meta_result.first()
 
-    # ── 3. Google Ads aggregates ──────────────────────────────────────
+    # ── 4. Google Ads aggregates (filtered by brand) ──────────────────
+    gads_where = [GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date]
+    if gads_customer_filter:
+        gads_where.append(GoogleAdMetric.customer_id.in_(gads_customer_filter))
     google_stmt = select(
         func.sum(GoogleAdMetric.impressions).label("impressions"),
         func.sum(GoogleAdMetric.clicks).label("clicks"),
@@ -1862,12 +1895,7 @@ async def get_marketing_data(
         func.sum(GoogleAdMetric.conversion_value).label("conversion_value"),
         func.avg(GoogleAdMetric.ctr).label("avg_ctr"),
         func.avg(GoogleAdMetric.roas).label("avg_roas"),
-    ).where(
-        and_(
-            GoogleAdMetric.date >= start_date,
-            GoogleAdMetric.date <= end_date,
-        )
-    )
+    ).where(and_(*gads_where))
     google_result = await db.execute(google_stmt)
     gads = google_result.first()
 
