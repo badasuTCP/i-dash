@@ -2071,15 +2071,45 @@ async def get_contractor_breakdown(
     except Exception as e:
         logger.warning("Contractor breakdown query failed: %s", e)
 
-    # Aggregate totals
+    # Get total ad spend/leads for I-BOS to distribute proportionally
+    total_spend = 0.0
+    total_leads = 0
+    try:
+        ads_q = await db.execute(text(f"""
+            SELECT COALESCE(SUM(spend),0), COALESCE(SUM(conversions),0)
+            FROM meta_ad_metrics WHERE date >= '{start_date}' AND date <= '{end_date}'
+        """))
+        m = ads_q.fetchone()
+        total_spend += float(m[0])
+        total_leads += int(m[1])
+
+        gads_q = await db.execute(text(f"""
+            SELECT COALESCE(SUM(spend),0), COALESCE(SUM(conversions),0)
+            FROM google_ad_metrics WHERE date >= '{start_date}' AND date <= '{end_date}'
+        """))
+        g = gads_q.fetchone()
+        total_spend += float(g[0])
+        total_leads += int(g[1])
+    except Exception:
+        pass
+
+    # Distribute spend/leads proportionally by traffic share
     total_visits = sum(c["visits"] for c in contractors)
     total_users = sum(c["users"] for c in contractors)
+    for c in contractors:
+        share = c["visits"] / max(total_visits, 1)
+        c["spend"] = round(total_spend * share, 2)
+        c["leads"] = round(total_leads * share)
+        c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
+        c["revenue"] = round(c["leads"] * 2500, 2)  # heuristic $2,500/lead
 
     return {
         "period": f"{start_date} to {end_date}",
         "hasLiveData": len(contractors) > 0,
         "total_visits": total_visits,
         "total_users": total_users,
+        "total_spend": round(total_spend, 2),
+        "total_leads": total_leads,
         "contractors": contractors,
     }
 
