@@ -1940,6 +1940,55 @@ async def get_marketing_data(
             "cpl": round(gads_cpl, 2),
         })
 
+    # ── 6. Google Sheets fallback for historical periods (2024/2025) ────
+    # When Meta/Google Ads have no data, check Sheets for campaign spend/leads
+    if total_spend == 0 and total_clicks == 0:
+        try:
+            from app.models.metrics import GoogleSheetMetric
+            sheets_spend = await db.execute(
+                select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
+                    GoogleSheetMetric.category == "Cost",
+                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
+                ))
+            )
+            sheets_clicks = await db.execute(
+                select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
+                    GoogleSheetMetric.category == "Engagement",
+                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
+                ))
+            )
+            sheets_leads = await db.execute(
+                select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
+                    GoogleSheetMetric.category == "Lead",
+                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
+                ))
+            )
+            sheets_conv = await db.execute(
+                select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
+                    GoogleSheetMetric.category == "Conversion",
+                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
+                ))
+            )
+            s_spend = float(sheets_spend.scalar() or 0)
+            s_clicks = int(sheets_clicks.scalar() or 0)
+            s_leads = float(sheets_leads.scalar() or 0)
+            s_conv = float(sheets_conv.scalar() or 0)
+
+            if s_spend > 0 or s_clicks > 0:
+                total_spend = s_spend
+                total_clicks = s_clicks
+                total_leads = s_leads
+                total_impressions = s_clicks * 15  # estimated from click data
+                cpl = (s_spend / s_leads) if s_leads > 0 else 0
+                platforms.append({
+                    "division": "Google Sheets (Historical)",
+                    "spend": s_spend, "revenue": s_conv,
+                    "roas": round(s_conv / s_spend, 1) if s_spend > 0 else 0,
+                    "conversions": int(s_leads), "cpl": round(cpl, 2),
+                })
+        except Exception as e:
+            logger.warning("Sheets marketing fallback failed: %s", e)
+
     logger.info(
         "Marketing data for %s: spend=$%.2f, impressions=%d, leads=%d, hasLive=True",
         division, total_spend, total_impressions, total_leads,
