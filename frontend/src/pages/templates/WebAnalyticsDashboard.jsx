@@ -224,8 +224,8 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
           tooltipStyle={tooltipStyle}
         />
 
-        {/* Website Breakdown + Device */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Website Breakdown + Device — items-start so they size independently */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 items-start">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
             className={`rounded-xl p-6 ${cardBg}`}>
             <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Website Breakdown by Users</h3>
@@ -247,29 +247,30 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
                 <p className={`text-sm ${textSecondary}`}>No user data available for this period</p>
               </div>
             )}
-            <div className="space-y-2 mt-2">
-              {websiteBreakdown.map((site, idx) => (
+            {/* Scrollable legend — caps at 320px then scrolls */}
+            <div className="space-y-2 mt-2 max-h-[320px] overflow-y-auto pr-1">
+              {(websiteBreakdown || []).map((site, idx) => (
                 <div key={idx} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: site.color }} />
-                    <span className={textSecondary}>{site.name}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: site?.color || '#94a3b8' }} />
+                    <span className={`${textSecondary} truncate`}>{site?.name || '—'}</span>
                   </div>
-                  <span className={`font-medium ${textPrimary}`}>{site.value.toLocaleString()}</span>
+                  <span className={`font-medium ${textPrimary} flex-shrink-0 ml-2`}>{(site?.value || 0).toLocaleString()}</span>
                 </div>
               ))}
             </div>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
+            className={`rounded-xl p-6 ${cardBg} lg:sticky lg:top-4`}>
             <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Visitors by Device</h3>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={deviceData}>
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
                 <XAxis dataKey="device" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `${(v/1000).toFixed(0)}K`} />
-                <Tooltip contentStyle={tooltipStyle} formatter={v => [v.toLocaleString()]} />
-                <Bar dataKey="users" fill={accentColor} radius={[6, 6, 0, 0]}>
+                <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}K` : v} />
+                <Tooltip contentStyle={tooltipStyle} formatter={v => [(v || 0).toLocaleString()]} />
+                <Bar dataKey="users" fill={accentColor} radius={[6, 6, 0, 0]} animationDuration={500}>
                   {deviceData.map((entry, idx) => (
                     <Cell key={idx} fill={['#3B82F6', '#10B981', '#F59E0B'][idx]} />
                   ))}
