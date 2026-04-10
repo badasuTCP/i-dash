@@ -7,34 +7,16 @@ import {
 import { AlertCircle, CheckCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
-import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
 const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, spendVsRevenue, funnelData, performanceSummary, spendByPeriod, ctrData, metricsPerPeriod, pageInsights, dataWarning, hasLiveData }) => {
   const { isDark } = useTheme();
-  const { resolveData, filterData, isFiltered, clearFilter } = useDashboardDateFilter();
 
-  // ── Unified resolution — single source of truth ───────────────────────────
-  // spendVsRevenue drives both the chart and the scorecard resolution.
-  const svrResolved = useMemo(
-    () => resolveData(spendVsRevenue, 'quarter', metricsPerPeriod),
-    [resolveData, spendVsRevenue, metricsPerPeriod]
-  );
-  // Secondary charts use filterData (no scorecard needed)
-  const sbp = useMemo(() => filterData(spendByPeriod, 'period'), [filterData, spendByPeriod]);
-  const ctr = useMemo(() => filterData(ctrData, 'quarter'),      [filterData, ctrData]);
-  const noDataMsg = svrResolved.noDataForPeriod ? svrResolved.fallbackMessage : null;
-
-  // Scorecards from the same resolved metrics — guaranteed same period as chart
-  const resolvedScorecards = useMemo(() => {
-    const metrics = svrResolved.resolvedMetrics;
-    if (!metrics) return scorecards;
-    return scorecards.map((kpi) =>
-      kpi.metricKey !== undefined && metrics[kpi.metricKey] !== undefined
-        ? { ...kpi, value: metrics[kpi.metricKey] }
-        : kpi
-    );
-  }, [scorecards, svrResolved.resolvedMetrics]);
+  // Server handles date filtering — pass data through directly
+  const svrResolved = useMemo(() => ({ data: spendVsRevenue || [] }), [spendVsRevenue]);
+  const sbp = useMemo(() => ({ data: spendByPeriod || [] }), [spendByPeriod]);
+  const ctr = useMemo(() => ({ data: ctrData || [] }), [ctrData]);
+  const resolvedScorecards = scorecards || [];
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
@@ -91,13 +73,7 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
           </motion.div>
         )}
 
-        {noDataMsg && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-3 rounded-lg flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
-            <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
-            <span>{noDataMsg}</span>
-          </motion.div>
-        )}
+        {/* Date filtering handled server-side — no client-side "no records" message */}
 
         {/* Scorecards */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}

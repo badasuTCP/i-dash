@@ -7,7 +7,6 @@ import {
 import { Filter, AlertCircle } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
-import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import PageInsight from '../../components/common/PageInsight';
 
 // ── Custom Brush handle — "grip" icon (three vertical dots) ─────────────────
@@ -112,25 +111,18 @@ const TrendChart = ({ data, accentColor, isDark, cardBg, textPrimary, tooltipSty
 
 const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websiteBreakdown, deviceData, trafficSources, visitorTrend, metricsPerPeriod, pageInsights, dataWarning, contractorDetails, hasLiveData, loading, apiReachable, propertyId, headerExtra }) => {
   const { isDark } = useTheme();
-  const { resolveData, isFiltered, clearFilter } = useDashboardDateFilter();
+  // Server handles date filtering — no client-side re-filtering needed.
+  // Data from the hook is already scoped to the selected date range.
+  const vtResolved = useMemo(() => ({
+    data: visitorTrend || [],
+    resolvedMetrics: null,
+    noDataForPeriod: false,
+    fallbackMessage: null,
+  }), [visitorTrend]);
+  const noDataMsg = null;
 
-  // ── Unified resolution ────────────────────────────────────────────────────
-  const vtResolved = useMemo(
-    () => resolveData(visitorTrend, 'month', metricsPerPeriod),
-    [resolveData, visitorTrend, metricsPerPeriod]
-  );
-  const noDataMsg = vtResolved.noDataForPeriod ? vtResolved.fallbackMessage : null;
-
-  // Scorecards from the same resolved metrics — guaranteed same period as chart
-  const resolvedScorecards = useMemo(() => {
-    const metrics = vtResolved.resolvedMetrics;
-    if (!metrics) return scorecards;
-    return scorecards.map((kpi) =>
-      kpi.metricKey !== undefined && metrics[kpi.metricKey] !== undefined
-        ? { ...kpi, value: metrics[kpi.metricKey] }
-        : kpi
-    );
-  }, [scorecards, vtResolved.resolvedMetrics]);
+  // Scorecards come directly from the hook — server already filtered by date
+  const resolvedScorecards = scorecards || [];
 
   const cardBg = isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm';
   const textPrimary = isDark ? 'text-white' : 'text-slate-900';
@@ -190,13 +182,7 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
           </motion.div>
         )}
 
-        {noDataMsg && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-3 rounded-lg flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
-            <AlertCircle size={15} className="mt-0.5 flex-shrink-0" />
-            <span>{noDataMsg}</span>
-          </motion.div>
-        )}
+        {/* Date filtering handled server-side — no client-side "no records" message */}
 
         {/* Scorecards */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
