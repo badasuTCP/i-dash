@@ -43,6 +43,8 @@ const DateRangePicker = ({ onApply, onClear }) => {
     }},
     { id: 'last90',      label: 'Last 90 Days',  getRange: () => ({ start: subDays(today, 89), end: today }) },
     { id: 'ytd',         label: 'Year to Date',  getRange: () => ({ start: startOfYear(today), end: today }) },
+    { id: '2025',        label: '2025 Full Year', getRange: () => ({ start: new Date(2025, 0, 1), end: new Date(2025, 11, 31) }) },
+    { id: '2024',        label: '2024 Full Year', getRange: () => ({ start: new Date(2024, 0, 1), end: new Date(2024, 11, 31) }) },
   ], [today]);
 
   // ── Display text ──────────────────────────────────────────────────────

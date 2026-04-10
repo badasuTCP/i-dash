@@ -13,8 +13,15 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 const GlobalDateContext = createContext(null);
 
 export function GlobalDateProvider({ children }) {
-  const [dateRange, setDateRange] = useState(null);   // { start: Date, end: Date } | null
-  const [presetId, setPresetId] = useState(null);      // e.g. 'last30', 'thisMonth', 'custom'
+  // Default to YTD (Jan 1 of current year → today)
+  const [dateRange, setDateRange] = useState(() => {
+    const now = new Date();
+    return {
+      start: `${now.getFullYear()}-01-01`,
+      end: now.toISOString().slice(0, 10),
+    };
+  });
+  const [presetId, setPresetId] = useState('ytd');
 
   /** Called by the Header DateRangePicker onApply */
   const setGlobalDate = useCallback((start, end, preset = null) => {
@@ -22,10 +29,11 @@ export function GlobalDateProvider({ children }) {
     setPresetId(preset);
   }, []);
 
-  /** Clear back to "All Time" (no filter) */
+  /** Clear back to YTD default */
   const clearGlobalDate = useCallback(() => {
-    setDateRange(null);
-    setPresetId(null);
+    const now = new Date();
+    setDateRange({ start: `${now.getFullYear()}-01-01`, end: now.toISOString().slice(0, 10) });
+    setPresetId('ytd');
   }, []);
 
   return (

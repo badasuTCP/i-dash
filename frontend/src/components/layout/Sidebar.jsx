@@ -38,9 +38,10 @@ const BrandPill = ({ brand, isActive, collapsed, onClick }) => (
 );
 
 // ─── Single Nav Item ────────────────────────────────────────────────────────
-const NavItem = ({ to, label, icon: Icon, accent, collapsed }) => (
+const NavItem = ({ to, label, icon: Icon, accent, collapsed, end }) => (
   <NavLink
     to={to}
+    end={end}
     title={collapsed ? label : undefined}
     className={({ isActive }) =>
       `group flex items-center gap-3 transition-all duration-200 rounded-lg
@@ -253,6 +254,7 @@ const Sidebar = () => {
               icon={page.icon}
               accent={currentBrand.accent}
               collapsed={collapsed}
+              end={page.label === 'Overview'}
             />
           ))}
         </div>
