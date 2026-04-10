@@ -64,8 +64,8 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
         {/* Page Insights */}
         <PageInsight insights={pageInsights} />
 
-        {/* Live data banner (green) — pipeline ran, showing real data */}
-        {hasLiveData && (
+        {/* Live data — check if there's actual spend in the period */}
+        {hasLiveData && scorecards?.[0]?.value > 0 && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
             className="mb-6 p-3 rounded-xl flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30">
             <CheckCircle size={15} className="text-emerald-400 flex-shrink-0" />
@@ -73,15 +73,21 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
           </motion.div>
         )}
 
-        {/* Estimated data warning (amber) — no pipeline has run yet */}
-        {!hasLiveData && dataWarning && (
+        {/* Pipeline connected but no data for this date range */}
+        {hasLiveData && (!scorecards?.[0]?.value || scorecards[0].value === 0) && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-4 rounded-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30">
-            <AlertCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-amber-400">⚠ Estimated Data — No Live Pipeline Connected</p>
-              <p className="text-xs text-amber-300/80 mt-0.5">{dataWarning}</p>
-            </div>
+            className="mb-6 p-3 rounded-xl flex items-center gap-2 bg-blue-500/10 border border-blue-500/30">
+            <AlertCircle size={15} className="text-blue-400 flex-shrink-0" />
+            <p className="text-sm font-medium text-blue-400">No ad data for the selected period — try a different date range</p>
+          </motion.div>
+        )}
+
+        {/* No pipeline has run yet */}
+        {!hasLiveData && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-3 rounded-xl flex items-center gap-2 bg-amber-500/10 border border-amber-500/30">
+            <AlertCircle size={15} className="text-amber-400 flex-shrink-0" />
+            <p className="text-sm font-medium text-amber-400">Awaiting pipeline sync — run Meta/Google Ads pipelines to populate</p>
           </motion.div>
         )}
 
