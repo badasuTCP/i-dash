@@ -14,8 +14,8 @@ import { format, subDays, subWeeks, subMonths, startOfMonth, endOfMonth, startOf
  */
 const DateRangePicker = ({ onApply, onClear }) => {
   const [isOpen, setIsOpen] = useState(false);
-  // null = no filter active, string = active preset id or 'custom'
-  const [activeMode, setActiveMode] = useState(null);
+  // Start with 'ytd' to match GlobalDateContext default
+  const [activeMode, setActiveMode] = useState('ytd');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
@@ -49,7 +49,7 @@ const DateRangePicker = ({ onApply, onClear }) => {
 
   // ── Display text ──────────────────────────────────────────────────────
   const displayText = useMemo(() => {
-    if (!activeMode) return 'All Time';
+    if (!activeMode) return 'Year to Date';
     if (activeMode === 'custom' && customStart && customEnd) {
       try {
         return `${format(new Date(customStart), 'MMM d')} – ${format(new Date(customEnd), 'MMM d, yyyy')}`;
@@ -102,7 +102,7 @@ const DateRangePicker = ({ onApply, onClear }) => {
 
   // ── Clear all filters ─────────────────────────────────────────────────
   const handleClear = useCallback(() => {
-    setActiveMode(null);
+    setActiveMode('ytd');
     setCustomStart('');
     setCustomEnd('');
     setIsOpen(false);

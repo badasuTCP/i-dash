@@ -17,15 +17,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class TimeoutMiddleware(BaseHTTPMiddleware):
-    """Abort any request that takes longer than 15 seconds."""
+    """Abort requests that take too long. Pipeline and auth endpoints get extra time."""
 
     async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        # Pipeline runs + sales intelligence need longer (heavy DB queries)
+        if "/pipelines/" in path or "/sales-intelligence" in path or "/brand-summary" in path:
+            timeout = 60.0
+        else:
+            timeout = 25.0
         try:
-            return await asyncio.wait_for(call_next(request), timeout=15.0)
+            return await asyncio.wait_for(call_next(request), timeout=timeout)
         except asyncio.TimeoutError:
             return JSONResponse(
                 status_code=504,
-                content={"detail": "Request timed out (15s limit)"},
+                content={"detail": f"Request timed out ({timeout:.0f}s limit)"},
             )
 
 from app.api import (
