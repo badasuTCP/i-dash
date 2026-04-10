@@ -14,22 +14,20 @@ const DateRangePicker = ({ onApply, onClear }) => {
   const today = useMemo(() => new Date(), []);
   const currentYear = today.getFullYear();
 
-  // Fetch data bounds on mount — determines which year presets to show
   useEffect(() => {
     dashboardAPI.getDateBounds?.()
       .then(({ data }) => setDateBounds(data))
-      .catch(() => {}); // silent — picker works without bounds
+      .catch(() => {});
   }, []);
 
   const earliestYear = dateBounds?.earliest_year || currentYear - 2;
 
-  // Build dynamic year presets: from earliest data year to current year - 1
   const yearPresets = useMemo(() => {
     const presets = [];
     for (let y = currentYear - 1; y >= earliestYear; y--) {
       presets.push({
         id: `year_${y}`,
-        label: `${y} Full Year`,
+        label: `${y}`,
         getRange: () => ({ start: new Date(y, 0, 1), end: new Date(y, 11, 31) }),
       });
     }
@@ -59,12 +57,8 @@ const DateRangePicker = ({ onApply, onClear }) => {
     { id: 'last90',      label: 'Last 90 Days',  getRange: () => ({ start: subDays(today, 89), end: today }) },
     { id: 'ytd',         label: 'Year to Date',  getRange: () => ({ start: startOfYear(today), end: today }) },
     { id: 'allTime',     label: 'All Time',       getRange: () => ({ start: dateBounds ? new Date(dateBounds.earliest) : new Date(2024, 0, 1), end: today }) },
-    ...yearPresets,
-  ], [today, yearPresets, dateBounds]);
+  ], [today, dateBounds]);
 
-  const allPresets = presets; // single flat list
-
-  // Display text
   const displayText = useMemo(() => {
     if (!activeMode) return 'Year to Date';
     if (activeMode === 'custom' && customStart && customEnd) {
@@ -72,19 +66,21 @@ const DateRangePicker = ({ onApply, onClear }) => {
         return `${format(new Date(customStart), 'MMM d')} – ${format(new Date(customEnd), 'MMM d, yyyy')}`;
       } catch { return 'Custom Range'; }
     }
-    const preset = allPresets.find(p => p.id === activeMode);
+    const all = [...presets, ...yearPresets];
+    const preset = all.find(p => p.id === activeMode);
     if (preset) {
       const range = preset.getRange();
       return `${format(range.start, 'MMM d')} – ${format(range.end, 'MMM d, yyyy')}`;
     }
     return 'Year to Date';
-  }, [activeMode, customStart, customEnd, allPresets]);
+  }, [activeMode, customStart, customEnd, presets, yearPresets]);
 
   const isCustomMode = activeMode === 'custom';
   const customValid = customStart && customEnd && new Date(customStart) <= new Date(customEnd);
 
   const handlePresetClick = useCallback((presetId) => {
-    const preset = allPresets.find(p => p.id === presetId);
+    const all = [...presets, ...yearPresets];
+    const preset = all.find(p => p.id === presetId);
     if (!preset) return;
     const range = preset.getRange();
     setCustomStart('');
@@ -92,24 +88,7 @@ const DateRangePicker = ({ onApply, onClear }) => {
     setActiveMode(presetId);
     setIsOpen(false);
     onApply?.(range.start, range.end, presetId);
-  }, [allPresets, onApply]);
-
-  const handleCustomStartChange = useCallback((e) => {
-    setCustomStart(e.target.value);
-    setActiveMode('custom');
-  }, []);
-
-  const handleCustomEndChange = useCallback((e) => {
-    setCustomEnd(e.target.value);
-    setActiveMode('custom');
-  }, []);
-
-  const handleApplyCustom = useCallback(() => {
-    if (!customValid) return;
-    setActiveMode('custom');
-    setIsOpen(false);
-    onApply?.(new Date(customStart), new Date(customEnd), 'custom');
-  }, [customStart, customEnd, customValid, onApply]);
+  }, [presets, yearPresets, onApply]);
 
   const handleClear = useCallback(() => {
     setActiveMode('ytd');
@@ -122,8 +101,7 @@ const DateRangePicker = ({ onApply, onClear }) => {
   return (
     <div className="relative">
       <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
+        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border transition-all text-sm ${
           activeMode && activeMode !== 'ytd'
@@ -153,94 +131,115 @@ const DateRangePicker = ({ onApply, onClear }) => {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.95 }}
               transition={{ duration: 0.2 }}
-              className="absolute top-full mt-2 right-0 z-50 glass-dark p-4 rounded-xl min-w-[360px] shadow-xl max-h-[80vh] overflow-y-auto"
+              className="absolute top-full mt-2 right-0 z-50 p-5 rounded-2xl min-w-[380px] shadow-2xl max-h-[85vh] overflow-y-auto
+                         bg-[#1a1f2e] border border-slate-600/40"
             >
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Quick Filters</p>
-              <div className="grid grid-cols-3 gap-1.5 mb-4">
-                {allPresets.map((preset) => (
-                  <motion.button
+              {/* Quick Presets */}
+              <p className="text-[11px] font-bold text-slate-200 uppercase tracking-widest mb-3">Quick Filters</p>
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                {presets.map((preset) => (
+                  <button
                     key={preset.id}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
                     onClick={() => handlePresetClick(preset.id)}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                       activeMode === preset.id
-                        ? 'bg-gradient-to-r from-[#F97066] to-[#FEB47B] text-white shadow-lg shadow-orange-500/20'
-                        : 'bg-slate-800/30 text-slate-300 hover:bg-slate-700/50'
+                        ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-lg shadow-indigo-500/25'
+                        : 'bg-slate-700/50 text-slate-200 hover:bg-slate-600/60 hover:text-white'
                     }`}
                   >
                     {preset.label}
-                  </motion.button>
+                  </button>
                 ))}
               </div>
 
-              {/* Data range indicator */}
-              {dateBounds && (
-                <p className="text-[10px] text-slate-200 mb-3 bg-slate-700/40 px-2 py-1 rounded inline-block">
-                  📊 Data available: <span className="font-semibold text-white">{dateBounds.earliest}</span> → <span className="font-semibold text-white">{dateBounds.latest}</span>
-                </p>
+              {/* Year Presets */}
+              {yearPresets.length > 0 && (
+                <>
+                  <p className="text-[11px] font-bold text-slate-200 uppercase tracking-widest mb-2">Historical Years</p>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    {yearPresets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        onClick={() => handlePresetClick(preset.id)}
+                        className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                          activeMode === preset.id
+                            ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-500/25'
+                            : 'bg-slate-700/50 text-slate-200 hover:bg-slate-600/60 hover:text-white'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
 
-              {/* Custom Date Range */}
-              <div className={`space-y-3 pt-4 border-t border-slate-600/30 transition-opacity ${
-                activeMode && activeMode !== 'custom' ? 'opacity-40 pointer-events-none' : 'opacity-100'
-              }`}>
-                <p className="text-xs font-bold text-white uppercase tracking-wide">Custom Date Range</p>
-                <div className="grid grid-cols-2 gap-3">
+              {/* Data availability */}
+              {dateBounds && (
+                <div className="mb-4 px-3 py-2 rounded-lg bg-slate-700/30 border border-slate-600/30">
+                  <p className="text-[11px] text-slate-300">
+                    📊 Data range: <span className="font-bold text-white">{dateBounds.earliest}</span> → <span className="font-bold text-white">{dateBounds.latest}</span>
+                  </p>
+                </div>
+              )}
+
+              {/* Custom Date Range — always interactive */}
+              <div className="pt-4 border-t border-slate-600/40">
+                <p className="text-[11px] font-bold text-slate-200 uppercase tracking-widest mb-3">Custom Date Range</p>
+                <div className="grid grid-cols-2 gap-3 mb-4">
                   <div>
-                    <label className="text-[10px] text-slate-300 mb-1 block font-medium">Start Date</label>
+                    <label className="text-[11px] text-slate-300 mb-1.5 block font-semibold">Start Date</label>
                     <input
                       type="date"
                       value={customStart}
-                      onChange={handleCustomStartChange}
+                      onChange={(e) => { setCustomStart(e.target.value); setActiveMode('custom'); }}
                       min={dateBounds?.earliest}
                       max={dateBounds?.latest}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-600/50 text-white text-sm
-                                 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none
-                                 [color-scheme:dark]"
+                      className="w-full px-3 py-2.5 rounded-lg bg-slate-700/60 border border-slate-500/50 text-white text-sm font-medium
+                                 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30 outline-none transition-all
+                                 [color-scheme:dark] placeholder:text-slate-400"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-slate-300 mb-1 block font-medium">End Date</label>
+                    <label className="text-[11px] text-slate-300 mb-1.5 block font-semibold">End Date</label>
                     <input
                       type="date"
                       value={customEnd}
-                      onChange={handleCustomEndChange}
+                      onChange={(e) => { setCustomEnd(e.target.value); setActiveMode('custom'); }}
                       min={dateBounds?.earliest}
                       max={dateBounds?.latest}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-600/50 text-white text-sm
-                                 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 outline-none
-                                 [color-scheme:dark]"
+                      className="w-full px-3 py-2.5 rounded-lg bg-slate-700/60 border border-slate-500/50 text-white text-sm font-medium
+                                 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/30 outline-none transition-all
+                                 [color-scheme:dark] placeholder:text-slate-400"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="flex gap-2 mt-4">
+              {/* Action Buttons */}
+              <div className="flex gap-2 pt-2">
                 {activeMode && activeMode !== 'ytd' && (
-                  <motion.button
-                    whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                    onClick={handleClear}
-                    className="px-4 py-2 rounded-lg bg-slate-700/30 text-slate-300 hover:bg-slate-700/50 transition-all text-sm font-medium"
-                  >
-                    Reset to YTD
-                  </motion.button>
+                  <button onClick={handleClear}
+                    className="px-4 py-2.5 rounded-lg bg-slate-700/50 text-slate-200 hover:bg-slate-600/60 transition-all text-xs font-semibold">
+                    Reset
+                  </button>
                 )}
-                <motion.button
-                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                  onClick={() => setIsOpen(false)}
-                  className="flex-1 px-4 py-2 rounded-lg bg-slate-700/30 text-slate-300 hover:bg-slate-700/50 transition-all text-sm font-medium"
-                >
+                <button onClick={() => setIsOpen(false)}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-slate-700/50 text-slate-200 hover:bg-slate-600/60 transition-all text-xs font-semibold">
                   Cancel
-                </motion.button>
-                <motion.button
-                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                  onClick={handleApplyCustom}
+                </button>
+                <button
+                  onClick={() => {
+                    if (!customValid) return;
+                    setActiveMode('custom');
+                    setIsOpen(false);
+                    onApply?.(new Date(customStart), new Date(customEnd), 'custom');
+                  }}
                   disabled={!isCustomMode || !customValid}
-                  className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-[#F97066] to-[#FEB47B] text-white hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-sm font-medium"
-                >
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white
+                             hover:opacity-90 disabled:opacity-20 disabled:cursor-not-allowed transition-all text-xs font-bold shadow-lg shadow-indigo-500/20">
                   Apply Custom
-                </motion.button>
+                </button>
               </div>
             </motion.div>
           </>
