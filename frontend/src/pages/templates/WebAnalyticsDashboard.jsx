@@ -244,7 +244,7 @@ const WebAnalyticsDashboard = ({ title, subtitle, accentColor, scorecards, websi
               </>
             ) : (
               <div className="flex items-center justify-center h-[280px]">
-                <p className={`text-sm ${textSecondary}`}>Select "All Properties" to see breakdown</p>
+                <p className={`text-sm ${textSecondary}`}>No user data available for this period</p>
               </div>
             )}
             <div className="space-y-2 mt-2">

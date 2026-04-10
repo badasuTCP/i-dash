@@ -1218,9 +1218,9 @@ async def get_web_analytics(
         for row in device_rows
     ]
 
-    # ── Website breakdown by property (for "All Properties" mode) ─────
+    # ── Website breakdown by property (works for all modes) ────────────
     website_breakdown = []
-    if len(property_ids) > 1:
+    if True:
         try:
             from app.models.ga4_property import GA4Property
             breakdown_stmt = (
