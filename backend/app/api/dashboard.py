@@ -1868,9 +1868,14 @@ async def get_marketing_data(
         gads_customer_filter = ["2823564937"]
 
     # ── 3. Meta Ads aggregates (filtered by brand) ────────────────────
+    # Include NULL account_id rows (pre-tagging data) alongside branded rows
+    from sqlalchemy import or_
     meta_where = [MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date]
     if meta_account_filter:
-        meta_where.append(MetaAdMetric.account_id.in_(meta_account_filter))
+        meta_where.append(or_(
+            MetaAdMetric.account_id.in_(meta_account_filter),
+            MetaAdMetric.account_id.is_(None),
+        ))
     meta_stmt = select(
         func.sum(MetaAdMetric.impressions).label("impressions"),
         func.sum(MetaAdMetric.clicks).label("clicks"),
@@ -1886,7 +1891,10 @@ async def get_marketing_data(
     # ── 4. Google Ads aggregates (filtered by brand) ──────────────────
     gads_where = [GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date]
     if gads_customer_filter:
-        gads_where.append(GoogleAdMetric.customer_id.in_(gads_customer_filter))
+        gads_where.append(or_(
+            GoogleAdMetric.customer_id.in_(gads_customer_filter),
+            GoogleAdMetric.customer_id.is_(None),
+        ))
     google_stmt = select(
         func.sum(GoogleAdMetric.impressions).label("impressions"),
         func.sum(GoogleAdMetric.clicks).label("clicks"),
