@@ -104,7 +104,7 @@ async def _create_default_admin() -> None:
 
 
 async def _seed_ibos_brand_assets() -> None:
-    """Pre-populate brand_assets with known I-BOS Meta/Google Ads IDs."""
+    """Pre-populate brand_assets with ALL known brand mappings."""
     try:
         from app.models.brand_asset import BrandAsset
         async with async_session_maker() as session:
@@ -112,26 +112,37 @@ async def _seed_ibos_brand_assets() -> None:
             if existing.scalar_one_or_none():
                 return  # Already seeded
 
-            IBOS_ASSETS = [
-                # Meta Ads accounts (from The Concrete Protector + I-Bos 2 portfolios)
-                ("meta", "act_144305066", "Beckley Concrete Decor"),
-                ("meta", "act_673130245854523", "Diamond Topcoat"),
-                ("meta", "1366105912189047", "Floor Warriors"),
-                ("meta", "1695172861344941", "TVS Coatings"),
-                ("meta", "1621412735957179", "Graber Design Coatings"),
-                # Google Ads customer IDs
-                ("google_ads", "6754610688", "Tailored Concrete Coatings"),
-                ("google_ads", "2957400868", "SLG Concrete Coatings"),
+            ALL_BRAND_ASSETS = [
+                # ── CP Brand (internal training) ──────────────────────────
+                ("meta", "act_144305066", "CP Internal Training", "cp"),
+
+                # ── Sani-Tred Brand ───────────────────────────────────────
+                ("google_ads", "2823564937", "Sani-Tred Google Ads", "sanitred"),
+
+                # ── I-BOS Brand (11 Meta + 2 Google) ──────────────────────
+                ("meta", "act_1614487789160872", "Beckley Concrete Decor (Concrete Transformations)", "ibos"),
+                ("meta", "act_673130245854523", "Columbus Concrete Coatings", "ibos"),
+                ("meta", "act_1366105912189047", "SLG Concrete Coatings", "ibos"),
+                ("meta", "act_1695172861344941", "Tailored Concrete Coatings", "ibos"),
+                ("meta", "act_1804828293424131", "Floor Warriors", "ibos"),
+                ("meta", "act_1621412735957179", "Graber Design Coatings", "ibos"),
+                ("meta", "act_1593411211628312", "TVS Coatings", "ibos"),
+                ("meta", "act_590626230518758", "LNS Concrete Coatings", "ibos"),
+                ("meta", "act_1216723690570763", "Reveles Epoxy", "ibos"),
+                ("meta", "act_1641409050108751", "SCF Concrete Promo", "ibos"),
+                ("meta", "act_144305066", "Beckley (CP Portfolio)", "ibos"),
+                ("google_ads", "6754610688", "Tailored Concrete (Google)", "ibos"),
+                ("google_ads", "2957400868", "SLG Concrete (Google)", "ibos"),
             ]
-            for platform, acct_id, name in IBOS_ASSETS:
+            for platform, acct_id, name, brand in ALL_BRAND_ASSETS:
                 session.add(BrandAsset(
                     platform=platform, account_id=acct_id, account_name=name,
-                    brand="ibos", source="seed", mapped_by="system",
+                    brand=brand, source="seed", mapped_by="system",
                 ))
             await session.commit()
-            logger.info("Seeded %d I-BOS brand assets", len(IBOS_ASSETS))
+            logger.info("Seeded %d brand assets across CP/SaniTred/IBOS", len(ALL_BRAND_ASSETS))
     except Exception as e:
-        logger.warning("I-BOS brand asset seeding failed: %s", e)
+        logger.warning("Brand asset seeding failed: %s", e)
 
 
 async def _start_scheduler() -> None:

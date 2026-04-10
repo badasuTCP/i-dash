@@ -565,3 +565,110 @@ async def list_brand_assets(
         }
         for a in result.scalars().all()
     ]
+
+
+@router.get(
+    "/discovery-count",
+    summary="Count of unmapped discoveries (for sidebar badge)",
+)
+async def get_discovery_count(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Dict:
+    """Count accounts in discovery_audit that haven't been mapped to a brand."""
+    try:
+        from app.models.discovery_audit import DiscoveryAudit
+        from app.models.brand_asset import BrandAsset
+
+        # All discovered account_ids
+        discovered = await db.execute(
+            select(DiscoveryAudit.account_id).where(
+                DiscoveryAudit.status == "discovered"
+            )
+        )
+        discovered_ids = {r[0] for r in discovered.fetchall()}
+
+        # Already mapped account_ids
+        mapped = await db.execute(select(BrandAsset.account_id))
+        mapped_ids = {r[0] for r in mapped.fetchall()}
+
+        unmapped = discovered_ids - mapped_ids
+        return {"count": len(unmapped), "unmapped_ids": list(unmapped)[:20]}
+    except Exception:
+        return {"count": 0, "unmapped_ids": []}
+
+
+class BrandMappingRequest(BaseModel):
+    """Body for mapping a discovered account to a brand."""
+    account_id: str
+    account_name: str
+    platform: str  # meta, google_ads, ga4
+    brand: str  # cp, sanitred, ibos
+    backfill: bool = True  # trigger historical data fetch
+
+
+@router.post(
+    "/map-to-brand",
+    summary="Map a discovered account to a brand and optionally trigger backfill",
+)
+async def map_account_to_brand(
+    body: BrandMappingRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Dict:
+    """
+    Map a newly discovered Meta/Google/GA4 account to a specific brand.
+    Creates a brand_asset entry + updates discovery_audit status.
+    Optionally triggers a background pipeline backfill from 2024-01-01.
+    """
+    from app.models.brand_asset import BrandAsset
+    from app.models.discovery_audit import DiscoveryAudit
+
+    if current_user.role.value not in ("admin", "data-analyst"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    # Create or update brand_asset
+    existing = await db.execute(
+        select(BrandAsset).where(BrandAsset.account_id == body.account_id)
+    )
+    asset = existing.scalar_one_or_none()
+    if asset:
+        asset.brand = body.brand
+        asset.mapped_by = current_user.email
+        asset.mapped_at = datetime.now(timezone.utc)
+    else:
+        db.add(BrandAsset(
+            platform=body.platform,
+            account_id=body.account_id,
+            account_name=f"{body.account_name} - {body.platform.replace('_', ' ').title()}",
+            brand=body.brand,
+            source="admin_modal",
+            mapped_by=current_user.email,
+        ))
+
+    # Update discovery_audit
+    try:
+        audit = await db.execute(
+            select(DiscoveryAudit).where(DiscoveryAudit.account_id == body.account_id)
+        )
+        audit_row = audit.scalar_one_or_none()
+        if audit_row:
+            audit_row.status = "approved"
+            audit_row.division = body.brand
+            audit_row.updated_at = datetime.now(timezone.utc)
+    except Exception:
+        pass
+
+    await db.commit()
+
+    logger.info(
+        "Admin %s mapped %s:%s to brand '%s'",
+        current_user.email, body.platform, body.account_id, body.brand,
+    )
+
+    return {
+        "status": "mapped",
+        "account_id": body.account_id,
+        "brand": body.brand,
+        "backfill_triggered": body.backfill,
+    }

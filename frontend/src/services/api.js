@@ -171,6 +171,9 @@ export const contractorsAPI = {
   getPendingCount: () => apiClient.get('/contractors/pending/count'),
   approve: (id, data = { active: true }) =>
     apiClient.put(`/contractors/${id}/approve`, data),
+  mapToBrand: (data) => apiClient.post('/contractors/map-to-brand', data),
+  getDiscoveryCount: () => apiClient.get('/contractors/discovery-count'),
+  getBrandAssets: (brand) => apiClient.get('/contractors/brand-assets', { params: { brand } }),
 };
 
 // Users endpoints
