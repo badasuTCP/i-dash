@@ -30,33 +30,14 @@ const GripHandle = (props) => {
 
 // ── Trend Chart with contextual scroll hint ─────────────────────────────────
 const TrendChart = ({ data, accentColor, isDark, cardBg, textPrimary, tooltipStyle }) => {
-  const [hasScrolled, setHasScrolled] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
   const len = data?.length || 0;
   const showBrush = len > 14;
-  const isLong = len > 30;
-  const showHint = showBrush && isLong && !hasScrolled;
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-      className={`rounded-xl p-6 mb-8 ${cardBg} relative`}>
+      className={`rounded-xl p-6 mb-8 ${cardBg}`}>
       <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Visitor Trend</h3>
-
-      {/* Floating hint — positioned over the empty brush track (left side) */}
-      {showHint && (
-        <div className="absolute bottom-8 left-16 right-1/2 flex items-center justify-center pointer-events-none z-20">
-          <motion.span
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: [0.5, 0.8, 0.5], x: [10, 0, 10] }}
-            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-            className={`text-[10px] uppercase tracking-[0.15em] font-semibold px-3 py-1.5 rounded-full ${
-              isDark ? 'bg-indigo-500/15 text-indigo-300/70 border border-indigo-500/20'
-                     : 'bg-indigo-50 text-indigo-400/80 border border-indigo-200/40'
-            }`}
-          >
-            ← Drag to view full history
-          </motion.span>
-        </div>
-      )}
 
       <ResponsiveContainer width="100%" height={350}>
         <AreaChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
@@ -84,14 +65,35 @@ const TrendChart = ({ data, accentColor, isDark, cardBg, textPrimary, tooltipSty
               height={30}
               stroke={isDark ? '#4f46e5' : '#6366f1'}
               fill={isDark ? '#0f172a' : '#f8fafc'}
-              startIndex={isLong ? len - 30 : 0}
+              startIndex={len > 30 ? len - 30 : 0}
               endIndex={len - 1}
-              onChange={() => { if (!hasScrolled) setHasScrolled(true); }}
+              onChange={() => { if (!hasInteracted) setHasInteracted(true); }}
               traveller={GripHandle}
             />
           )}
         </AreaChart>
       </ResponsiveContainer>
+
+      {/* Contextual hint — below the chart, disappears after first brush touch */}
+      {showBrush && !hasInteracted && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="flex items-center justify-center mt-1 mb-0"
+        >
+          <motion.span
+            animate={{ opacity: [0.4, 0.7, 0.4] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+            className={`text-[10px] uppercase tracking-[0.12em] font-medium px-3 py-1 rounded-full inline-flex items-center gap-1.5 ${
+              isDark ? 'text-slate-500' : 'text-slate-400'
+            }`}
+          >
+            <span style={{ fontSize: '13px' }}>↔</span>
+            Drag the navigator bar to scroll through time
+          </motion.span>
+        </motion.div>
+      )}
 
       {/* Brush track styling */}
       <style>{`
