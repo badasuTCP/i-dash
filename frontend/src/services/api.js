@@ -143,8 +143,8 @@ export const dashboardAPI = {
 // Pipeline endpoints — matches /api/pipelines backend router
 export const pipelinesAPI = {
   getAll:    ()           => apiClient.get('/pipelines'),
-  run:       (name)       => apiClient.post(`/pipelines/${name}/run`),
-  runAll:    ()           => apiClient.post('/pipelines/run-all'),
+  run:       (name)       => apiClient.post(`/pipelines/${name}/run`, null, { timeout: 120000 }),
+  runAll:    ()           => apiClient.post('/pipelines/run-all', null, { timeout: 120000 }),
   getHistory:(name, limit=20) => apiClient.get(`/pipelines/${name}/history`, { params: { limit } }),
 };
 

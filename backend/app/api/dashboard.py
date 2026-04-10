@@ -2030,11 +2030,12 @@ async def get_contractor_breakdown(
     contractors = []
     try:
         from app.models.ga4_property import GA4Property
-        # Get all I-BOS GA4 properties with data
+        # Merge properties by contractor_id to avoid duplicates
+        # (e.g. "Tailored Concrete Coatings" + "Tailored Concrete Coatings - GA4")
         props_q = await db.execute(
             select(
-                GA4Property.property_id,
-                GA4Property.display_name,
+                func.min(GA4Property.property_id).label("property_id"),
+                func.min(GA4Property.display_name).label("display_name"),
                 GA4Property.contractor_id,
                 func.sum(GA4Metric.sessions).label("visits"),
                 func.sum(GA4Metric.total_users).label("users"),
@@ -2050,7 +2051,7 @@ async def get_contractor_breakdown(
                 GA4Metric.source == "(all)",
                 GA4Metric.device == "(all)",
             ))
-            .group_by(GA4Property.property_id, GA4Property.display_name, GA4Property.contractor_id)
+            .group_by(GA4Property.contractor_id)
             .order_by(func.sum(GA4Metric.sessions).desc())
             .limit(20)
         )

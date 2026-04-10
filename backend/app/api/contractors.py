@@ -53,6 +53,7 @@ class ContractorResponse(BaseModel):
     active: bool
     status: str = "active"
     meta_account_id: Optional[str] = None
+    platform_source: Optional[str] = None  # meta, google_ads, ga4
     updated_at: datetime | None = None
 
     class Config:
