@@ -23,9 +23,17 @@ export function GlobalDateProvider({ children }) {
   });
   const [presetId, setPresetId] = useState('ytd');
 
-  /** Called by the Header DateRangePicker onApply */
+  /** Called by the Header DateRangePicker onApply.
+   *  Normalizes Date objects to YYYY-MM-DD strings for stable comparison. */
   const setGlobalDate = useCallback((start, end, preset = null) => {
-    setDateRange(start && end ? { start, end } : null);
+    const fmt = (d) => {
+      if (!d) return null;
+      if (typeof d === 'string') return d;
+      return d.toISOString().slice(0, 10);
+    };
+    const s = fmt(start);
+    const e = fmt(end);
+    setDateRange(s && e ? { start: s, end: e } : null);
     setPresetId(preset);
   }, []);
 

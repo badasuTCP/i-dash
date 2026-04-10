@@ -18,10 +18,16 @@ const IBOSContractors = () => {
   const [expandedId, setExpandedId] = useState(null);
   const [tab, setTab] = useState('all'); // all, paid, organic
 
+  // Normalize dates to strings for stable dependency comparison
+  const _fmt = (d) => {
+    if (!d) return null;
+    if (typeof d === 'string') return d;
+    return d.toISOString().slice(0, 10);
+  };
   const ytdStart = `${new Date().getFullYear()}-01-01`;
   const ytdEnd = new Date().toISOString().slice(0, 10);
-  const from = dateFrom || ytdStart;
-  const to = dateTo || ytdEnd;
+  const from = _fmt(dateFrom) || ytdStart;
+  const to = _fmt(dateTo) || ytdEnd;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
