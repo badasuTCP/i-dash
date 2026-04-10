@@ -21,7 +21,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ComposedChart, Bar, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis,
-  PolarRadiusAxis, Radar, Cell, BarChart as ReBarChart,
+  PolarRadiusAxis, Radar, Cell, BarChart as ReBarChart, Brush,
 } from 'recharts';
 import {
   TrendingUp, Users, Target, AlertTriangle, Zap, Award, Clock,
@@ -500,6 +500,10 @@ const SalesIntelligence = () => {
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Area yAxisId="left" type="monotone" dataKey="activities" name="Activities" stroke={COLORS.activity} fill="url(#actGrad)" strokeWidth={2} />
                   <Line yAxisId="right" type="monotone" dataKey="deals_won" name="Deals Won" stroke={COLORS.won} strokeWidth={2.5} dot={{ r: 3, fill: COLORS.won }} activeDot={{ r: 5 }} />
+                  {dailyData.length > 14 && (
+                    <Brush dataKey="date" height={24} stroke="#6366f1" fill={isDark ? '#0f172a' : '#f8fafc'}
+                      startIndex={Math.max(0, dailyData.length - 30)} endIndex={dailyData.length - 1} />
+                  )}
                 </ComposedChart>
               </ResponsiveContainer>
             ) : (

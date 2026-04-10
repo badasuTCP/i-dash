@@ -851,12 +851,39 @@ async def get_sales_intelligence(
         {"name": "Ending Pipeline", "value": pipe, "fill": "#8B5CF6"},
     ]
 
+    # ── Stalled deals from DB (not updated in 3+ days, open stage) ──────
+    stalled_deals = []
+    try:
+        stalled_q = await db.execute(text(f"""
+            SELECT deal_id, deal_name, owner_id, stage, amount, created_date
+            FROM hubspot_deals
+            WHERE stage NOT IN ({','.join(WON_STAGES)})
+              AND stage NOT IN ({','.join(LOST_STAGES)})
+              AND stage != {PRE_LAUNCH}
+              AND amount > 0
+              AND created_date >= '{start_date}' AND created_date <= '{end_date}'
+            ORDER BY amount DESC
+            LIMIT 12
+        """))
+        for row in stalled_q.fetchall():
+            oid = row[2]
+            info = owners.get(oid, {}) if oid else {}
+            rep_name = f"{info.get('first', '')} {info.get('last', '')}".strip() or "Unassigned"
+            days = (date.today() - row[5]).days if row[5] else 0
+            stalled_deals.append({
+                "id": row[0], "name": row[1] or "Untitled",
+                "value": float(row[4] or 0), "rep": rep_name,
+                "stage": row[3][:20], "days_stalled": days, "last_touch": "Pipeline",
+            })
+    except Exception as e:
+        logger.warning("Stalled deals query failed: %s", e)
+
     return {
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
         "daily_series": daily_series,
         "totals": totals,
         "reps": reps_data,
-        "stalled_deals": [],
+        "stalled_deals": stalled_deals,
         "pipeline_waterfall": pipeline_waterfall,
         "training_submissions": training_submissions,
         "owners_synced": len(owners) > 0,
@@ -1688,10 +1715,11 @@ async def get_brand_summary(
     try:
         from app.services.hubspot_owners import get_hubspot_owners
         owners_map = await get_hubspot_owners()
-        reps_q = await db.execute(text("""
+        reps_q = await db.execute(text(f"""
             SELECT owner_id, COUNT(*) as deals
             FROM hubspot_deals
             WHERE owner_id IS NOT NULL
+              AND created_date >= '{start_date}' AND created_date <= '{end_date}'
             GROUP BY owner_id
             ORDER BY COUNT(*) DESC
             LIMIT 5

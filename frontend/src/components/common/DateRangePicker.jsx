@@ -176,16 +176,16 @@ const DateRangePicker = ({ onApply, onClear }) => {
 
               {/* Data range indicator */}
               {dateBounds && (
-                <p className="text-[10px] text-slate-500 mb-3">
-                  Data available: {dateBounds.earliest} → {dateBounds.latest}
+                <p className="text-[10px] text-slate-200 mb-3 bg-slate-700/40 px-2 py-1 rounded inline-block">
+                  📊 Data available: <span className="font-semibold text-white">{dateBounds.earliest}</span> → <span className="font-semibold text-white">{dateBounds.latest}</span>
                 </p>
               )}
 
               {/* Custom Date Range */}
-              <div className={`space-y-3 pt-4 border-t border-slate-700/30 transition-opacity ${
+              <div className={`space-y-3 pt-4 border-t border-slate-600/30 transition-opacity ${
                 activeMode && activeMode !== 'custom' ? 'opacity-40 pointer-events-none' : 'opacity-100'
               }`}>
-                <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Custom Date Range</p>
+                <p className="text-xs font-bold text-white uppercase tracking-wide">Custom Date Range</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[10px] text-slate-300 mb-1 block font-medium">Start Date</label>
