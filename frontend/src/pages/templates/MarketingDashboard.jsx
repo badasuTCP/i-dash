@@ -115,32 +115,21 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
           </div>
         </motion.div>
 
-        {/* Spend vs Revenue + Funnel */}
+        {/* Funnel from live scorecards */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
             className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Marketing Spend vs Revenue</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={svrResolved.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
-                <XAxis dataKey="quarter" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                <YAxis yAxisId="left" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
-                <YAxis yAxisId="right" orientation="right" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000000).toFixed(1)}M`} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend />
-                <Bar yAxisId="left" dataKey="spend" name="Spend" fill={accentColor} radius={[4, 4, 0, 0]} opacity={0.8} />
-                <Line yAxisId="right" type="monotone" dataKey="revenue" name="Revenue" stroke="#10B981" strokeWidth={2.5} dot={{ r: 4, fill: '#10B981' }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Marketing Funnel Volume</h3>
+            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Marketing Funnel</h3>
             <div className="space-y-4 py-4">
-              {funnelData.map((step, idx) => {
-                const widthPercent = (step.value / funnelData[0].value) * 100;
-                return (
+              {(() => {
+                const sc = resolvedScorecards.reduce((m, k) => { m[k.label] = k.value; return m; }, {});
+                const steps = [
+                  { name: 'Impressions', value: sc['Impressions'] || sc['Total Impressions'] || 0 },
+                  { name: 'Clicks', value: sc['Total Clicks'] || 0 },
+                  { name: 'Leads', value: sc['Leads'] || sc['Total Distinct Leads'] || 0 },
+                ];
+                const maxVal = Math.max(...steps.map(s => s.value), 1);
+                return steps.filter(s => s.value > 0).map((step, idx) => (
                   <div key={idx}>
                     <div className="flex justify-between text-sm mb-1">
                       <span className={textSecondary}>{step.name}</span>
@@ -149,58 +138,71 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
                     <div className={`h-8 rounded-md overflow-hidden ${isDark ? 'bg-slate-800/50' : 'bg-slate-100'}`}>
                       <motion.div
                         initial={{ width: 0 }}
-                        animate={{ width: `${widthPercent}%` }}
-                        transition={{ duration: 1, delay: 0.5 + idx * 0.15, ease: 'easeOut' }}
+                        animate={{ width: `${(step.value / maxVal) * 100}%` }}
+                        transition={{ duration: 1, delay: 0.3 + idx * 0.15 }}
                         className="h-full rounded-md"
-                        style={{
-                          background: `linear-gradient(90deg, ${accentColor}, ${accentColor}88)`,
-                        }}
+                        style={{ background: `linear-gradient(90deg, ${accentColor}, ${accentColor}88)` }}
                       />
                     </div>
                   </div>
-                );
-              })}
+                ));
+              })()}
+              {resolvedScorecards.length === 0 && (
+                <p className={`text-sm text-center py-8 ${textSecondary}`}>No funnel data for this period</p>
+              )}
+            </div>
+          </motion.div>
+
+          {/* Platform breakdown summary */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+            className={`rounded-xl p-6 ${cardBg}`}>
+            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Quick Stats</h3>
+            <div className="grid grid-cols-2 gap-4">
+              {resolvedScorecards.map((kpi, i) => (
+                <div key={i} className={`rounded-lg p-4 ${isDark ? 'bg-slate-800/40' : 'bg-slate-50'}`}>
+                  <p className={`text-[10px] uppercase tracking-wide font-semibold mb-1 ${textSecondary}`}>{kpi.label}</p>
+                  <p className={`text-xl font-bold ${textPrimary}`}>
+                    {kpi.format === 'currency' ? `$${(kpi.value || 0).toLocaleString()}` : (kpi.value || 0).toLocaleString()}
+                  </p>
+                </div>
+              ))}
             </div>
           </motion.div>
         </div>
 
-        {/* Spend by Period + CTR */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Spend & Leads by Period — FULL WIDTH */}
+        <div className="mb-8">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
             className={`rounded-xl p-6 ${cardBg}`}>
             <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Spend & Leads by Period</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={sbp.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
-                <XAxis dataKey="period" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                <YAxis yAxisId="left" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
-                <YAxis yAxisId="right" orientation="right" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend />
-                <Bar yAxisId="left" dataKey="spend" name="Spend" fill={accentColor} radius={[4, 4, 0, 0]} opacity={0.7} />
-                <Line yAxisId="right" type="monotone" dataKey="leads" name="Leads" stroke="#F59E0B" strokeWidth={2} dot={{ fill: '#F59E0B', r: 3 }} />
-                {(sbp.data?.length || 0) > 14 && (
-                  <Brush dataKey="period" height={24} stroke="#6366f1" fill={isDark ? '#0f172a' : '#f8fafc'}
-                    startIndex={Math.max(0, (sbp.data?.length || 0) - 30)} endIndex={(sbp.data?.length || 1) - 1} />
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Traffic Quality (CTR) by Quarter</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={ctr.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
-                <XAxis dataKey="quarter" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={v => `${v}%`} />
-                <Tooltip contentStyle={tooltipStyle} formatter={v => [`${v}%`]} />
-                <Legend />
-                <Bar dataKey="meta" name="Meta CTR" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="google" name="Google CTR" fill="#10B981" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {(sbp.data?.length || 0) > 0 ? (
+              <ResponsiveContainer width="100%" height={350}>
+                <ComposedChart data={sbp.data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="spendGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={accentColor} stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.4)'} />
+                  <XAxis dataKey="date" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                  <YAxis yAxisId="left" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => `$${v >= 1000 ? (v/1000).toFixed(0) + 'K' : v}`} />
+                  <YAxis yAxisId="right" orientation="right" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [name === 'Spend' ? `$${(v || 0).toLocaleString()}` : (v || 0).toLocaleString(), name]} />
+                  <Legend />
+                  <Area yAxisId="left" type="monotone" dataKey="spend" name="Spend" stroke={accentColor} fill="url(#spendGrad)" strokeWidth={2} />
+                  <Line yAxisId="right" type="monotone" dataKey="leads" name="Leads" stroke="#F59E0B" strokeWidth={2.5} dot={false} activeDot={{ r: 5, fill: '#F59E0B' }} />
+                  {(sbp.data?.length || 0) > 14 && (
+                    <Brush dataKey="date" height={26} stroke="#6366f1" fill={isDark ? '#0f172a' : '#f8fafc'}
+                      startIndex={Math.max(0, (sbp.data?.length || 0) - 30)} endIndex={(sbp.data?.length || 1) - 1} />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className={`h-[350px] flex items-center justify-center ${textSecondary}`}>
+                <p className="text-sm">No spend data for this period</p>
+              </div>
+            )}
           </motion.div>
         </div>
       </div>
