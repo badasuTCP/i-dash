@@ -19,13 +19,15 @@ const PendingContractorNotifier = () => {
   const hasFired = useRef(false);
 
   useEffect(() => {
-    // Only fire once per mount, only for authenticated super-admins
+    // Only fire ONCE per browser session, only for admin/data-analyst
     if (hasFired.current) return;
     if (!isAuthenticated) return;
-    if (authMode === 'demo') return; // skip in demo mode — API won't respond
-    if (user?.role !== 'data-analyst') return;
+    if (authMode === 'demo') return;
+    if (user?.role !== 'data-analyst' && user?.role !== 'admin') return;
+    if (sessionStorage.getItem('idash_pending_notified')) return;
 
     hasFired.current = true;
+    sessionStorage.setItem('idash_pending_notified', '1');
 
     const check = async () => {
       try {

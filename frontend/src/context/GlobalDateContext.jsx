@@ -42,7 +42,7 @@ export function GlobalDateProvider({ children }) {
       presetId,
       dateFrom: dateRange?.start ?? null,
       dateTo: dateRange?.end ?? null,
-      isFiltered: !!dateRange,
+      isFiltered: presetId !== null && presetId !== 'ytd',
       setGlobalDate,
       clearGlobalDate,
     }}>
