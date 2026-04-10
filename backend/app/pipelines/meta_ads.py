@@ -245,7 +245,7 @@ class MetaAdsPipeline(BasePipeline):
                         campaign_insight.get("frequency", 0) or 0
                     )
 
-                    # Extract conversion data
+                    # Extract conversion data — count leads AND purchases
                     conversions = 0.0
                     conversion_value = 0.0
 
@@ -253,16 +253,23 @@ class MetaAdsPipeline(BasePipeline):
                     if isinstance(actions, list):
                         for action in actions:
                             if isinstance(action, dict):
-                                action_type = action.get("action_type")
+                                action_type = action.get("action_type", "")
                                 action_count = float(
                                     action.get("value", 0) or 0
                                 )
-                                # Count purchase-type actions as conversions
+                                # Count lead + purchase actions as conversions
                                 if action_type in [
+                                    "lead",
+                                    "offsite_conversion.fb_pixel_lead",
+                                    "onsite_conversion.lead_grouped",
+                                    "onsite_conversion.messaging_conversation_started_7d",
                                     "purchase",
                                     "omni_purchase",
                                     "checkout",
                                     "add_to_cart",
+                                    "complete_registration",
+                                    "contact_total",
+                                    "submit_application",
                                 ]:
                                     conversions += action_count
 

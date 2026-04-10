@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
-  BarChart, Bar, LineChart, Line, AreaChart, Area,
+  BarChart, Bar, LineChart, Line, AreaChart, Area, Brush,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Funnel,
 } from 'recharts';
 import { AlertCircle, CheckCircle } from 'lucide-react';
@@ -179,6 +179,10 @@ const MarketingDashboardTemplate = ({ title, subtitle, accentColor, scorecards, 
                 <Legend />
                 <Bar yAxisId="left" dataKey="spend" name="Spend" fill={accentColor} radius={[4, 4, 0, 0]} opacity={0.7} />
                 <Line yAxisId="right" type="monotone" dataKey="leads" name="Leads" stroke="#F59E0B" strokeWidth={2} dot={{ fill: '#F59E0B', r: 3 }} />
+                {(sbp.data?.length || 0) > 14 && (
+                  <Brush dataKey="period" height={24} stroke="#6366f1" fill={isDark ? '#0f172a' : '#f8fafc'}
+                    startIndex={Math.max(0, (sbp.data?.length || 0) - 30)} endIndex={(sbp.data?.length || 1) - 1} />
+                )}
               </ComposedChart>
             </ResponsiveContainer>
           </motion.div>

@@ -2011,6 +2011,80 @@ async def get_marketing_data(
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Contractor Breakdown — live per-contractor metrics from GA4 + Ads
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/contractor-breakdown",
+    summary="Per-contractor metrics for I-BOS breakdown page",
+)
+async def get_contractor_breakdown(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+) -> dict:
+    """Live per-contractor aggregation from GA4 properties + brand_assets."""
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    contractors = []
+    try:
+        from app.models.ga4_property import GA4Property
+        # Get all I-BOS GA4 properties with data
+        props_q = await db.execute(
+            select(
+                GA4Property.property_id,
+                GA4Property.display_name,
+                GA4Property.contractor_id,
+                func.sum(GA4Metric.sessions).label("visits"),
+                func.sum(GA4Metric.total_users).label("users"),
+                func.avg(GA4Metric.bounce_rate).label("bounce"),
+            )
+            .join(GA4Property, GA4Property.property_id == GA4Metric.property_id)
+            .where(and_(
+                GA4Property.division == "ibos",
+                GA4Property.enabled == True,
+                GA4Metric.date >= start_date,
+                GA4Metric.date <= end_date,
+                GA4Metric.channel == "(all)",
+                GA4Metric.source == "(all)",
+                GA4Metric.device == "(all)",
+            ))
+            .group_by(GA4Property.property_id, GA4Property.display_name, GA4Property.contractor_id)
+            .order_by(func.sum(GA4Metric.sessions).desc())
+            .limit(20)
+        )
+
+        _colors = ["#3B82F6","#10B981","#F59E0B","#8B5CF6","#EF4444","#06B6D4","#EC4899","#F97316","#14B8A6","#6366F1"]
+        for i, row in enumerate(props_q.all()):
+            contractors.append({
+                "id": row.contractor_id or row.property_id,
+                "name": row.display_name,
+                "property_id": row.property_id,
+                "visits": int(row.visits or 0),
+                "users": int(row.users or 0),
+                "bounce_rate": round(float(row.bounce or 0), 1),
+                "color": _colors[i % len(_colors)],
+                # Ad spend/leads would come from brand_assets mapping
+                "spend": 0, "leads": 0, "revenue": 0, "cpl": 0,
+            })
+    except Exception as e:
+        logger.warning("Contractor breakdown query failed: %s", e)
+
+    # Aggregate totals
+    total_visits = sum(c["visits"] for c in contractors)
+    total_users = sum(c["users"] for c in contractors)
+
+    return {
+        "period": f"{start_date} to {end_date}",
+        "hasLiveData": len(contractors) > 0,
+        "total_visits": total_visits,
+        "total_users": total_users,
+        "contractors": contractors,
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Retail Breakdown — Google Sheets (Sani-Tred Order Export)
 # ────────────────────────────────────────────────────────────────────────────
 

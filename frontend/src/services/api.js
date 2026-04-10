@@ -74,6 +74,10 @@ export const dashboardAPI = {
       params: { brand, date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
     }),
   getDateBounds: () => apiClient.get('/dashboard/date-bounds'),
+  getContractorBreakdown: (startDate, endDate) =>
+    apiClient.get('/dashboard/contractor-breakdown', {
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
+    }),
   getScorecards: (startDate, endDate) =>
     apiClient.get('/dashboard/scorecards', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
