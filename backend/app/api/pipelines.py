@@ -112,6 +112,11 @@ async def _run_pipeline_bg(
     pipeline instance immediately before the run. The previous values are
     restored afterwards so concurrent default runs are not affected.
     """
+    # Yield once so the parent request handler can finish serializing and
+    # flushing the 202 response through Railway's 60s edge proxy before any
+    # potentially-blocking pipeline work starts here.
+    await asyncio.sleep(0)
+
     started_at = datetime.now(timezone.utc)
     _running_pipelines[name] = {
         "status": "running",

@@ -10,6 +10,7 @@ auto-inserts any new accounts with status='pending_admin' for Super Admin
 review.
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -165,7 +166,8 @@ class MetaAdsPipeline(BasePipeline):
             "ctr",
         ]
 
-        try:
+        def _blocking_fetch() -> List[Dict[str, Any]]:
+            """Run the synchronous Facebook SDK call in a worker thread."""
             insights = ad_account.get_insights(
                 fields=fields,
                 params={
@@ -178,18 +180,16 @@ class MetaAdsPipeline(BasePipeline):
                     "limit": 500,
                 },
             )
-
-            results = []
+            out: List[Dict[str, Any]] = []
             for insight in insights:
                 insight_dict = dict(insight)
+                if self.campaign_ids and insight_dict.get("campaign_id") not in self.campaign_ids:
+                    continue
+                out.append(insight_dict)
+            return out
 
-                if self.campaign_ids:
-                    if insight_dict.get("campaign_id") not in self.campaign_ids:
-                        continue
-
-                results.append(insight_dict)
-
-            return results
+        try:
+            return await asyncio.to_thread(_blocking_fetch)
 
         except FacebookRequestError as e:
             self.logger.warning(
@@ -371,7 +371,9 @@ async def fetch_meta_ad_accounts() -> List[Dict[str, str]]:
         logger.warning("META_ACCESS_TOKEN not set — skipping Meta auto-discovery")
         return accounts
 
-    try:
+    def _blocking_discovery() -> List[Dict[str, str]]:
+        """All Meta SDK calls are synchronous — run them on a worker thread."""
+        discovered: List[Dict[str, str]] = []
         FacebookAdsApi.init(access_token=settings.META_ACCESS_TOKEN)
 
         # Strategy 1: Business-level enumeration (best coverage)
@@ -388,7 +390,7 @@ async def fetch_meta_ad_accounts() -> List[Dict[str, str]]:
                     act_id = acct_dict.get("account_id", "")
                     if not act_id.startswith("act_"):
                         act_id = f"act_{act_id}"
-                    accounts.append({
+                    discovered.append({
                         "id": act_id,
                         "name": acct_dict.get("name", act_id),
                     })
@@ -404,10 +406,9 @@ async def fetch_meta_ad_accounts() -> List[Dict[str, str]]:
                         act_id = acct_dict.get("account_id", "")
                         if not act_id.startswith("act_"):
                             act_id = f"act_{act_id}"
-                        # Avoid duplicates
-                        existing_ids = {a["id"] for a in accounts}
+                        existing_ids = {a["id"] for a in discovered}
                         if act_id not in existing_ids:
-                            accounts.append({
+                            discovered.append({
                                 "id": act_id,
                                 "name": acct_dict.get("name", act_id),
                             })
@@ -416,9 +417,9 @@ async def fetch_meta_ad_accounts() -> List[Dict[str, str]]:
 
                 logger.info(
                     "Meta auto-discovery: found %d ad accounts via Business API",
-                    len(accounts),
+                    len(discovered),
                 )
-                return accounts
+                return discovered
 
             except FacebookRequestError as e:
                 logger.warning(
@@ -441,21 +442,23 @@ async def fetch_meta_ad_accounts() -> List[Dict[str, str]]:
                 ad_account = AdAccount(account_id)
                 acct_info = ad_account.api_get(fields=["account_id", "name"])
                 acct_dict = dict(acct_info)
-                accounts.append({
+                discovered.append({
                     "id": account_id,
                     "name": acct_dict.get("name", account_id),
                 })
             except Exception as e:
                 logger.warning("Could not fetch account info for %s: %s", account_id, e)
-                # Still include it with the raw ID as name
-                accounts.append({"id": account_id, "name": account_id})
+                discovered.append({"id": account_id, "name": account_id})
 
         logger.info(
             "Meta auto-discovery (single-account mode): found %d account(s)",
-            len(accounts),
+            len(discovered),
         )
-        return accounts
+        return discovered
 
+    try:
+        accounts = await asyncio.to_thread(_blocking_discovery)
+        return accounts
     except Exception as e:
         logger.error("Meta auto-discovery failed entirely: %s", e)
         return []
