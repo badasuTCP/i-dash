@@ -217,6 +217,21 @@ async def update_visibility(
     else:
         contractor.status = "active" if body.active else "inactive"
     contractor.updated_at = datetime.now(timezone.utc)
+
+    # Mirror the visibility flip onto any associated GA4 properties so the
+    # metrics pipeline + Web Analytics queries both see the right set.
+    try:
+        from app.models.ga4_property import GA4Property
+        ga4_props = await db.execute(
+            select(GA4Property).where(GA4Property.contractor_id == contractor_id)
+        )
+        for prop in ga4_props.scalars().all():
+            prop.enabled = body.active
+            prop.status = contractor.status
+            prop.updated_at = datetime.now(timezone.utc)
+    except Exception as e:
+        logger.debug("Could not sync GA4 property on visibility toggle: %s", e)
+
     await db.commit()
     await db.refresh(contractor)
 
@@ -255,7 +270,22 @@ async def bulk_update_visibility(
 
     for c in contractors:
         c.active = body.active
+        c.status = "active" if body.active else "inactive"
         c.updated_at = now
+
+    # Flip every GA4 property that maps to a contractor in one pass so
+    # the metrics pipeline + Web Analytics queries pick them up.
+    try:
+        from app.models.ga4_property import GA4Property
+        props_result = await db.execute(
+            select(GA4Property).where(GA4Property.contractor_id.isnot(None))
+        )
+        for prop in props_result.scalars().all():
+            prop.enabled = body.active
+            prop.status = "active" if body.active else "inactive"
+            prop.updated_at = now
+    except Exception as e:
+        logger.debug("Could not sync GA4 properties on bulk toggle: %s", e)
 
     await db.commit()
 
@@ -467,7 +497,13 @@ async def approve_contractor(
     contractor.division = body.division
     contractor.updated_at = datetime.now(timezone.utc)
 
-    # Sync GA4 property status so it doesn't keep appearing as pending
+    # Sync GA4 property status AND enabled flag so it doesn't keep appearing
+    # as pending AND so the metrics pipeline actually fetches data for it.
+    #
+    # The GA4 pipeline extracts data only for properties where enabled=True
+    # (see google_analytics._extract_discovery_mode → get_properties_for_division
+    # called with enabled_only=True), and the /web-analytics endpoint filters
+    # by the same flag. Approving a contractor MUST flip enabled to match.
     try:
         from app.models.ga4_property import GA4Property
         ga4_props = await db.execute(
@@ -475,6 +511,8 @@ async def approve_contractor(
         )
         for prop in ga4_props.scalars().all():
             prop.status = contractor.status
+            # Approved → enable for extraction; rejected/inactive → disable.
+            prop.enabled = contractor.active
             prop.updated_at = datetime.now(timezone.utc)
     except Exception as e:
         logger.debug("Could not sync GA4 property status: %s", e)

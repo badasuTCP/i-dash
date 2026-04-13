@@ -103,6 +103,7 @@ async def init_db() -> None:
         await _ensure_meta_ad_metrics_schema(conn)
         await _ensure_google_ad_metrics_schema(conn)
         await _backfill_ad_metric_divisions(conn)
+        await _reconcile_ga4_property_enabled(conn)
 
 
 async def _ensure_meta_ad_metrics_schema(conn) -> None:
@@ -193,6 +194,48 @@ async def _ensure_google_ad_metrics_schema(conn) -> None:
         logger.warning("ensure_schema: could not create gads division index: %s", exc)
 
     logger.info("ensure_schema: google_ad_metrics reconciled (idempotent)")
+
+
+async def _reconcile_ga4_property_enabled(conn) -> None:
+    """One-shot reconciliation: bring ga4_properties.enabled in sync with
+    contractors.active. Older versions of the approve endpoint flipped
+    status but not enabled, leaving GA4 properties tied to an active
+    contractor with enabled=False — which caused the Web Analytics page
+    to show 'No data' despite the contractor appearing as Active in the
+    Contractor Management UI.
+
+    Safe to run every boot: every UPDATE is a no-op once the values agree.
+    """
+    try:
+        # Any GA4 property whose contractor is active/approved must be enabled.
+        await conn.execute(text("""
+            UPDATE ga4_properties
+               SET enabled = TRUE,
+                   status  = 'active',
+                   updated_at = NOW()
+             WHERE contractor_id IN (
+                       SELECT id FROM contractors
+                        WHERE active = TRUE
+                          AND status = 'active'
+                   )
+               AND (enabled IS DISTINCT FROM TRUE OR status IS DISTINCT FROM 'active')
+        """))
+        # And any whose contractor is explicitly inactive/rejected must be disabled.
+        await conn.execute(text("""
+            UPDATE ga4_properties
+               SET enabled = FALSE,
+                   status  = 'inactive',
+                   updated_at = NOW()
+             WHERE contractor_id IN (
+                       SELECT id FROM contractors
+                        WHERE active = FALSE
+                          AND status IN ('inactive', 'rejected')
+                   )
+               AND (enabled IS DISTINCT FROM FALSE OR status IS DISTINCT FROM 'inactive')
+        """))
+        logger.info("ensure_schema: ga4_properties.enabled reconciled with contractors.active")
+    except Exception as exc:
+        logger.warning("ensure_schema: ga4 reconcile skipped: %s", exc)
 
 
 async def _backfill_ad_metric_divisions(conn) -> None:
