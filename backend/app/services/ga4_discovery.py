@@ -35,6 +35,16 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+GA4_SOURCE_PREFIX = "[GA4]"
+
+
+def _with_ga4_prefix(name: str) -> str:
+    """Ensure a GA4-discovered property / contractor name is prefixed with [GA4]."""
+    if not name:
+        return GA4_SOURCE_PREFIX
+    name = name.strip()
+    return name if name.startswith(GA4_SOURCE_PREFIX) else f"{GA4_SOURCE_PREFIX} {name}"
+
 # ── Account-to-Division mapping ──────────────────────────────────────────────
 ACCOUNT_DIVISION_MAP: Dict[str, str] = {
     "115324581": "sanitred",   # Sani-Tred (Primary Retail)
@@ -249,7 +259,7 @@ async def persist_discovered_properties(db) -> Dict[str, Any]:
                 if not existing_contractor.scalar_one_or_none():
                     db.add(Contractor(
                         id=contractor_slug,
-                        name=prop["display_name"],
+                        name=_with_ga4_prefix(prop["display_name"]),
                         division="ibos",
                         active=False,
                         status="pending_admin",

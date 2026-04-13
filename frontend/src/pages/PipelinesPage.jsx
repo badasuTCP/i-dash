@@ -219,18 +219,57 @@ const PipelinesPage = () => {
   }, [fetchStatus]);
 
   // ── Run a single pipeline ────────────────────────────────────────────────────
+  // The backend dispatches the run to a background task and returns 202
+  // immediately with {status: 'accepted'}. We then poll /status until the task
+  // reports back with records_loaded + duration_seconds so the UI can show
+  // the real result instead of an empty "Done — records in s".
   const handleRunNow = useCallback(async (name) => {
     setRunningJobs((p) => ({ ...p, [name]: true }));
     setRunResults((p) => ({ ...p, [name]: null }));
     try {
       const range = backfill[name] || {};
-      const res = await pipelinesAPI.run(name, {
+      await pipelinesAPI.run(name, {
         date_from: range.from || undefined,
         date_to:   range.to   || undefined,
       });
-      setRunResults((p) => ({ ...p, [name]: { success: true, ...res.data } }));
-      // Refresh status after run
-      setTimeout(() => fetchStatus(true), 1500);
+
+      // Show a "queued" state while we wait for the background task.
+      setRunResults((p) => ({
+        ...p,
+        [name]: { success: true, pending: true, message: 'Running in background...' },
+      }));
+
+      // Poll /pipelines/{name}/status for up to ~15 minutes (30s * 30).
+      const MAX_POLLS = 30;
+      const POLL_INTERVAL_MS = 30_000;
+      let polls = 0;
+      const poll = async () => {
+        polls += 1;
+        try {
+          const statusRes = await pipelinesAPI.getStatus(name);
+          const data = statusRes.data || {};
+          if (data.status === 'running' || data.status === 'accepted') {
+            if (polls < MAX_POLLS) setTimeout(poll, POLL_INTERVAL_MS);
+            return;
+          }
+          if (data.status === 'success' || data.status === 'failed') {
+            setRunResults((p) => ({
+              ...p,
+              [name]: {
+                success: data.status === 'success',
+                pending: false,
+                records_loaded: data.records_loaded,
+                duration_seconds: data.duration_seconds,
+                error: data.error,
+              },
+            }));
+            fetchStatus(true);
+          }
+        } catch {
+          if (polls < MAX_POLLS) setTimeout(poll, POLL_INTERVAL_MS);
+        }
+      };
+      setTimeout(poll, 3_000);  // first poll after 3s
     } catch (err) {
       const detail = err.response?.data?.detail || err.message || 'Run failed';
       setRunResults((p) => ({ ...p, [name]: { success: false, error: detail } }));
@@ -601,9 +640,11 @@ const PipelinesPage = () => {
                                   : 'bg-red-500/10 text-red-400'
                               }`}
                             >
-                              {result.success
-                                ? <><CheckCircle size={12} /> Done — {result.records_loaded} records in {result.duration_seconds?.toFixed(1)}s</>
-                                : <><XCircle size={12} /> {result.error}</>}
+                              {result.pending
+                                ? <><Loader2 size={12} className="animate-spin" /> {result.message || 'Running in background...'}</>
+                                : result.success
+                                  ? <><CheckCircle size={12} /> Done — {(result.records_loaded ?? 0).toLocaleString()} records in {(result.duration_seconds ?? 0).toFixed(1)}s</>
+                                  : <><XCircle size={12} /> {result.error || 'Run failed'}</>}
                               <button onClick={() => setRunResults((p) => ({ ...p, [name]: null }))} className="ml-auto opacity-50 hover:opacity-100">✕</button>
                             </motion.div>
                           )}

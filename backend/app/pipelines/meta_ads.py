@@ -31,6 +31,27 @@ from app.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
+# ── Friday's canonical brand mapping ──────────────────────────────────────────
+# Any ad account under META_BUSINESS_ID is I-BOS by default. The CP training
+# account is the sole explicit CP override. Approved here = active immediately.
+META_PORTFOLIO_BUSINESS_ID = "1785037011813074"
+META_CP_ACCOUNT_IDS = {"144305066", "act_144305066"}
+META_SOURCE_PREFIX = "[META]"
+
+
+def _with_meta_prefix(name: str) -> str:
+    """Ensure a Meta-discovered account name is prefixed with [META]."""
+    if not name:
+        return META_SOURCE_PREFIX
+    name = name.strip()
+    return name if name.startswith(META_SOURCE_PREFIX) else f"{META_SOURCE_PREFIX} {name}"
+
+
+def _division_for_meta_account(meta_id: str) -> str:
+    """Friday's rule: CP only for the training account, else I-BOS."""
+    bare = (meta_id or "").replace("act_", "")
+    return "cp" if bare in {a.replace("act_", "") for a in META_CP_ACCOUNT_IDS} else "ibos"
+
 
 class MetaAdsPipeline(BasePipeline):
     """
@@ -303,7 +324,9 @@ class MetaAdsPipeline(BasePipeline):
                     # Create record
                     record = MetaAdMetric(
                         account_id=campaign_insight.get("_account_id", ""),
-                        account_name=campaign_insight.get("_account_name", ""),
+                        account_name=_with_meta_prefix(
+                            campaign_insight.get("_account_name", "")
+                        ),
                         date=metric_date,
                         campaign_id=campaign_id,
                         campaign_name=campaign_name,
@@ -515,7 +538,7 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                         session.add(DiscoveryAudit(
                             platform="meta",
                             account_id=acct["id"],
-                            account_name=acct["name"],
+                            account_name=_with_meta_prefix(acct["name"]),
                             portfolio=acct.get("portfolio", ""),
                             status="discovered",
                         ))
@@ -548,16 +571,34 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
             new_count = 0
             now = datetime.now(timezone.utc)
 
+            # Friday's canonical rule: any account under META_BUSINESS_ID
+            # is auto-approved; the CP training account is the sole CP override.
+            portfolio_business_id = (
+                getattr(settings, "META_BUSINESS_ID", "") or META_PORTFOLIO_BUSINESS_ID
+            )
+
             for acct in meta_accounts:
                 meta_id = acct["id"]
-                meta_name = acct["name"]
+                raw_name = acct["name"]
+                meta_name = _with_meta_prefix(raw_name)
 
                 # Already tracked or already decided (approved/rejected)?
                 if meta_id in existing_meta_ids or meta_id in already_decided:
                     continue
 
-                # Generate a unique slug
-                base_slug = _slugify(meta_name)
+                # Brand + status assignment (Friday's logic)
+                division = _division_for_meta_account(meta_id)
+                under_portfolio = (
+                    portfolio_business_id == META_PORTFOLIO_BUSINESS_ID
+                    or acct.get("business_id") == portfolio_business_id
+                )
+                # Accounts under our known Business portfolio are pre-approved —
+                # no manual admin gating required.
+                auto_active = bool(under_portfolio)
+                new_status = "active" if auto_active else "pending_admin"
+
+                # Generate a unique slug (based on raw name so slugs stay clean)
+                base_slug = _slugify(raw_name)
                 if not base_slug:
                     base_slug = meta_id.replace("act_", "meta-")
 
@@ -567,13 +608,12 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                     slug = f"{base_slug}-{suffix}"
                     suffix += 1
 
-                # Insert new pending contractor
                 new_contractor = Contractor(
                     id=slug,
                     name=meta_name,
-                    division="i-bos",
-                    active=False,
-                    status="pending_admin",
+                    division=division,
+                    active=auto_active,
+                    status=new_status,
                     meta_account_id=meta_id,
                     updated_at=now,
                 )
@@ -585,12 +625,17 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                 result["new_contractors"].append({
                     "id": slug,
                     "name": meta_name,
+                    "division": division,
+                    "status": new_status,
                     "meta_account_id": meta_id,
                 })
                 logger.info(
-                    "Meta auto-discovery: new contractor '%s' (%s) → pending_admin",
+                    "Meta auto-discovery: %s '%s' (%s) → %s/%s",
+                    "auto-approved" if auto_active else "pending_admin",
                     meta_name,
                     meta_id,
+                    division,
+                    new_status,
                 )
 
             if new_count > 0:

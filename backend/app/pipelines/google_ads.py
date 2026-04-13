@@ -18,6 +18,16 @@ from app.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
+G_ADS_SOURCE_PREFIX = "[G-ADS]"
+
+
+def _with_gads_prefix(name: str) -> str:
+    """Ensure a Google-Ads-discovered customer label is prefixed with [G-ADS]."""
+    if not name:
+        return G_ADS_SOURCE_PREFIX
+    name = str(name).strip()
+    return name if name.startswith(G_ADS_SOURCE_PREFIX) else f"{G_ADS_SOURCE_PREFIX} {name}"
+
 
 class GoogleAdsPipeline(BasePipeline):
     """
@@ -171,9 +181,9 @@ class GoogleAdsPipeline(BasePipeline):
         """
         try:
             self.logger.info(
-                f"Extracting Google Ads data from {self.start_date} "
+                f"Extracting {G_ADS_SOURCE_PREFIX} data from {self.start_date} "
                 f"to {self.end_date} for {len(self.customer_ids)} customer(s): "
-                f"{', '.join(self.customer_ids)}"
+                f"{', '.join(_with_gads_prefix(c) for c in self.customer_ids)}"
             )
 
             all_campaigns: List[Dict[str, Any]] = []
@@ -182,16 +192,17 @@ class GoogleAdsPipeline(BasePipeline):
                 try:
                     data = await self._get_campaigns_by_adgroup(customer_id=cid)
                     if data:
+                        label = data[0].get("customer_name") or _with_gads_prefix(cid)
                         self.logger.info(
-                            f"Customer {cid}: fetched {len(data)} ad group records"
+                            f"{label} ({cid}): fetched {len(data)} ad group records"
                         )
                         all_campaigns.extend(data)
                     else:
                         no_data_customers.append(cid)
                         self.logger.warning(
-                            "Customer %s: No Active Campaigns — 0 ad group records "
+                            "%s (%s): No Active Campaigns — 0 ad group records "
                             "in date range %s to %s",
-                            cid, self.start_date, self.end_date,
+                            _with_gads_prefix(cid), cid, self.start_date, self.end_date,
                         )
                 except GoogleAdsException as e:
                     self.logger.warning(f"Google Ads error for customer {cid}: {e}")
@@ -227,6 +238,7 @@ class GoogleAdsPipeline(BasePipeline):
 
             query = f"""
             SELECT
+                customer.descriptive_name,
                 campaign.id,
                 campaign.name,
                 campaign.advertising_channel_type,
@@ -255,8 +267,10 @@ class GoogleAdsPipeline(BasePipeline):
             results = ga_service.search(customer_id=cid, query=query)
 
             for row in results:
+                descriptive = getattr(row.customer, "descriptive_name", "") or cid
                 campaign_data = {
                     "customer_id": cid,
+                    "customer_name": _with_gads_prefix(descriptive),
                     "campaign_id": str(row.campaign.id),
                     "campaign_name": row.campaign.name,
                     "ad_group_name": str(row.campaign.advertising_channel_type.name),

@@ -167,7 +167,8 @@ def _ga4_prop_to_contractor(prop):
         """Minimal object that ContractorResponse.model_validate can handle."""
         def __init__(self, p):
             self.id = p.contractor_id
-            self.name = p.display_name
+            raw = p.display_name or ""
+            self.name = raw if raw.startswith("[GA4]") else f"[GA4] {raw}".strip()
             self.division = "ibos"
             self.active = p.enabled
             self.status = p.status or "pending_admin"

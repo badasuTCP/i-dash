@@ -150,6 +150,7 @@ export const pipelinesAPI = {
     return apiClient.post(`/pipelines/${name}/run`, null, { params, timeout: 120000 });
   },
   runAll:    ()           => apiClient.post('/pipelines/run-all', null, { timeout: 120000 }),
+  getStatus: (name)       => apiClient.get(`/pipelines/${name}/status`),
   getHistory:(name, limit=20) => apiClient.get(`/pipelines/${name}/history`, { params: { limit } }),
 };
 
