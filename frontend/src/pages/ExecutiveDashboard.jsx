@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
-  BarChart, Bar, Line, Area, PieChart, Pie, Cell,
+  BarChart, Bar, Line, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart,
 } from 'recharts';
 import { useTheme } from '../context/ThemeContext';
 import ScoreCard from '../components/scorecards/ScoreCard';
 import {
   Activity, AlertCircle, Wifi, WifiOff, Loader2,
-  Globe, Target, TrendingUp, Users, DollarSign, BarChart3,
+  Globe, Target, BarChart3,
 } from 'lucide-react';
 import { useDashboardDateFilter } from '../hooks/useDashboardDateFilter';
 import { dashboardAPI } from '../services/api';
@@ -33,8 +33,6 @@ const fmtPct = (v) => {
   const sign = v >= 0 ? '+' : '';
   return `${sign}${Number(v).toFixed(1)}%`;
 };
-
-const DIVISION_COLORS = ['#3B82F6', '#10B981', '#F59E0B'];
 
 // ─────────────────────────────────────────────────────────────────────────
 // Curated fallback quarterly table — matches TCP MAIN layout.
@@ -200,19 +198,6 @@ const ExecutiveSummary = () => {
   const yoySales = hasExecData && summary?.yoy_sales?.length ? summary.yoy_sales : FALLBACK_YOY;
 
   const divisionRevenue = summary?.division_revenue || { cp: 4730018, sanitred: 1132388, ibos: 1261046 };
-  const pipelineStatus  = summary?.pipeline_status || [];
-
-  const divisionCards = [
-    { name: 'CP (Main)',              color: '#3B82F6', revenue: divisionRevenue.cp,       note: 'Derived: Total − Contractor − Retail', badge: 'Google Sheets' },
-    { name: 'Sani-Tred (Retail)',     color: '#10B981', revenue: divisionRevenue.sanitred, note: 'Retail Sales column · sum of quarters', badge: 'Google Sheets' },
-    { name: 'I-BOS (Contractor Fee)', color: '#F59E0B', revenue: divisionRevenue.ibos,     note: 'Contractor Revenue · sum of quarters',  badge: 'Google Sheets' },
-  ];
-
-  const divisionPieData = [
-    { name: 'CP (Main)',          value: divisionRevenue.cp || 0 },
-    { name: 'Sani-Tred (Retail)', value: divisionRevenue.sanitred || 0 },
-    { name: 'I-BOS (Contractor)', value: divisionRevenue.ibos || 0 },
-  ].filter((d) => d.value > 0);
 
   // ── Cross-division live KPI table (NEW) ────────────────────────────────
   // Pulls from /dashboard/web-analytics + /dashboard/marketing for each
@@ -324,37 +309,23 @@ const ExecutiveSummary = () => {
           ))}
         </motion.div>
 
-        {/* ── LIVE SUMMARY + DIVISION REVENUE CARDS ────────────────────── */}
+        {/* ── LIVE SUMMARY (full width) ────────────────────────────────── */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
-          className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-8">
-          <div className={`lg:col-span-2 rounded-xl p-5 ${cardBg}`} style={{ borderLeft: '4px solid #8B5CF6' }}>
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-                <Activity className="text-white" size={14} />
-              </div>
-              <span className="text-xs font-bold uppercase tracking-wide text-violet-400">Live Summary</span>
+          className={`rounded-xl p-5 mb-8 ${cardBg}`} style={{ borderLeft: '4px solid #8B5CF6' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+              <Activity className="text-white" size={14} />
             </div>
-            <ul className={`text-sm leading-relaxed space-y-2 ${textPrimary}`}>
-              {insights.map((ins, idx) => (
-                <li key={idx} className="flex gap-2">
-                  <span className="text-violet-400">›</span>
-                  <span>{ins}</span>
-                </li>
-              ))}
-            </ul>
+            <span className="text-xs font-bold uppercase tracking-wide text-violet-400">Live Summary</span>
           </div>
-
-          {divisionCards.map((div, idx) => (
-            <motion.div key={idx} whileHover={{ y: -2 }}
-              className={`rounded-xl p-5 ${cardBg}`} style={{ borderTop: `3px solid ${div.color}` }}>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold uppercase tracking-wide" style={{ color: div.color }}>{div.name}</span>
-                <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-500/15 text-emerald-400">{div.badge}</span>
-              </div>
-              <p className={`text-xl font-bold ${textPrimary}`}>{fmtCurrency(div.revenue)}</p>
-              <p className={`text-xs mt-1 ${textSecondary}`}>{div.note}</p>
-            </motion.div>
-          ))}
+          <ul className={`text-sm leading-relaxed space-y-2 ${textPrimary}`}>
+            {insights.map((ins, idx) => (
+              <li key={idx} className="flex gap-2">
+                <span className="text-violet-400">›</span>
+                <span>{ins}</span>
+              </li>
+            ))}
+          </ul>
         </motion.div>
 
         {/* ── QUARTERLY KPI TABLE (TCP MAIN) ───────────────────────────── */}
@@ -502,61 +473,6 @@ const ExecutiveSummary = () => {
                 <Bar dataKey="visits" name="Visits" fill="#3B82F6" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="users"  name="Users"  fill="#10B981" radius={[4, 4, 0, 0]} />
               </BarChart>
-            </ResponsiveContainer>
-          </motion.div>
-        </div>
-
-        {/* ── ROW 3: Pipeline Status + Division Pie ────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.42 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-lg font-semibold mb-1 ${textPrimary}`}>Data Pipeline Status</h3>
-            <p className={`text-xs mb-4 ${textSecondary}`}>Live view of which pipelines are feeding this dashboard</p>
-            <div className="space-y-3">
-              {pipelineStatus.length === 0 && (
-                <p className={`text-sm ${textSecondary}`}>No pipeline runs logged yet.</p>
-              )}
-              {pipelineStatus.map((p) => {
-                const isUp = p.status === 'live';
-                const color = isUp ? '#10B981' : p.status === 'failed' ? '#EF4444' : '#F59E0B';
-                const relative = p.last_run ? new Date(p.last_run).toLocaleString() : 'Never';
-                return (
-                  <div key={p.name} className={`flex items-start gap-3 p-3 rounded-lg ${isDark ? 'bg-slate-800/40' : 'bg-slate-50'}`}>
-                    <div className="mt-0.5 w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: color, boxShadow: isUp ? `0 0 6px ${color}` : 'none' }} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-xs font-semibold ${textPrimary}`}>{p.label}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide ${
-                          isUp
-                            ? 'bg-emerald-500/15 text-emerald-400'
-                            : p.status === 'failed'
-                              ? 'bg-red-500/15 text-red-400'
-                              : 'bg-amber-500/15 text-amber-400'
-                        }`}>{p.status}</span>
-                      </div>
-                      <p className={`text-[11px] mt-0.5 ${textSecondary}`}>
-                        Last run: {relative} · {(p.records ?? 0).toLocaleString()} records
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Division Revenue Breakdown</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie data={divisionPieData}
-                  cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={3} dataKey="value">
-                  {DIVISION_COLORS.map((color, idx) => <Cell key={idx} fill={color} />)}
-                </Pie>
-                <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtCurrency(v)} />
-                <Legend />
-              </PieChart>
             </ResponsiveContainer>
           </motion.div>
         </div>
