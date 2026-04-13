@@ -68,6 +68,10 @@ const _fmtDate = (d) => {
 };
 
 export const dashboardAPI = {
+  getExecutiveSummary: (startDate, endDate) =>
+    apiClient.get('/dashboard/executive-summary', {
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
+    }),
   getOverview: (startDate, endDate) =>
     apiClient.get('/dashboard/overview', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },

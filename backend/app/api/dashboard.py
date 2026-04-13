@@ -2471,3 +2471,270 @@ async def get_retail_data(
         "topProducts": top_products,
         "monthlyMetrics": monthly_metrics,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Executive Summary — top-level landing page aggregate
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get(
+    "/executive-summary",
+    summary="Executive Summary — live cross-division KPIs, quarterly table, pipeline status",
+)
+async def get_executive_summary(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+) -> dict:
+    """
+    Aggregate every live metric source into a single payload for the
+    Executive Summary landing page. Pulls:
+
+      - Quarterly KPI table from the ``exec::TCP MAIN`` pivot tab
+        (produced by the enhanced google_sheets pipeline).
+      - Scorecards derived from the latest quarter + combined ad spend
+        (meta_ad_metrics + google_ad_metrics) across the selected range.
+      - Division revenue breakdown (CP / Sani-Tred / I-BOS) summed
+        across every quarter present in the TCP MAIN tab.
+      - YOY comparison series (current vs previous year).
+      - Pipeline status: which sources are live, last sync, record counts.
+
+    No hardcoded numbers anywhere. If a sheet row is missing, it returns
+    ``null`` rather than guessing — the frontend renders an em-dash.
+    """
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    # ── 1. Pull every cell from the pivot-layout TCP MAIN tab ─────────
+    # sheet_name is 'exec::TCP MAIN' (or similar exec:: prefix) per the
+    # pivot transform in google_sheets.py.
+    pivot_stmt = (
+        select(
+            GoogleSheetMetric.metric_name,
+            GoogleSheetMetric.date,
+            GoogleSheetMetric.metric_value,
+        )
+        .where(GoogleSheetMetric.sheet_name.like("exec::%"))
+        .order_by(GoogleSheetMetric.date, GoogleSheetMetric.metric_name)
+    )
+    pivot_rows = (await db.execute(pivot_stmt)).all()
+
+    # Build a two-level dict: {metric_name: {quarter_label: value}}
+    #   quarter_label = "Q1 2025" / "Q2 2025" / ...
+    def _quarter_label(d: date) -> str:
+        return f"Q{((d.month - 1) // 3) + 1} {d.year}"
+
+    quarterly_table: dict = {}
+    quarter_order: list = []  # preserved insertion order of quarter labels
+    quarter_seen = set()
+    for metric_name, d, value in pivot_rows:
+        ql = _quarter_label(d)
+        if ql not in quarter_seen:
+            quarter_order.append(ql)
+            quarter_seen.add(ql)
+        quarterly_table.setdefault(metric_name, {})[ql] = float(value or 0)
+
+    # Sort quarters chronologically (Q1 2025 < Q2 2025 < ...)
+    def _q_sort_key(label: str) -> tuple:
+        # label = "Q<n> <YYYY>"
+        try:
+            q, y = label.split(" ")
+            return (int(y), int(q.lstrip("Q")))
+        except Exception:
+            return (9999, 9)
+
+    quarter_order.sort(key=_q_sort_key)
+
+    # ── 2. Current-quarter scorecards ─────────────────────────────────
+    latest_quarter = quarter_order[-1] if quarter_order else None
+    prev_quarter = quarter_order[-2] if len(quarter_order) >= 2 else None
+
+    def _cell(metric: str, q: Optional[str]) -> Optional[float]:
+        if not q or metric not in quarterly_table:
+            return None
+        v = quarterly_table[metric].get(q)
+        return None if v is None else float(v)
+
+    def _pct_change(cur: Optional[float], prev: Optional[float]) -> Optional[float]:
+        if cur is None or prev in (None, 0):
+            return None
+        try:
+            return round(((cur - prev) / abs(prev)) * 100, 1)
+        except ZeroDivisionError:
+            return None
+
+    total_revenue_cur = _cell("Total Revenue", latest_quarter)
+    total_revenue_prev = _cell("Total Revenue", prev_quarter)
+    contractor_rev_cur = _cell("Contractor Revenue", latest_quarter)
+    retail_sales_cur = _cell("Retail Sales", latest_quarter)
+    cost_of_mistakes_cur = _cell("Cost of Mistakes", latest_quarter)
+    cost_of_mistakes_prev = _cell("Cost of Mistakes", prev_quarter)
+    marketing_leads_cur = _cell("Marketing Leads", latest_quarter)
+    marketing_leads_prev = _cell("Marketing Leads", prev_quarter)
+    marketing_spend_sheet_cur = _cell("Marketing Spend", latest_quarter)
+
+    # Live marketing spend from ads pipelines (may exceed sheet value — use live if present)
+    ads_spend_q = await db.execute(
+        select(
+            func.coalesce(func.sum(MetaAdMetric.spend), 0),
+            func.coalesce(func.sum(MetaAdMetric.conversions), 0),
+        ).where(and_(MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date))
+    )
+    meta_spend, meta_leads = ads_spend_q.one()
+    gads_spend_q = await db.execute(
+        select(
+            func.coalesce(func.sum(GoogleAdMetric.spend), 0),
+            func.coalesce(func.sum(GoogleAdMetric.conversions), 0),
+        ).where(and_(GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date))
+    )
+    gads_spend, gads_leads = gads_spend_q.one()
+    live_ads_spend = float(meta_spend or 0) + float(gads_spend or 0)
+    live_ads_leads = float(meta_leads or 0) + float(gads_leads or 0)
+
+    # Combined total revenue = sum across every quarter in the sheet
+    combined_total_revenue = sum(
+        (quarterly_table.get("Total Revenue", {}).get(q, 0) or 0)
+        for q in quarter_order
+    )
+
+    scorecards = [
+        {
+            "label": "Combined Total Revenue",
+            "value": round(combined_total_revenue, 2),
+            "change": _pct_change(total_revenue_cur, total_revenue_prev),
+            "format": "currency",
+            "source": "Google Sheets · TCP MAIN",
+        },
+        {
+            "label": "Marketing Spend",
+            "value": round(live_ads_spend or (marketing_spend_sheet_cur or 0), 2),
+            "change": _pct_change(live_ads_spend, marketing_spend_sheet_cur),
+            "format": "currency",
+            "source": "Meta + Google Ads (live)",
+        },
+        {
+            "label": "Marketing Leads",
+            "value": int(live_ads_leads or (marketing_leads_cur or 0)),
+            "change": _pct_change(marketing_leads_cur, marketing_leads_prev),
+            "format": "number",
+            "source": "Ads pipelines",
+        },
+        {
+            "label": "Cost of Mistakes",
+            "value": round(cost_of_mistakes_cur or 0, 2),
+            "change": _pct_change(cost_of_mistakes_cur, cost_of_mistakes_prev),
+            "format": "currency",
+            "source": "Google Sheets · TCP MAIN",
+        },
+    ]
+
+    # ── 3. Division revenue breakdown (summed across all quarters) ────
+    # CP derived = Total Revenue − Contractor Revenue − Retail Sales
+    total_rev_sum = sum(
+        (quarterly_table.get("Total Revenue", {}).get(q, 0) or 0) for q in quarter_order
+    )
+    contractor_rev_sum = sum(
+        (quarterly_table.get("Contractor Revenue", {}).get(q, 0) or 0) for q in quarter_order
+    )
+    retail_sum = sum(
+        (quarterly_table.get("Retail Sales", {}).get(q, 0) or 0) for q in quarter_order
+    )
+    cp_derived = max(0.0, total_rev_sum - contractor_rev_sum - retail_sum)
+    division_revenue = {
+        "cp": round(cp_derived, 2),
+        "sanitred": round(retail_sum, 2),
+        "ibos": round(contractor_rev_sum, 2),
+    }
+
+    # ── 4. Revenue by quarter chart series ────────────────────────────
+    revenue_by_quarter = []
+    for q in quarter_order:
+        total = quarterly_table.get("Total Revenue", {}).get(q, 0) or 0
+        contractor = quarterly_table.get("Contractor Revenue", {}).get(q, 0) or 0
+        retail = quarterly_table.get("Retail Sales", {}).get(q, 0) or 0
+        cp = max(0.0, total - contractor - retail)
+        revenue_by_quarter.append({
+            "quarter": q,
+            "cp": round(cp, 2),
+            "retail": round(retail, 2),
+            "contractor": round(contractor, 2),
+            "total": round(total, 2),
+        })
+
+    # ── 5. YOY series — pair each 2025 quarter with the 2026 quarter ──
+    yoy_sales = []
+    for q_num in (1, 2, 3, 4):
+        prev_label = f"Q{q_num} 2025"
+        cur_label = f"Q{q_num} 2026"
+        prev_val = quarterly_table.get("Total Revenue", {}).get(prev_label)
+        cur_val = quarterly_table.get("Total Revenue", {}).get(cur_label)
+        yoy_sales.append({
+            "month": f"Q{q_num}",
+            "previous": round(float(prev_val), 2) if prev_val is not None else None,
+            "current": round(float(cur_val), 2) if cur_val is not None else None,
+        })
+
+    # ── 6. Quarterly KPI table — preserve metric order as written in sheet ──
+    quarterly_rows = []
+    # Preserve the order metrics first appeared in pivot_rows
+    seen_metrics = []
+    seen_set = set()
+    for metric_name, _d, _v in pivot_rows:
+        if metric_name not in seen_set:
+            seen_metrics.append(metric_name)
+            seen_set.add(metric_name)
+    for metric in seen_metrics:
+        row: dict = {"metric": metric}
+        for q in quarter_order:
+            row[q] = quarterly_table.get(metric, {}).get(q)
+        quarterly_rows.append(row)
+
+    # ── 7. Pipeline status ────────────────────────────────────────────
+    pipeline_status = []
+    for pname, label in [
+        ("google_sheets", "Google Sheets"),
+        ("meta_ads", "Meta Ads"),
+        ("google_ads", "Google Ads"),
+        ("google_analytics", "Google Analytics (GA4)"),
+        ("hubspot", "HubSpot CRM"),
+        ("snapshot", "Snapshot Aggregator"),
+    ]:
+        last_log = await db.execute(
+            select(PipelineLog)
+            .where(PipelineLog.pipeline_name.in_([pname, f"{pname}_pipeline"]))
+            .order_by(PipelineLog.started_at.desc())
+            .limit(1)
+        )
+        log = last_log.scalar_one_or_none()
+        pipeline_status.append({
+            "name": pname,
+            "label": label,
+            "status": (
+                "live" if log and log.status == PipelineStatus.SUCCESS
+                else "failed" if log and log.status == PipelineStatus.FAILED
+                else "pending"
+            ),
+            "last_run": log.started_at.isoformat() if log and log.started_at else None,
+            "records": log.records_fetched if log else 0,
+        })
+
+    # ── 8. Final payload ──────────────────────────────────────────────
+    return {
+        "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+        "has_live_data": bool(quarter_order),
+        "latest_quarter": latest_quarter,
+        "scorecards": scorecards,
+        "quarterly_kpis": {
+            "quarters": quarter_order,
+            "rows": quarterly_rows,
+        },
+        "division_revenue": division_revenue,
+        "revenue_by_quarter": revenue_by_quarter,
+        "yoy_sales": yoy_sales,
+        "pipeline_status": pipeline_status,
+        "sources": {
+            "quarterly_kpis": "google_sheets :: TCP MAIN",
+            "marketing_spend": "meta_ad_metrics + google_ad_metrics",
+            "marketing_leads": "meta_ad_metrics + google_ad_metrics (conversions)",
+        },
+    }

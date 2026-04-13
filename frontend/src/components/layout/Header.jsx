@@ -28,7 +28,7 @@ export const Header = () => {
     if (path.includes('/cp/web-analytics')) return { title: 'CP Web Analytics', badge: 'Main' };
     if (path.includes('/cp/marketing')) return { title: 'CP Marketing Campaign', badge: 'Main' };
     if (path.includes('/cp')) return { title: 'CP Dashboard', badge: 'Main' };
-    if (path.includes('/executive')) return { title: 'Executive Dashboard', badge: 'All Divisions' };
+    if (path.includes('/executive')) return { title: 'Executive Summary', badge: 'All Divisions' };
     if (path.includes('/pipelines')) return { title: 'Data Pipelines', badge: null };
     if (path.includes('/ai')) return { title: 'AI Insights', badge: null };
     if (path.includes('/accounts')) return { title: 'Account Management', badge: null };

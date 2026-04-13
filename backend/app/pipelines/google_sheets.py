@@ -9,6 +9,7 @@ keyword scoring.
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -226,6 +227,23 @@ class GoogleSheetsPipeline(BasePipeline):
                     if not rows:
                         continue
 
+                    # ── Pivot-table layout detection ──────────────────────
+                    # Some tabs (notably TCP MAIN) store metric names down
+                    # column A and quarter labels across the top row:
+                    #     Metric           | Q1 2025 | Q2 2025 | ... | Q1 2026
+                    #     Total Revenue    | 1.41M   | 1.99M   | ... | 709.7K
+                    # Unwrap each (row, column) cell into one metric record
+                    # tagged with the row label as metric_name and the
+                    # quarter-start date as the date.
+                    pivot_records = self._try_pivot_transform(sheet_name, rows)
+                    if pivot_records is not None:
+                        records.extend(pivot_records)
+                        self.logger.info(
+                            "Pivot layout detected for '%s' — extracted %d cell records",
+                            sheet_name, len(pivot_records),
+                        )
+                        continue
+
                     date_column = self._detect_date_column(list(rows[0].keys()))
                     self.logger.debug(
                         f"Sheet '{sheet_name}': date column = '{date_column}'"
@@ -335,6 +353,112 @@ class GoogleSheetsPipeline(BasePipeline):
 
         self.logger.debug(f"Could not parse date: {date_str}")
         return None
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Pivot-table support (TCP MAIN and similar exec-summary tabs)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    _QUARTER_RE = re.compile(r"^\s*Q([1-4])\s+(\d{4})\s*$", re.IGNORECASE)
+
+    def _parse_quarter_header(self, header: str) -> Optional[datetime]:
+        """If ``header`` is a quarter label like 'Q1 2025', return its start date."""
+        if not header:
+            return None
+        m = self._QUARTER_RE.match(str(header).strip())
+        if not m:
+            return None
+        q = int(m.group(1))
+        year = int(m.group(2))
+        month = {1: 1, 2: 4, 3: 7, 4: 10}[q]
+        try:
+            return datetime(year, month, 1).date()
+        except ValueError:
+            return None
+
+    def _try_pivot_transform(
+        self, sheet_name: str, rows: List[Dict[str, Any]]
+    ) -> Optional[List[GoogleSheetMetric]]:
+        """
+        Detect and unwrap a pivot-table layout where metric names are in the
+        first column and period labels (e.g. 'Q1 2025') span the remaining
+        header columns.
+
+        Returns ``None`` if the layout is not a pivot (so caller falls back
+        to the standard per-row-date path), else a flattened list of
+        ``GoogleSheetMetric`` records — one per (metric-row × period-col) cell.
+
+        Records are stored with a ``sheet_name`` prefixed ``exec::`` so the
+        Executive Summary endpoint can pull them with a single indexed query.
+        """
+        if not rows:
+            return None
+
+        headers = list(rows[0].keys())
+        if len(headers) < 3:
+            return None
+
+        first_col = headers[0]
+        period_cols: List[tuple] = []  # (header, date)
+        for h in headers[1:]:
+            dt = self._parse_quarter_header(h)
+            if dt:
+                period_cols.append((h, dt))
+
+        # Require at least 2 period columns to call this a pivot (single-quarter
+        # tabs are probably normal row-per-date layouts with one metric).
+        if len(period_cols) < 2:
+            return None
+        # And at least half of the non-first columns must be quarter labels.
+        if len(period_cols) < max(2, (len(headers) - 1) // 2):
+            return None
+
+        # Normalize the sheet_name to 'exec::' so queries can find it cleanly.
+        # Strip any prior retail::/contractor:: prefix from the classifier.
+        bare = sheet_name.split("::", 1)[1] if "::" in sheet_name else sheet_name
+        tagged = f"exec::{bare}"
+
+        out: List[GoogleSheetMetric] = []
+        for row in rows:
+            metric_label = (row.get(first_col) or "").strip()
+            if not metric_label:
+                continue
+            for header, period_date in period_cols:
+                raw = row.get(header, "")
+                if raw is None or str(raw).strip() == "":
+                    continue
+                # Strip currency / percent / thousands formatting.
+                cleaned = (
+                    str(raw)
+                    .replace("$", "")
+                    .replace(",", "")
+                    .replace("%", "")
+                    .strip()
+                )
+                # Handle shorthand: 1.41M → 1410000, 709.7K → 709700
+                multiplier = 1.0
+                if cleaned.endswith(("M", "m")):
+                    multiplier = 1_000_000
+                    cleaned = cleaned[:-1]
+                elif cleaned.endswith(("K", "k")):
+                    multiplier = 1_000
+                    cleaned = cleaned[:-1]
+                elif cleaned.endswith(("B", "b")):
+                    multiplier = 1_000_000_000
+                    cleaned = cleaned[:-1]
+                try:
+                    value = float(cleaned) * multiplier
+                except (ValueError, TypeError):
+                    continue
+                out.append(
+                    GoogleSheetMetric(
+                        sheet_name=tagged,
+                        date=period_date,
+                        metric_name=metric_label,
+                        metric_value=value,
+                        category=self._infer_category(metric_label),
+                    )
+                )
+        return out
 
     def _infer_category(self, column_name: str) -> str:
         """Infer a metric category from a column name."""

@@ -100,7 +100,7 @@ const AdminControls = () => {
   ];
 
   const divisionItems = [
-    { key: 'executive', label: 'Executive Dashboard', description: 'Combined cross-division overview' },
+    { key: 'executive', label: 'Executive Summary', description: 'Combined cross-division overview' },
     { key: 'cp', label: 'The Concrete Protector', description: 'Main company division' },
     { key: 'sanitred', label: 'Sani-Tred', description: 'Retail waterproofing division' },
     { key: 'ibos', label: 'I-BOS', description: 'Contractor network division' },

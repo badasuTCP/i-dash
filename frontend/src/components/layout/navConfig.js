@@ -85,7 +85,7 @@ export const brandPages = {
 // ────────────────────────────────────────────────────────────────
 export const executiveLink = {
   to: '/dashboard/executive',
-  label: 'Executive Dashboard',
+  label: 'Executive Summary',
   icon: BarChart3,
   roles: ['executive', 'data-analyst'],
 };
