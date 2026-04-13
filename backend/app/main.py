@@ -391,34 +391,81 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
     )
 
 
-# Root endpoint
-@app.get(
-    "/",
-    summary="API root endpoint",
-    tags=["Root"],
-)
-async def root() -> dict:
-    """
-    Root endpoint with API information.
+# ──────────────────────────────────────────────────────────────────────
+# Static frontend (unified service)
+# ──────────────────────────────────────────────────────────────────────
+# The Dockerfile copies the Vite build output into /app/static. Mount it
+# if the directory exists so this same service can serve the React SPA.
+# A catch-all route at the bottom returns index.html for any non-API
+# path so client-side routing (react-router) works on deep links / refresh.
+from pathlib import Path as _Path
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
-    Returns:
-        Dictionary with API metadata and available endpoints.
-    """
+_STATIC_DIR = _Path(__file__).resolve().parent.parent / "static"
+_INDEX_HTML = _STATIC_DIR / "index.html"
+
+if _STATIC_DIR.exists():
+    # Vite's build emits everything referenced from index.html under /assets
+    _assets_dir = _STATIC_DIR / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+    # Everything else at the root (favicon, logos, etc.)
+    app.mount(
+        "/static-root",
+        StaticFiles(directory=str(_STATIC_DIR)),
+        name="static-root",
+    )
+    logger.info("Serving frontend from %s", _STATIC_DIR)
+else:
+    logger.info("No frontend build at %s — API-only mode", _STATIC_DIR)
+
+
+@app.get("/", include_in_schema=False)
+async def _serve_index():
+    if _INDEX_HTML.exists():
+        return FileResponse(str(_INDEX_HTML))
+    # API-only fallback (no frontend built)
     return {
         "service": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "description": "Enterprise analytics platform",
         "endpoints": {
             "health": "/health",
             "docs": "/api/docs",
-            "openapi": "/api/openapi.json",
-            "auth": "/api/auth",
-            "users": "/api/users",
-            "dashboard": "/api/dashboard",
-            "pipelines": "/api/pipelines",
-            "ai": "/api/ai",
+            "api": "/api",
         },
     }
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def _spa_catch_all(full_path: str):
+    """
+    SPA catch-all. Returns index.html for any non-API path so that
+    react-router deep links (e.g. /iboss/marketing) survive a refresh.
+
+    Requests to /api/*, /health, /docs are handled by the routers
+    registered above and never reach this handler.
+    """
+    # Never swallow API / doc routes
+    if (
+        full_path.startswith("api/")
+        or full_path.startswith("health")
+        or full_path.startswith("docs")
+        or full_path.startswith("openapi")
+        or full_path.startswith("assets/")
+    ):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    # If the request matches a real file on disk (favicon.ico, robots.txt, etc.)
+    # serve it directly.
+    candidate = _STATIC_DIR / full_path
+    if candidate.is_file():
+        return FileResponse(str(candidate))
+
+    if _INDEX_HTML.exists():
+        return FileResponse(str(_INDEX_HTML))
+
+    raise HTTPException(status_code=404, detail="Not Found")
 
 
 if __name__ == "__main__":

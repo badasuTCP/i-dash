@@ -1,10 +1,13 @@
 import axios from 'axios';
 
-// ── Hardcoded production backend URL ────────────────────────────────────
+// ── API base URL ────────────────────────────────────────────────────────
+// In the unified-service deploy the frontend is served from the same
+// origin as the backend, so '/api' is always correct in production.
+// Local dev points at the uvicorn server on :8000.
 const API_BASE_URL =
-  typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-    ? 'https://i-dash-production.up.railway.app/api'
-    : 'http://localhost:8000/api';
+  typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'http://localhost:8000/api'
+    : '/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

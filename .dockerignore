@@ -1,0 +1,30 @@
+# Keep build context small so Railway builds fast
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+
+# Frontend dev artefacts
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/*.timestamp-*.mjs
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+
+# Local secrets — must never enter the image
+.env
+.env.*
+backend/credentials/*.json
+backend/.venv
+backend/migrations/versions/__pycache__
+
+# Docs that don't affect build
+docs
+*.md
