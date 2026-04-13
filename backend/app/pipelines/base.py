@@ -141,17 +141,23 @@ class BasePipeline(ABC):
 
     async def _retry_with_backoff(
         self,
-        coro,
+        coro_factory,
         operation_name: str,
     ) -> Any:
         """
         Execute a coroutine with exponential backoff retry logic.
 
-        Attempts the operation up to max_retries times, with exponentially
-        increasing delays between attempts.
-
         Args:
-            coro: Coroutine to execute.
+            coro_factory: A **zero-arg callable** that returns a fresh
+                coroutine on each invocation. A coroutine object can only be
+                awaited once — passing one directly would raise
+                ``RuntimeError: cannot reuse already awaited coroutine`` on
+                the second retry attempt. Wrap your call in a lambda:
+                ``await self._retry_with_backoff(lambda: self.extract(), ...)``.
+
+                For backwards compatibility, if a bare coroutine is passed in
+                it is awaited once on the first attempt only; any retry will
+                be suppressed with a logged warning.
             operation_name: Description of the operation (for logging).
 
         Returns:
@@ -163,12 +169,31 @@ class BasePipeline(ABC):
         last_exception = None
         delay = self.retry_delay
 
+        # Backwards-compat guard: if we were handed a bare coroutine, only
+        # try it once. Log the misuse so it can be fixed at the caller.
+        is_bare_coro = asyncio.iscoroutine(coro_factory)
+        if is_bare_coro:
+            self.logger.warning(
+                "%s: received bare coroutine instead of factory — retries disabled "
+                "for this call to avoid 'cannot reuse already awaited coroutine'",
+                operation_name,
+            )
+
         for attempt in range(self.max_retries):
             try:
                 self.logger.debug(f"{operation_name} - attempt {attempt + 1}")
-                return await coro
+                if is_bare_coro:
+                    return await coro_factory
+                return await coro_factory()
             except Exception as e:
                 last_exception = e
+                # A bare coroutine can't be retried — exit immediately.
+                if is_bare_coro:
+                    self.logger.error(
+                        "%s failed on single attempt (bare coroutine, no retry): %s",
+                        operation_name, e,
+                    )
+                    break
                 if attempt < self.max_retries - 1:
                     self.logger.warning(
                         f"{operation_name} failed: {str(e)}. "
@@ -244,10 +269,11 @@ class BasePipeline(ABC):
         try:
             self.logger.info(f"Starting pipeline: {self.name}")
 
-            # Extract with retry
+            # Extract with retry — pass a factory so each retry creates a
+            # fresh coroutine (a coroutine object can only be awaited once).
             self.logger.debug("Extract phase started")
             raw_data = await self._retry_with_backoff(
-                self.extract(),
+                lambda: self.extract(),
                 operation_name=f"{self.name} - extract",
             )
             self.logger.debug("Extract phase completed")
@@ -255,7 +281,7 @@ class BasePipeline(ABC):
             # Transform with retry
             self.logger.debug("Transform phase started")
             records = await self._retry_with_backoff(
-                self.transform(raw_data),
+                lambda: self.transform(raw_data),
                 operation_name=f"{self.name} - transform",
             )
             records_fetched = len(records)
@@ -264,7 +290,7 @@ class BasePipeline(ABC):
             # Load with retry
             self.logger.debug("Load phase started")
             loaded_count = await self._retry_with_backoff(
-                self.load(records),
+                lambda: self.load(records),
                 operation_name=f"{self.name} - load",
             )
             self.logger.debug(f"Load phase completed: {loaded_count} records loaded")

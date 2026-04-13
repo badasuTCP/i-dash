@@ -5,13 +5,20 @@ Extracts contacts, deals, meetings, emails, and tasks from HubSpot API,
 aggregates by date, and loads into HubSpotMetric records.
 """
 
+import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Callable, Dict, List
 
 from hubspot.crm.contacts import ApiException as HubSpotException
 from hubspot.crm.objects import SimplePublicObject
 from hubspot import Client
+
+# Chunk size for date-windowed HubSpot backfills. HubSpot's Search API
+# paginates with a 10,000-result hard cap per query and rate-limits at
+# ~4 searches/sec — 30 days is a safe balance for 2024-2026 ranges.
+HUBSPOT_CHUNK_DAYS = 30
+HUBSPOT_CHUNK_SLEEP_S = 1.0
 
 from app.core.config import settings
 from app.models.metrics import HubSpotMetric
@@ -265,54 +272,155 @@ class HubSpotPipeline(BasePipeline):
             self.logger.warning(f"Contact sync to hubspot_contacts failed (non-fatal): {e}")
 
     async def _paginate(self, api, properties: List[str]) -> List[SimplePublicObject]:
-        """Generic paginator for HubSpot CRM basic_api.get_page()."""
-        results = []
-        try:
-            page = api.basic_api.get_page(limit=100, properties=properties)
-            while page:
-                results.extend(page.results or [])
-                if page.paging and page.paging.next:
-                    page = api.basic_api.get_page(
-                        limit=100,
-                        after=page.paging.next.after,
-                        properties=properties,
+        """Generic paginator for HubSpot CRM basic_api.get_page().
+
+        The HubSpot SDK is synchronous — each page fetch blocks the event
+        loop. We run the whole pagination loop in a worker thread via
+        ``asyncio.to_thread`` so the main loop stays responsive and the
+        202 Accepted from the endpoint has already been flushed.
+        """
+        def _blocking_paginate() -> List[SimplePublicObject]:
+            results: List[SimplePublicObject] = []
+            try:
+                page = api.basic_api.get_page(limit=100, properties=properties)
+                while page:
+                    results.extend(page.results or [])
+                    if page.paging and page.paging.next:
+                        page = api.basic_api.get_page(
+                            limit=100,
+                            after=page.paging.next.after,
+                            properties=properties,
+                        )
+                    else:
+                        break
+            except Exception as e:
+                self.logger.warning(f"Error paginating {api}: {e}")
+            return results
+
+        return await asyncio.to_thread(_blocking_paginate)
+
+    async def _chunked_date_search(
+        self,
+        label: str,
+        search_api,
+        properties: List[str],
+        date_property: str,
+    ) -> List[SimplePublicObject]:
+        """Run the HubSpot Search API in 30-day windows across the pipeline's
+        date range.
+
+        This keeps each search under HubSpot's 10,000-result pagination cap
+        and yields control between windows (``asyncio.sleep(1)``) so Railway's
+        edge proxy never sees the backend as idle and rate limits stay happy.
+        """
+        all_results: List[SimplePublicObject] = []
+        window_start = self.start_date
+        while window_start <= self.end_date:
+            window_end = min(
+                window_start + timedelta(days=HUBSPOT_CHUNK_DAYS - 1),
+                self.end_date,
+            )
+            self.logger.info(
+                "HubSpot %s chunk: %s → %s", label, window_start, window_end,
+            )
+
+            def _blocking_search(ws=window_start, we=window_end) -> List[SimplePublicObject]:
+                # Convert to ms-epoch strings (HubSpot filter format).
+                start_ms = int(
+                    datetime.combine(ws, datetime.min.time(), tzinfo=timezone.utc)
+                    .timestamp() * 1000
+                )
+                end_ms = int(
+                    datetime.combine(we, datetime.max.time(), tzinfo=timezone.utc)
+                    .timestamp() * 1000
+                )
+                public_filter = {
+                    "filters": [
+                        {"propertyName": date_property, "operator": "GTE", "value": str(start_ms)},
+                        {"propertyName": date_property, "operator": "LTE", "value": str(end_ms)},
+                    ]
+                }
+                body = {
+                    "filterGroups": [public_filter],
+                    "properties": properties,
+                    "limit": 100,
+                }
+                out: List[SimplePublicObject] = []
+                try:
+                    resp = search_api.do_search(public_object_search_request=body)
+                    while resp:
+                        out.extend(resp.results or [])
+                        nxt = getattr(resp.paging, "next", None) if resp.paging else None
+                        if not nxt:
+                            break
+                        body["after"] = nxt.after
+                        resp = search_api.do_search(public_object_search_request=body)
+                except Exception as e:
+                    self.logger.warning(
+                        "HubSpot %s search chunk %s → %s failed: %s",
+                        label, ws, we, e,
                     )
-                else:
-                    break
-        except Exception as e:
-            self.logger.warning(f"Error paginating {api}: {str(e)}")
-        return results
+                return out
+
+            chunk = await asyncio.to_thread(_blocking_search)
+            all_results.extend(chunk)
+            self.logger.info(
+                "HubSpot %s chunk %s → %s: %d records (running total: %d)",
+                label, window_start, window_end, len(chunk), len(all_results),
+            )
+
+            window_start = window_end + timedelta(days=1)
+            if window_start <= self.end_date:
+                # Keep the event loop alive + respect HubSpot rate limits.
+                await asyncio.sleep(HUBSPOT_CHUNK_SLEEP_S)
+
+        self.logger.info("HubSpot %s total: %d records", label, len(all_results))
+        return all_results
 
     async def _get_contacts(self) -> List[SimplePublicObject]:
-        return await self._paginate(
-            self.client.crm.contacts,
-            ["hs_lead_status", "createdate", "lifecyclestage", "hubspot_owner_id",
-             "recent_conversion_event_name", "num_conversion_events", "training_class"],
+        return await self._chunked_date_search(
+            label="contacts",
+            search_api=self.client.crm.contacts.search_api,
+            properties=[
+                "hs_lead_status", "createdate", "lifecyclestage", "hubspot_owner_id",
+                "recent_conversion_event_name", "num_conversion_events", "training_class",
+            ],
+            date_property="createdate",
         )
 
     async def _get_deals(self) -> List[SimplePublicObject]:
-        return await self._paginate(
-            self.client.crm.deals,
-            ["dealname", "dealstage", "amount", "closedate",
-             "hs_analytics_num_visits", "createdate", "hubspot_owner_id"],
+        return await self._chunked_date_search(
+            label="deals",
+            search_api=self.client.crm.deals.search_api,
+            properties=[
+                "dealname", "dealstage", "amount", "closedate",
+                "hs_analytics_num_visits", "createdate", "hubspot_owner_id",
+            ],
+            date_property="hs_lastmodifieddate",
         )
 
     async def _get_meetings(self) -> List[SimplePublicObject]:
-        return await self._paginate(
-            self.client.crm.objects.meetings,
-            ["hs_timestamp", "engagement_type"],
+        return await self._chunked_date_search(
+            label="meetings",
+            search_api=self.client.crm.objects.meetings.search_api,
+            properties=["hs_timestamp", "engagement_type"],
+            date_property="hs_lastmodifieddate",
         )
 
     async def _get_emails(self) -> List[SimplePublicObject]:
-        return await self._paginate(
-            self.client.crm.objects.emails,
-            ["hs_timestamp", "engagement_type"],
+        return await self._chunked_date_search(
+            label="emails",
+            search_api=self.client.crm.objects.emails.search_api,
+            properties=["hs_timestamp", "engagement_type"],
+            date_property="hs_lastmodifieddate",
         )
 
     async def _get_tasks(self) -> List[SimplePublicObject]:
-        return await self._paginate(
-            self.client.crm.objects.tasks,
-            ["hs_task_status", "hs_timestamp"],
+        return await self._chunked_date_search(
+            label="tasks",
+            search_api=self.client.crm.objects.tasks.search_api,
+            properties=["hs_task_status", "hs_timestamp"],
+            date_property="hs_lastmodifieddate",
         )
 
     async def transform(self, raw_data: Dict[str, Any]) -> List[HubSpotMetric]:
