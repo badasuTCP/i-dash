@@ -1826,6 +1826,30 @@ async def get_marketing_data(
                 break
 
     if not pipeline_ran:
+        # Last-resort check: if the ad-metric tables themselves have rows in
+        # the requested range, there IS live data regardless of what
+        # PipelineLog says. Backfills that completed the INSERT but crashed
+        # before logging would otherwise leave the UI stuck on the amber
+        # "Awaiting pipeline sync" banner.
+        try:
+            meta_count = await db.execute(
+                select(func.count()).select_from(MetaAdMetric).where(and_(
+                    MetaAdMetric.date >= start_date,
+                    MetaAdMetric.date <= end_date,
+                ))
+            )
+            gads_count = await db.execute(
+                select(func.count()).select_from(GoogleAdMetric).where(and_(
+                    GoogleAdMetric.date >= start_date,
+                    GoogleAdMetric.date <= end_date,
+                ))
+            )
+            if (meta_count.scalar() or 0) > 0 or (gads_count.scalar() or 0) > 0:
+                pipeline_ran = True
+        except Exception as exc:
+            logger.warning("Direct ad-metric fallback check failed: %s", exc)
+
+    if not pipeline_ran:
         return {
             "division": division,
             "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
@@ -1868,14 +1892,25 @@ async def get_marketing_data(
         gads_customer_filter = ["2823564937"]
 
     # ── 3. Meta Ads aggregates (filtered by brand) ────────────────────
-    # Include NULL account_id rows (pre-tagging data) alongside branded rows
+    # Include NULL account_id rows (pre-tagging data) alongside branded rows.
+    # For I-BOS specifically, exclude act_144305066 — that is the CP Internal
+    # Training account and must never appear in an I-BOS aggregation, even
+    # if a stale brand_assets row leaks in.
     from sqlalchemy import or_
+    CP_TRAINING_META_ID = "act_144305066"
     meta_where = [MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date]
     if meta_account_filter:
         meta_where.append(or_(
             MetaAdMetric.account_id.in_(meta_account_filter),
             MetaAdMetric.account_id.is_(None),
         ))
+    if division == "ibos":
+        meta_where.append(
+            or_(
+                MetaAdMetric.account_id.is_(None),
+                MetaAdMetric.account_id != CP_TRAINING_META_ID,
+            )
+        )
     meta_stmt = select(
         func.sum(MetaAdMetric.impressions).label("impressions"),
         func.sum(MetaAdMetric.clicks).label("clicks"),
@@ -1908,21 +1943,19 @@ async def get_marketing_data(
     gads = google_result.first()
 
     # ── 4. Daily spend time-series (for Spend & Leads chart) ─────────
+    # Re-use the exact same brand filters as the scorecards above — otherwise
+    # the chart would show cross-brand totals that disagree with the cards.
     meta_daily = select(
         MetaAdMetric.date,
         func.sum(MetaAdMetric.spend).label("spend"),
         func.sum(MetaAdMetric.conversions).label("leads"),
-    ).where(
-        and_(MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date)
-    ).group_by(MetaAdMetric.date).order_by(MetaAdMetric.date)
+    ).where(and_(*meta_where)).group_by(MetaAdMetric.date).order_by(MetaAdMetric.date)
 
     google_daily = select(
         GoogleAdMetric.date,
         func.sum(GoogleAdMetric.spend).label("spend"),
         func.sum(GoogleAdMetric.conversions).label("leads"),
-    ).where(
-        and_(GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date)
-    ).group_by(GoogleAdMetric.date).order_by(GoogleAdMetric.date)
+    ).where(and_(*gads_where)).group_by(GoogleAdMetric.date).order_by(GoogleAdMetric.date)
 
     meta_daily_res = await db.execute(meta_daily)
     google_daily_res = await db.execute(google_daily)
@@ -2063,11 +2096,10 @@ async def get_contractor_breakdown(
     """Live per-contractor aggregation from GA4 properties + brand_assets."""
     start_date, end_date = _get_date_range(date_from, date_to)
 
-    contractors = []
+    # ── 1. Pull GA4 traffic per contractor (identified by contractor_id) ─
+    contractors: list[dict] = []
     try:
         from app.models.ga4_property import GA4Property
-        # Merge properties by contractor_id to avoid duplicates
-        # (e.g. "Tailored Concrete Coatings" + "Tailored Concrete Coatings - GA4")
         props_q = await db.execute(
             select(
                 func.min(GA4Property.property_id).label("property_id"),
@@ -2089,56 +2121,176 @@ async def get_contractor_breakdown(
             ))
             .group_by(GA4Property.contractor_id)
             .order_by(func.sum(GA4Metric.sessions).desc())
-            .limit(20)
+            .limit(40)  # widened so we can merge before trimming to 20
         )
 
         _colors = ["#3B82F6","#10B981","#F59E0B","#8B5CF6","#EF4444","#06B6D4","#EC4899","#F97316","#14B8A6","#6366F1"]
         for i, row in enumerate(props_q.all()):
+            clean_name = (row.display_name or "").replace("[GA4]", "").strip()
             contractors.append({
                 "id": row.contractor_id or row.property_id,
-                "name": row.display_name,
+                "name": clean_name or row.display_name,
                 "property_id": row.property_id,
                 "visits": int(row.visits or 0),
                 "users": int(row.users or 0),
                 "bounce_rate": round(float(row.bounce or 0), 1),
                 "color": _colors[i % len(_colors)],
-                # Ad spend/leads would come from brand_assets mapping
-                "spend": 0, "leads": 0, "revenue": 0, "cpl": 0,
+                # Ad metrics filled in below when a brand_assets match exists
+                "meta_account_id": None,
+                "meta_account_name": None,
+                "sources": ["GA4"],
+                "spend": 0.0, "leads": 0, "revenue": 0.0, "cpl": 0.0,
             })
     except Exception as e:
-        logger.warning("Contractor breakdown query failed: %s", e)
+        logger.warning("Contractor breakdown GA4 query failed: %s", e)
 
-    # Get total ad spend/leads for I-BOS to distribute proportionally
-    total_spend = 0.0
-    total_leads = 0
+    # ── 2. Pull per-Meta-account spend (I-BOS brand only, CP purged) ────
+    CP_TRAINING_META_ID = "act_144305066"
+    meta_spend_by_account: dict[str, dict] = {}
     try:
-        ads_q = await db.execute(text(f"""
-            SELECT COALESCE(SUM(spend),0), COALESCE(SUM(conversions),0)
-            FROM meta_ad_metrics WHERE date >= '{start_date}' AND date <= '{end_date}'
-        """))
-        m = ads_q.fetchone()
-        total_spend += float(m[0])
-        total_leads += int(m[1])
+        from app.models.brand_asset import BrandAsset
+        ba_rows = await db.execute(
+            select(BrandAsset.account_id, BrandAsset.account_name).where(and_(
+                BrandAsset.platform == "meta",
+                BrandAsset.brand == "ibos",
+                BrandAsset.account_id != CP_TRAINING_META_ID,
+            ))
+        )
+        ibos_meta_accounts = {r[0]: r[1] for r in ba_rows.fetchall()}
 
-        gads_q = await db.execute(text(f"""
-            SELECT COALESCE(SUM(spend),0), COALESCE(SUM(conversions),0)
-            FROM google_ad_metrics WHERE date >= '{start_date}' AND date <= '{end_date}'
-        """))
-        g = gads_q.fetchone()
-        total_spend += float(g[0])
-        total_leads += int(g[1])
-    except Exception:
-        pass
+        if ibos_meta_accounts:
+            meta_agg = await db.execute(
+                select(
+                    MetaAdMetric.account_id,
+                    func.sum(MetaAdMetric.spend).label("spend"),
+                    func.sum(MetaAdMetric.conversions).label("leads"),
+                    func.sum(MetaAdMetric.conversion_value).label("revenue"),
+                ).where(and_(
+                    MetaAdMetric.date >= start_date,
+                    MetaAdMetric.date <= end_date,
+                    MetaAdMetric.account_id.in_(ibos_meta_accounts.keys()),
+                    MetaAdMetric.account_id != CP_TRAINING_META_ID,
+                )).group_by(MetaAdMetric.account_id)
+            )
+            for r in meta_agg.all():
+                meta_spend_by_account[r.account_id] = {
+                    "spend": float(r.spend or 0),
+                    "leads": int(r.leads or 0),
+                    "revenue": float(r.revenue or 0),
+                    "account_name": ibos_meta_accounts.get(r.account_id) or r.account_id,
+                }
+    except Exception as e:
+        logger.warning("Contractor breakdown Meta spend query failed: %s", e)
 
-    # Distribute spend/leads proportionally by traffic share
+    # ── 3. Match Meta spend to GA4 contractors by normalized name ───────
+    # The [META] / [GA4] prefixes and "- GA4" suffixes shouldn't create two
+    # rows for the same business. Normalize and merge.
+    def _norm(s: str) -> str:
+        if not s:
+            return ""
+        s = s.lower()
+        for token in ("[meta]", "[ga4]", "[g-ads]", "- ga4", "(greg haber)"):
+            s = s.replace(token, "")
+        return "".join(ch for ch in s if ch.isalnum())
+
+    # Build a lookup: normalized Meta account_name → account_id/metrics
+    meta_by_norm = {
+        _norm(v["account_name"]): (acct_id, v)
+        for acct_id, v in meta_spend_by_account.items()
+    }
+
+    matched_meta_accounts: set[str] = set()
+    for c in contractors:
+        key = _norm(c["name"])
+        if not key:
+            continue
+        for meta_norm, (acct_id, metrics) in meta_by_norm.items():
+            if key == meta_norm or key in meta_norm or meta_norm in key:
+                c["meta_account_id"] = acct_id
+                c["meta_account_name"] = metrics["account_name"]
+                c["spend"] = round(metrics["spend"], 2)
+                c["leads"] = metrics["leads"]
+                c["revenue"] = round(metrics["revenue"], 2)
+                c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
+                if "META" not in c["sources"]:
+                    c["sources"].append("META")
+                matched_meta_accounts.add(acct_id)
+                break
+
+    # ── 4. Fold Meta-only accounts (no GA4 match) into the list ─────────
+    for acct_id, metrics in meta_spend_by_account.items():
+        if acct_id in matched_meta_accounts:
+            continue
+        contractors.append({
+            "id": acct_id,
+            "name": metrics["account_name"],
+            "property_id": None,
+            "visits": 0, "users": 0, "bounce_rate": 0.0,
+            "color": "#64748B",
+            "meta_account_id": acct_id,
+            "meta_account_name": metrics["account_name"],
+            "sources": ["META"],
+            "spend": round(metrics["spend"], 2),
+            "leads": metrics["leads"],
+            "revenue": round(metrics["revenue"], 2),
+            "cpl": round(metrics["spend"] / max(metrics["leads"], 1), 2) if metrics["leads"] > 0 else 0,
+        })
+
+    # Sort by visits desc then spend desc, and cap to 20
+    contractors.sort(key=lambda c: (c["visits"], c["spend"]), reverse=True)
+    contractors = contractors[:20]
+
+    # ── 5. Portfolio totals (I-BOS only — CP already excluded) ──────────
     total_visits = sum(c["visits"] for c in contractors)
     total_users = sum(c["users"] for c in contractors)
+    total_spend = sum(c["spend"] for c in contractors)
+    total_leads = sum(c["leads"] for c in contractors)
+
+    # Google Ads spend folded into totals (not split per contractor yet —
+    # I-BOS has only 2 Google Ads CIDs so proportional share is the best
+    # we can do until we map Google customer IDs → contractor slugs).
+    try:
+        from app.models.brand_asset import BrandAsset
+        ba_g = await db.execute(
+            select(BrandAsset.account_id).where(and_(
+                BrandAsset.platform == "google_ads", BrandAsset.brand == "ibos",
+            ))
+        )
+        ibos_gads = [r[0] for r in ba_g.fetchall()]
+        if ibos_gads:
+            gads_q = await db.execute(
+                select(
+                    func.coalesce(func.sum(GoogleAdMetric.spend), 0),
+                    func.coalesce(func.sum(GoogleAdMetric.conversions), 0),
+                ).where(and_(
+                    GoogleAdMetric.date >= start_date,
+                    GoogleAdMetric.date <= end_date,
+                    GoogleAdMetric.customer_id.in_(ibos_gads),
+                ))
+            )
+            g = gads_q.fetchone()
+            gads_spend = float(g[0] or 0)
+            gads_leads = int(g[1] or 0)
+            total_spend += gads_spend
+            total_leads += gads_leads
+            # Distribute Google Ads across contractors with positive visits
+            visits_total = sum(c["visits"] for c in contractors) or 1
+            for c in contractors:
+                if c["visits"] <= 0:
+                    continue
+                share = c["visits"] / visits_total
+                c["spend"] = round(c["spend"] + gads_spend * share, 2)
+                c["leads"] = int(round(c["leads"] + gads_leads * share))
+                c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
+                if "G-ADS" not in c["sources"]:
+                    c["sources"].append("G-ADS")
+    except Exception as e:
+        logger.warning("Contractor breakdown Google Ads fold-in failed: %s", e)
+
+    # Revenue heuristic fallback when Meta didn't report conversion_value
     for c in contractors:
-        share = c["visits"] / max(total_visits, 1)
-        c["spend"] = round(total_spend * share, 2)
-        c["leads"] = round(total_leads * share)
-        c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
-        c["revenue"] = round(c["leads"] * 2500, 2)  # heuristic $2,500/lead
+        if c["revenue"] == 0 and c["leads"] > 0:
+            c["revenue"] = round(c["leads"] * 2500, 2)
 
     return {
         "period": f"{start_date} to {end_date}",

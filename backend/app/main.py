@@ -106,8 +106,33 @@ async def _create_default_admin() -> None:
 async def _seed_ibos_brand_assets() -> None:
     """Pre-populate brand_assets with ALL known brand mappings."""
     try:
+        from sqlalchemy import delete as sa_delete
         from app.models.brand_asset import BrandAsset
+
         async with async_session_maker() as session:
+            # ── One-time CP purge ─────────────────────────────────────────
+            # Older seeds mapped act_144305066 (CP Internal Training) to the
+            # ibos brand as well. This double-counted CP spend in every
+            # I-BOS report. The mapping is now canonical CP-only, so
+            # nuke the stale (meta, act_144305066, ibos) row on every boot.
+            # DELETE is a no-op if the row is already gone.
+            try:
+                purge_result = await session.execute(
+                    sa_delete(BrandAsset).where(
+                        BrandAsset.platform == "meta",
+                        BrandAsset.account_id == "act_144305066",
+                        BrandAsset.brand == "ibos",
+                    )
+                )
+                if purge_result.rowcount:
+                    await session.commit()
+                    logger.info(
+                        "Purged %d stale (meta, act_144305066, ibos) brand_asset row(s)",
+                        purge_result.rowcount,
+                    )
+            except Exception as purge_exc:
+                logger.warning("CP purge on brand_assets skipped: %s", purge_exc)
+
             existing = await session.execute(select(BrandAsset).limit(1))
             if existing.scalar_one_or_none():
                 return  # Already seeded
@@ -130,7 +155,9 @@ async def _seed_ibos_brand_assets() -> None:
                 ("meta", "act_590626230518758", "LNS Concrete Coatings", "ibos"),
                 ("meta", "act_1216723690570763", "Reveles Epoxy", "ibos"),
                 ("meta", "act_1641409050108751", "SCF Concrete Promo", "ibos"),
-                ("meta", "act_144305066", "Beckley (CP Portfolio)", "ibos"),
+                # act_144305066 intentionally NOT mapped to ibos — it is the
+                # CP Internal Training account. Mapping it to ibos would
+                # double-count CP spend inside the I-BOS portfolio.
                 ("google_ads", "6754610688", "Tailored Concrete (Google)", "ibos"),
                 ("google_ads", "2957400868", "SLG Concrete (Google)", "ibos"),
             ]
