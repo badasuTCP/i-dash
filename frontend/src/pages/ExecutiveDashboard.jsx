@@ -57,7 +57,8 @@ const ExecutiveSummary = () => {
       setLoading(true);
       setError(null);
       try {
-        const [start, end] = dateRange || [null, null];
+        const start = dateRange?.start || null;
+        const end   = dateRange?.end   || null;
         const resp = await dashboardAPI.getExecutiveSummary(start, end);
         if (!cancelled) {
           setData(resp.data);
