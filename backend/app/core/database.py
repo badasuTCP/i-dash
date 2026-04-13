@@ -5,13 +5,17 @@ Provides async SQLAlchemy engine, session factory, and dependency injection
 for database access across the application.
 """
 
+import logging
 import re
 from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _build_engine_args():
@@ -84,9 +88,67 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Initialize database by creating all tables."""
+    """Initialize database by creating all tables AND reconciling known
+    column drift (lightweight ALTER TABLE migrations for Railway/Postgres).
+
+    ``Base.metadata.create_all`` only creates tables that are entirely
+    missing — it does not add new columns to an existing table. When the
+    SQLAlchemy model gains a column (e.g. ``meta_ad_metrics.account_id``)
+    we need an idempotent ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``
+    pass on every startup so the live schema stays in lockstep with the
+    code. Each statement is safe to run repeatedly.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _ensure_meta_ad_metrics_schema(conn)
+
+
+async def _ensure_meta_ad_metrics_schema(conn) -> None:
+    """Idempotent ADD COLUMN pass for meta_ad_metrics.
+
+    Postgres has supported ``ADD COLUMN IF NOT EXISTS`` since 9.6, so each
+    statement is a no-op after the first successful run. We log each one
+    so the startup output makes it obvious which columns were added.
+    """
+    # (column_name, sql_type_with_default) — keep in sync with MetaAdMetric.
+    COLUMNS = [
+        ("account_id",       "VARCHAR(128)"),
+        ("account_name",     "VARCHAR(256)"),
+        ("ad_set_name",      "VARCHAR(255) NOT NULL DEFAULT ''"),
+        ("conversion_value", "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+        ("ctr",              "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+        ("cpc",              "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+        ("cpm",              "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+        ("roas",             "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+        ("reach",            "INTEGER NOT NULL DEFAULT 0"),
+        ("frequency",        "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+    ]
+
+    for col_name, col_type in COLUMNS:
+        stmt = (
+            f"ALTER TABLE meta_ad_metrics "
+            f"ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+        )
+        try:
+            await conn.execute(text(stmt))
+        except Exception as exc:
+            # A failure here must NOT crash the startup path. Log and keep
+            # going so the rest of the app still boots.
+            logger.warning(
+                "ensure_schema: failed to ALTER meta_ad_metrics ADD %s (%s): %s",
+                col_name, col_type, exc,
+            )
+
+    # Helpful index for the account-scoped queries in dashboard.py
+    try:
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_meta_ad_metrics_account_id "
+                 "ON meta_ad_metrics (account_id)")
+        )
+    except Exception as exc:
+        logger.warning("ensure_schema: could not create account_id index: %s", exc)
+
+    logger.info("ensure_schema: meta_ad_metrics reconciled (idempotent)")
 
 
 async def close_db() -> None:
