@@ -100,13 +100,37 @@ async def _persist_pipeline_log(
         logger.warning("Could not persist PipelineLog for '%s': %s", name, exc)
 
 
-async def _run_pipeline_bg(name: str, pipeline_service: PipelineService) -> None:
-    """Background coroutine that runs a single pipeline and stores the result."""
+async def _run_pipeline_bg(
+    name: str,
+    pipeline_service: PipelineService,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> None:
+    """Background coroutine that runs a single pipeline and stores the result.
+
+    If ``start_date`` / ``end_date`` are provided, they are applied to the
+    pipeline instance immediately before the run. The previous values are
+    restored afterwards so concurrent default runs are not affected.
+    """
     started_at = datetime.now(timezone.utc)
     _running_pipelines[name] = {
         "status": "running",
         "started_at": started_at.isoformat(),
     }
+
+    pipeline_obj = pipeline_service.pipelines.get(name)
+    prev_start = getattr(pipeline_obj, "start_date", None) if pipeline_obj else None
+    prev_end = getattr(pipeline_obj, "end_date", None) if pipeline_obj else None
+    if pipeline_obj and (start_date or end_date):
+        if start_date:
+            pipeline_obj.start_date = start_date
+        if end_date:
+            pipeline_obj.end_date = end_date
+        logger.info(
+            "Pipeline '%s' running with date range %s → %s",
+            name, pipeline_obj.start_date, pipeline_obj.end_date,
+        )
+
     try:
         result = await pipeline_service.run_pipeline(name)
         completed_at = datetime.now(timezone.utc)
@@ -124,13 +148,21 @@ async def _run_pipeline_bg(name: str, pipeline_service: PipelineService) -> None
         completed_at = datetime.now(timezone.utc)
         _running_pipelines[name] = {
             "status": "failed",
-            "error": str(exc),
+            "error": f"{type(exc).__name__}: {exc}",
             "completed_at": completed_at.isoformat(),
         }
-        logger.error("Background pipeline '%s' failed: %s", name, exc)
+        logger.exception("Background pipeline '%s' failed", name)
         await _persist_pipeline_log(
-            name, PipelineStatus.FAILED, 0, started_at, completed_at, str(exc),
+            name, PipelineStatus.FAILED, 0, started_at, completed_at,
+            f"{type(exc).__name__}: {exc}",
         )
+    finally:
+        # Restore any singleton date overrides
+        if pipeline_obj and (start_date or end_date):
+            if prev_start is not None:
+                pipeline_obj.start_date = prev_start
+            if prev_end is not None:
+                pipeline_obj.end_date = prev_end
 
 
 @router.post(
@@ -151,8 +183,8 @@ async def run_pipeline(
     current_user: User = Depends(get_current_user),
     _: None = Depends(role_required(["admin", "data-analyst"])),
     pipeline_service: PipelineService = Depends(get_pipeline_service),
-    date_from: Optional[date] = Query(None, description="Override start date (YYYY-MM-DD)"),
-    date_to: Optional[date] = Query(None, description="Override end date (YYYY-MM-DD)"),
+    date_from: Optional[str] = Query(None, description="Override start date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Override end date (YYYY-MM-DD)"),
 ) -> Dict[str, Any]:
     """
     Trigger execution of a specific pipeline in the background.
@@ -185,17 +217,46 @@ async def run_pipeline(
             "message": f"Pipeline '{name}' is already running — started at {current.get('started_at')}",
         }
 
-    # Apply date overrides to the pipeline before dispatching
-    pipeline_obj = pipeline_service.pipelines.get(name)
-    if pipeline_obj and (date_from or date_to):
-        end_dt = date_to or date.today()
-        start_dt = date_from or (end_dt - timedelta(days=30))
-        pipeline_obj.start_date = start_dt
-        pipeline_obj.end_date = end_dt
-        logger.info("Pipeline '%s' date range overridden to %s → %s", name, start_dt, end_dt)
+    # Parse optional date overrides explicitly so bad input returns a clean 400.
+    start_dt: Optional[date] = None
+    end_dt: Optional[date] = None
+    if date_from:
+        try:
+            start_dt = date.fromisoformat(date_from.strip())
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid date_from '{date_from}' — expected YYYY-MM-DD",
+            )
+    if date_to:
+        try:
+            end_dt = date.fromisoformat(date_to.strip())
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid date_to '{date_to}' — expected YYYY-MM-DD",
+            )
+    if start_dt and end_dt and start_dt > end_dt:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"date_from ({start_dt}) must be <= date_to ({end_dt})",
+        )
+    if start_dt and not end_dt:
+        end_dt = date.today()
+    if end_dt and not start_dt:
+        start_dt = end_dt - timedelta(days=30)
 
-    # Dispatch to background using asyncio.create_task for proper async support
-    asyncio.create_task(_run_pipeline_bg(name, pipeline_service))
+    if start_dt or end_dt:
+        logger.info(
+            "Pipeline '%s' requested with backfill range %s → %s",
+            name, start_dt, end_dt,
+        )
+
+    # Dispatch to background using asyncio.create_task for proper async support.
+    # Dates are passed through so the background task applies them atomically.
+    asyncio.create_task(
+        _run_pipeline_bg(name, pipeline_service, start_dt, end_dt)
+    )
 
     logger.info("Admin %s dispatched pipeline '%s' to background", current_user.id, name)
 

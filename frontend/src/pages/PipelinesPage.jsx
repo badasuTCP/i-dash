@@ -93,6 +93,7 @@ const PipelinesPage = () => {
   const [historyLoading, setHistLoading] = useState({});
   const [runAllLoading, setRunAllLoading] = useState(false);
   const [runAllResult, setRunAllResult]   = useState(null);
+  const [backfill, setBackfill] = useState({}); // { pipelineName: { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' } }
   const [lastFetch, setLastFetch]     = useState(null);
   const [apiConnected, setApiConnected] = useState(null); // null = unknown, true, false
   const [countdown, setCountdown] = useState(30);
@@ -222,7 +223,11 @@ const PipelinesPage = () => {
     setRunningJobs((p) => ({ ...p, [name]: true }));
     setRunResults((p) => ({ ...p, [name]: null }));
     try {
-      const res = await pipelinesAPI.run(name);
+      const range = backfill[name] || {};
+      const res = await pipelinesAPI.run(name, {
+        date_from: range.from || undefined,
+        date_to:   range.to   || undefined,
+      });
       setRunResults((p) => ({ ...p, [name]: { success: true, ...res.data } }));
       // Refresh status after run
       setTimeout(() => fetchStatus(true), 1500);
@@ -232,7 +237,7 @@ const PipelinesPage = () => {
     } finally {
       setRunningJobs((p) => ({ ...p, [name]: false }));
     }
-  }, [fetchStatus]);
+  }, [fetchStatus, backfill]);
 
   // ── Run all pipelines ────────────────────────────────────────────────────────
   const handleRunAll = useCallback(async () => {
@@ -520,15 +525,68 @@ const PipelinesPage = () => {
                             History
                           </button>
 
+                          {/* Backfill date range (optional — blank = default 30-day window) */}
+                          <div
+                            className={`flex items-center gap-1 text-xs ${textSec}`}
+                            title="Optional: pick a date range for historical backfill. Leave blank for the default 30-day window."
+                          >
+                            <span className="hidden md:inline">Backfill:</span>
+                            <input
+                              type="date"
+                              value={backfill[name]?.from || ''}
+                              max={backfill[name]?.to || undefined}
+                              onChange={(e) =>
+                                setBackfill((p) => ({
+                                  ...p,
+                                  [name]: { ...(p[name] || {}), from: e.target.value },
+                                }))
+                              }
+                              className={`px-2 py-1 rounded-lg text-xs border ${inputCls}`}
+                            />
+                            <span>→</span>
+                            <input
+                              type="date"
+                              value={backfill[name]?.to || ''}
+                              min={backfill[name]?.from || undefined}
+                              onChange={(e) =>
+                                setBackfill((p) => ({
+                                  ...p,
+                                  [name]: { ...(p[name] || {}), to: e.target.value },
+                                }))
+                              }
+                              className={`px-2 py-1 rounded-lg text-xs border ${inputCls}`}
+                            />
+                            {(backfill[name]?.from || backfill[name]?.to) && (
+                              <button
+                                onClick={() =>
+                                  setBackfill((p) => {
+                                    const next = { ...p };
+                                    delete next[name];
+                                    return next;
+                                  })
+                                }
+                                title="Clear backfill dates"
+                                className="opacity-60 hover:opacity-100"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+
                           {/* Run Now */}
                           <button
                             onClick={() => handleRunNow(name)}
                             disabled={isRunning || apiConnected === false}
+                            title={
+                              backfill[name]?.from || backfill[name]?.to
+                                ? `Run with backfill ${backfill[name]?.from || '…'} → ${backfill[name]?.to || 'today'}`
+                                : 'Run with default 30-day window'
+                            }
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors"
                           >
                             {isRunning
                               ? <><Loader2 size={12} className="animate-spin" /> Running...</>
-                              : <><Play size={12} /> Run Now</>}
+                              : <><Play size={12} /> {(backfill[name]?.from || backfill[name]?.to) ? 'Backfill' : 'Run Now'}</>}
                           </button>
                         </div>
 
