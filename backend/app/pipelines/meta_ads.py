@@ -322,11 +322,16 @@ class MetaAdsPipeline(BasePipeline):
                     )
 
                     # Create record
+                    _acct_id_raw = campaign_insight.get("_account_id", "") or ""
                     record = MetaAdMetric(
-                        account_id=campaign_insight.get("_account_id", ""),
+                        account_id=_acct_id_raw,
                         account_name=_with_meta_prefix(
                             campaign_insight.get("_account_name", "")
                         ),
+                        # Canonical brand tag applied at write time so
+                        # queries never need to join brand_assets to
+                        # figure out which division a row belongs to.
+                        division=_division_for_meta_account(_acct_id_raw),
                         date=metric_date,
                         campaign_id=campaign_id,
                         campaign_name=campaign_name,

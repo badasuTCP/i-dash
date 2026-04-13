@@ -1860,57 +1860,68 @@ async def get_marketing_data(
         }
 
     # ── 2. Resolve brand-specific ad account filters ────────────────
-    # CP = only internal training account (act_144305066)
-    # I-BOS = only I-BOS mapped accounts from brand_assets
-    # Sani-Tred = Sani-Tred Google Ads CID (2823564937)
-    meta_account_filter = None
-    gads_customer_filter = None
-    if division == "cp":
-        meta_account_filter = ["act_144305066"]
-    elif division == "ibos":
-        try:
-            from app.models.brand_asset import BrandAsset
-            ba_q = await db.execute(
-                select(BrandAsset.account_id).where(
-                    and_(BrandAsset.brand == "ibos", BrandAsset.platform == "meta")
-                )
-            )
-            ibos_meta = [r[0] for r in ba_q.fetchall()]
-            if ibos_meta:
-                meta_account_filter = ibos_meta
-            ba_g = await db.execute(
-                select(BrandAsset.account_id).where(
-                    and_(BrandAsset.brand == "ibos", BrandAsset.platform == "google_ads")
-                )
-            )
-            ibos_gads = [r[0] for r in ba_g.fetchall()]
-            if ibos_gads:
-                gads_customer_filter = ibos_gads
-        except Exception:
-            pass
-    elif division == "sanitred":
-        gads_customer_filter = ["2823564937"]
-
-    # ── 3. Meta Ads aggregates (filtered by brand) ────────────────────
-    # Include NULL account_id rows (pre-tagging data) alongside branded rows.
-    # For I-BOS specifically, exclude act_144305066 — that is the CP Internal
-    # Training account and must never appear in an I-BOS aggregation, even
-    # if a stale brand_assets row leaks in.
-    from sqlalchemy import or_
+    # Hard-coded canonical rules (source of truth — do NOT rely on
+    # brand_assets for brand gating, only for enumeration):
+    #
+    #   cp       Meta = act_144305066 only.         No Google Ads, ever.
+    #   sanitred No Meta, ever.                     Google Ads = 2823564937 only.
+    #   ibos     Meta = every act_* except CP.      Google Ads = everything
+    #                                               except the Sani-Tred CID.
+    from sqlalchemy import or_, literal
     CP_TRAINING_META_ID = "act_144305066"
+    SANITRED_GADS_CID = "2823564937"
+
     meta_where = [MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date]
-    if meta_account_filter:
+    gads_where = [GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date]
+
+    # --- Brand gating — single source of truth (division column first,
+    # account/customer ID as a fallback for rows written before the
+    # division backfill landed). ---
+    if division == "cp":
+        # Meta: the training account only, by account_id OR by division tag.
         meta_where.append(or_(
-            MetaAdMetric.account_id.in_(meta_account_filter),
-            MetaAdMetric.account_id.is_(None),
+            MetaAdMetric.account_id == CP_TRAINING_META_ID,
+            MetaAdMetric.division == "cp",
         ))
-    if division == "ibos":
-        meta_where.append(
+        # Google Ads: NEVER. Short-circuit the query.
+        gads_where.append(literal(False))
+    elif division == "sanitred":
+        # Meta: NEVER. Sani-Tred is retail/Google only.
+        meta_where.append(literal(False))
+        # Google Ads: the one Sani-Tred CID.
+        gads_where.append(or_(
+            GoogleAdMetric.customer_id == SANITRED_GADS_CID,
+            GoogleAdMetric.division == "sanitred",
+        ))
+    elif division == "ibos":
+        # Meta: everything except CP training.
+        meta_where.append(and_(
+            or_(
+                MetaAdMetric.division == "ibos",
+                MetaAdMetric.account_id.is_(None),
+                MetaAdMetric.account_id != CP_TRAINING_META_ID,
+            ),
             or_(
                 MetaAdMetric.account_id.is_(None),
                 MetaAdMetric.account_id != CP_TRAINING_META_ID,
-            )
-        )
+            ),
+        ))
+        # Google Ads: everything except Sani-Tred's single CID.
+        gads_where.append(and_(
+            or_(
+                GoogleAdMetric.division == "ibos",
+                GoogleAdMetric.customer_id.is_(None),
+                GoogleAdMetric.customer_id != SANITRED_GADS_CID,
+            ),
+            or_(
+                GoogleAdMetric.customer_id.is_(None),
+                GoogleAdMetric.customer_id != SANITRED_GADS_CID,
+            ),
+        ))
+    else:
+        # Unknown division → return nothing rather than leaking data.
+        meta_where.append(literal(False))
+        gads_where.append(literal(False))
     meta_stmt = select(
         func.sum(MetaAdMetric.impressions).label("impressions"),
         func.sum(MetaAdMetric.clicks).label("clicks"),
@@ -1923,13 +1934,7 @@ async def get_marketing_data(
     meta_result = await db.execute(meta_stmt)
     meta = meta_result.first()
 
-    # ── 4. Google Ads aggregates (filtered by brand) ──────────────────
-    gads_where = [GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date]
-    if gads_customer_filter:
-        gads_where.append(or_(
-            GoogleAdMetric.customer_id.in_(gads_customer_filter),
-            GoogleAdMetric.customer_id.is_(None),
-        ))
+    # ── 4. Google Ads aggregates (filtered by brand — gads_where built above)
     google_stmt = select(
         func.sum(GoogleAdMetric.impressions).label("impressions"),
         func.sum(GoogleAdMetric.clicks).label("clicks"),

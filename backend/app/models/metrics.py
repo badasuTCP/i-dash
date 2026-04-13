@@ -127,6 +127,9 @@ class MetaAdMetric(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     account_id: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
     account_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    # Brand/division tag applied at extract time. 'cp' for act_144305066,
+    # 'ibos' for every other Meta account in our portfolio, 'sanitred' never.
+    division: Mapped[Optional[str]] = mapped_column(String(32), index=True, nullable=True)
     date: Mapped[datetime] = mapped_column(Date, index=True, nullable=False)
     campaign_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     campaign_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -183,6 +186,9 @@ class GoogleAdMetric(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     customer_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    # Brand/division tag applied at extract time. CID 2823564937 = 'sanitred',
+    # I-BOS customer IDs = 'ibos'. CP must never carry Google Ads data.
+    division: Mapped[Optional[str]] = mapped_column(String(32), index=True, nullable=True)
     date: Mapped[datetime] = mapped_column(Date, index=True, nullable=False)
     campaign_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     campaign_name: Mapped[str] = mapped_column(String(255), nullable=False)

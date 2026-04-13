@@ -101,6 +101,8 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_meta_ad_metrics_schema(conn)
+        await _ensure_google_ad_metrics_schema(conn)
+        await _backfill_ad_metric_divisions(conn)
 
 
 async def _ensure_meta_ad_metrics_schema(conn) -> None:
@@ -114,6 +116,7 @@ async def _ensure_meta_ad_metrics_schema(conn) -> None:
     COLUMNS = [
         ("account_id",       "VARCHAR(128)"),
         ("account_name",     "VARCHAR(256)"),
+        ("division",         "VARCHAR(32)"),
         ("ad_set_name",      "VARCHAR(255) NOT NULL DEFAULT ''"),
         ("conversion_value", "DOUBLE PRECISION NOT NULL DEFAULT 0"),
         ("ctr",              "DOUBLE PRECISION NOT NULL DEFAULT 0"),
@@ -148,7 +151,94 @@ async def _ensure_meta_ad_metrics_schema(conn) -> None:
     except Exception as exc:
         logger.warning("ensure_schema: could not create account_id index: %s", exc)
 
+    try:
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_meta_ad_metrics_division "
+                 "ON meta_ad_metrics (division)")
+        )
+    except Exception as exc:
+        logger.warning("ensure_schema: could not create division index: %s", exc)
+
     logger.info("ensure_schema: meta_ad_metrics reconciled (idempotent)")
+
+
+async def _ensure_google_ad_metrics_schema(conn) -> None:
+    """Idempotent ADD COLUMN pass for google_ad_metrics.
+
+    Adds the brand/division tag so we can hard-separate Sani-Tred / I-BOS
+    Google Ads spend without relying on brand_assets lookups at query time.
+    """
+    COLUMNS = [
+        ("division", "VARCHAR(32)"),
+    ]
+    for col_name, col_type in COLUMNS:
+        stmt = (
+            f"ALTER TABLE google_ad_metrics "
+            f"ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+        )
+        try:
+            await conn.execute(text(stmt))
+        except Exception as exc:
+            logger.warning(
+                "ensure_schema: failed to ALTER google_ad_metrics ADD %s (%s): %s",
+                col_name, col_type, exc,
+            )
+
+    try:
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_google_ad_metrics_division "
+                 "ON google_ad_metrics (division)")
+        )
+    except Exception as exc:
+        logger.warning("ensure_schema: could not create gads division index: %s", exc)
+
+    logger.info("ensure_schema: google_ad_metrics reconciled (idempotent)")
+
+
+async def _backfill_ad_metric_divisions(conn) -> None:
+    """Stamp brand/division on every existing ad-metric row based on the
+    canonical account/customer ID mapping. Safe to run on every boot.
+
+    Meta:
+      act_144305066 → 'cp'  (CP Internal Training)
+      everything else → 'ibos'  (entire I-BOS portfolio under our Business)
+
+    Google Ads:
+      2823564937 → 'sanitred'  (Sani-Tred Google Ads)
+      any other  → 'ibos'
+    """
+    try:
+        # Meta CP tag (only the training account)
+        await conn.execute(text("""
+            UPDATE meta_ad_metrics
+               SET division = 'cp'
+             WHERE account_id = 'act_144305066'
+               AND (division IS NULL OR division <> 'cp')
+        """))
+        # Meta I-BOS tag (everything else)
+        await conn.execute(text("""
+            UPDATE meta_ad_metrics
+               SET division = 'ibos'
+             WHERE (account_id IS NULL OR account_id <> 'act_144305066')
+               AND (division IS NULL OR division <> 'ibos')
+        """))
+        # Google Ads Sani-Tred tag
+        await conn.execute(text("""
+            UPDATE google_ad_metrics
+               SET division = 'sanitred'
+             WHERE customer_id = '2823564937'
+               AND (division IS NULL OR division <> 'sanitred')
+        """))
+        # Google Ads I-BOS tag (everything else)
+        await conn.execute(text("""
+            UPDATE google_ad_metrics
+               SET division = 'ibos'
+             WHERE (customer_id IS NULL OR customer_id <> '2823564937')
+               AND (division IS NULL OR division <> 'ibos')
+        """))
+        logger.info("ensure_schema: division backfill complete")
+    except Exception as exc:
+        logger.warning("ensure_schema: division backfill skipped: %s", exc)
 
 
 async def close_db() -> None:

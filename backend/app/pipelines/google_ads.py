@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 G_ADS_SOURCE_PREFIX = "[G-ADS]"
 
+# Canonical Google Ads customer-ID → division mapping.
+# 2823564937 is the Sani-Tred primary account; every other CID in our
+# portfolio belongs to I-BOS (or gets routed there by default).
+GADS_SANITRED_CIDS = {"2823564937"}
+
 
 def _with_gads_prefix(name: str) -> str:
     """Ensure a Google-Ads-discovered customer label is prefixed with [G-ADS]."""
@@ -27,6 +32,12 @@ def _with_gads_prefix(name: str) -> str:
         return G_ADS_SOURCE_PREFIX
     name = str(name).strip()
     return name if name.startswith(G_ADS_SOURCE_PREFIX) else f"{G_ADS_SOURCE_PREFIX} {name}"
+
+
+def _division_for_gads_customer(customer_id: str) -> str:
+    """Hard-coded rule: 2823564937 → 'sanitred', everything else → 'ibos'."""
+    cid = (customer_id or "").replace("-", "").strip()
+    return "sanitred" if cid in GADS_SANITRED_CIDS else "ibos"
 
 
 class GoogleAdsPipeline(BasePipeline):
@@ -367,8 +378,10 @@ class GoogleAdsPipeline(BasePipeline):
                     )
 
                     # Create record
+                    _cid = campaign.get("customer_id")
                     record = GoogleAdMetric(
-                        customer_id=campaign.get("customer_id"),
+                        customer_id=_cid,
+                        division=_division_for_gads_customer(_cid),
                         date=metric_date,
                         campaign_id=campaign_id,
                         campaign_name=campaign_name,
