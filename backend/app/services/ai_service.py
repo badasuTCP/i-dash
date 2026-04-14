@@ -101,8 +101,9 @@ class AIService:
             Formatted prompt string with metrics context.
         """
         metrics_text = f"""
-Current Analytics Context (Last {context.get('period_days', 30)} days):
-- Period: {context.get('start_date')} to {context.get('end_date')}
+=== FULL SYSTEM DATA (All pipelines, {context.get('start_date')} to {context.get('end_date')}) ===
+
+DASHBOARD SNAPSHOT:
 - Total Revenue: ${context.get('total_revenue', 0):,.2f}
 - Total Ad Spend: ${context.get('total_ad_spend', 0):,.2f}
 - Total Leads Generated: {context.get('total_leads', 0):,}
@@ -110,61 +111,81 @@ Current Analytics Context (Last {context.get('period_days', 30)} days):
 - Blended ROAS: {context.get('blended_roas', 0):.2f}x
 
 """
-
-        # Division breakdown
-        for division in ["cp", "sanitred", "ibos"]:
-            div_data = context.get(division)
-            if div_data:
-                div_label = {
-                    "cp": "The Concrete Protector",
-                    "sanitred": "Sani-Tred",
-                    "ibos": "I-BOS",
-                }.get(division, division)
-                metrics_text += f"""{div_label}:
-- Revenue: ${div_data.get('revenue', 0):,.2f}
-- Ad Spend: ${div_data.get('ad_spend', 0):,.2f}
-- Conversions: {div_data.get('conversions', 0):,}
-- ROAS: {div_data.get('roas', 0):.2f}x
-
-"""
-
         if "meta_ads" in context:
             meta = context["meta_ads"]
-            metrics_text += f"""Meta Ads Performance:
-- Spend: ${meta.get('spend', 0):,.2f}
-- Conversions: {meta.get('conversions', 0):.0f}
-- ROAS: {meta.get('roas', 0):.2f}x
-
+            metrics_text += f"""META ADS (Facebook/Instagram) — ALL TIME:
+- Total Spend: ${meta.get('total_spend', meta.get('spend', 0)):,.2f}
+- Total Conversions/Leads: {meta.get('total_conversions', meta.get('conversions', 0)):,.0f}
+- Avg ROAS: {meta.get('avg_roas', meta.get('roas', 0)):.2f}x
+- Records: {meta.get('total_records', 0):,}
 """
+            by_contractor = meta.get("by_contractor", [])
+            if by_contractor:
+                metrics_text += "Per-Contractor Meta Ads Spend:\n"
+                for c in by_contractor:
+                    cpl = f"${c['spend'] / max(c['leads'], 1):.2f}" if c['leads'] > 0 else "N/A"
+                    metrics_text += (
+                        f"  - {c['name']}: Spend ${c['spend']:,.2f}, "
+                        f"Leads {c['leads']:,}, Clicks {c['clicks']:,}, CPL {cpl}\n"
+                    )
+            metrics_text += "\n"
 
         if "google_ads" in context:
             gads = context["google_ads"]
-            metrics_text += f"""Google Ads Performance:
-- Spend: ${gads.get('spend', 0):,.2f}
-- Clicks: {gads.get('clicks', 0):,}
-- Conversions: {gads.get('conversions', 0):.0f}
-- ROAS: {gads.get('roas', 0):.2f}x
+            metrics_text += f"""GOOGLE ADS — ALL TIME:
+- Total Spend: ${gads.get('total_spend', gads.get('spend', 0)):,.2f}
+- Total Conversions: {gads.get('total_conversions', gads.get('conversions', 0)):,.0f}
+- Records: {gads.get('total_records', 0):,}
+Note: CID 2823564937 = Sani-Tred, CID 6754610688 = Tailored, CID 2957400868 = SLG
 
 """
 
         if "hubspot" in context:
             hubspot = context["hubspot"]
-            metrics_text += f"""HubSpot CRM Metrics:
+            metrics_text += f"""HUBSPOT CRM — ALL TIME:
 - Contacts Created: {hubspot.get('contacts_created', 0):,}
 - Deals Created: {hubspot.get('deals_created', 0):,}
+- Deals Won: {hubspot.get('deals_won', 0):,}
 - Revenue Won: ${hubspot.get('revenue_won', 0):,.2f}
+- Meetings Booked: {hubspot.get('meetings_booked', 0):,}
+- Pipeline Value: ${hubspot.get('pipeline_value', 0):,.2f}
+- Tasks Completed: {hubspot.get('tasks_completed', 0):,}
 
 """
 
         if "ga4" in context:
             ga4 = context["ga4"]
-            metrics_text += f"""Web Analytics (GA4):
-- Sessions: {ga4.get('sessions', 0):,}
-- Users: {ga4.get('users', 0):,}
-- Bounce Rate: {ga4.get('bounce_rate', 0):.1f}%
-- Conversion Rate: {ga4.get('conversion_rate', 0):.2f}%
+            metrics_text += f"""WEB ANALYTICS (GA4) — ALL TIME:
+- Total Sessions: {ga4.get('total_sessions', ga4.get('sessions', 0)):,}
+- Total Users: {ga4.get('total_users', ga4.get('users', 0)):,}
+- Avg Bounce Rate: {ga4.get('avg_bounce_rate', ga4.get('bounce_rate', 0)):.1f}%
 
 """
+
+        if "woocommerce" in context:
+            wc = context["woocommerce"]
+            metrics_text += f"""WOOCOMMERCE (Sani-Tred Retail Store) — ALL TIME:
+- Total Orders: {wc.get('total_orders', 0):,}
+- Total Revenue: ${wc.get('total_revenue', 0):,.2f}
+- Avg Order Value: ${wc.get('avg_order_value', 0):,.2f}
+- Products in Catalog: {wc.get('product_count', 0):,}
+
+"""
+
+        if "google_sheets_kpis" in context:
+            kpis = context["google_sheets_kpis"]
+            metrics_text += "EXECUTIVE KPIs (Google Sheets · TCP MAIN — all quarters summed):\n"
+            for k, v in kpis.items():
+                metrics_text += f"  - {k}: {v:,.2f}\n"
+            metrics_text += "\n"
+
+        if "active_contractors" in context:
+            contractors_list = context["active_contractors"]
+            metrics_text += f"ACTIVE I-BOS CONTRACTORS ({len(contractors_list)}):\n"
+            for c in contractors_list:
+                status = f" [Ad: {c['ad_status']}]" if c.get("ad_status") else ""
+                metrics_text += f"  - {c['name']}{status}\n"
+            metrics_text += "\n"
 
         # ── Per-contractor marketing spend (I-BOS division) ──────────
         contractors = context.get("contractors", CONTRACTOR_MARKETING_DATA)

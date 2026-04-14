@@ -53,36 +53,34 @@ def get_ai_service() -> AIService:
 async def _fetch_metrics_context(
     db: AsyncSession,
     user: User,
-    days: int = 30,
+    days: int = 730,
 ) -> Dict[str, Any]:
     """
-    Fetch metrics to build context for AI queries.
+    Fetch ALL available metrics to give the AI maximum context.
 
-    Args:
-        db: Database session.
-        user: Current user for department filtering.
-        days: Number of days to fetch (default 30).
-
-    Returns:
-        Dictionary with aggregated metrics.
+    Pulls from every live pipeline (Meta, Google Ads, GA4, HubSpot,
+    WooCommerce, Google Sheets) across the FULL data range — not
+    just the last 30 days. The AI needs to answer questions like
+    "what were our best months in 2024?" which requires all-time data.
     """
+    # Use a wide window: 2 years back to today (covers 2024-2026 backfill)
     start_date = date.today() - timedelta(days=days)
     end_date = date.today()
 
-    # Fetch dashboard snapshots
+    # Also compute YTD (current year)
+    ytd_start = date(date.today().year, 1, 1)
+
+    # ── Snapshot totals (all-time) ────────────────────────────────────
     snapshot_stmt = select(
         func.sum(DashboardSnapshot.total_revenue).label("revenue"),
         func.sum(DashboardSnapshot.total_ad_spend).label("ad_spend"),
         func.sum(DashboardSnapshot.total_leads).label("leads"),
         func.sum(DashboardSnapshot.total_deals_won).label("deals_won"),
         func.avg(DashboardSnapshot.blended_roas).label("roas"),
-    ).where(
-        and_(
-            DashboardSnapshot.date >= start_date,
-            DashboardSnapshot.date <= end_date,
-        )
-    )
-
+    ).where(and_(
+        DashboardSnapshot.date >= start_date,
+        DashboardSnapshot.date <= end_date,
+    ))
     snapshot_result = await db.execute(snapshot_stmt)
     snapshot_data = snapshot_result.first()
 
@@ -97,48 +95,155 @@ async def _fetch_metrics_context(
         "blended_roas": float(snapshot_data[4] or 0),
     }
 
-    # Add platform-specific data if user has access
-    if user.department.value in [UserDepartment.MARKETING.value, UserDepartment.ALL.value] or user.role.value == "admin":
-        meta_stmt = select(
-            func.sum(MetaAdMetric.spend).label("spend"),
-            func.sum(MetaAdMetric.conversions).label("conversions"),
-            func.avg(MetaAdMetric.roas).label("roas"),
-        ).where(
-            and_(
-                MetaAdMetric.date >= start_date,
-                MetaAdMetric.date <= end_date,
-            )
-        )
+    # ── Meta Ads (all-time + per-contractor) ──────────────────────────
+    try:
+        meta_total = await db.execute(select(
+            func.sum(MetaAdMetric.spend),
+            func.sum(MetaAdMetric.conversions),
+            func.avg(MetaAdMetric.roas),
+            func.count(MetaAdMetric.id),
+        ).where(MetaAdMetric.date >= start_date))
+        mt = meta_total.first()
 
-        meta_result = await db.execute(meta_stmt)
-        meta_data = meta_result.first()
+        # Per-contractor (top 15 by spend)
+        meta_by_acct = await db.execute(select(
+            MetaAdMetric.account_name,
+            func.sum(MetaAdMetric.spend).label("spend"),
+            func.sum(MetaAdMetric.conversions).label("leads"),
+            func.sum(MetaAdMetric.clicks).label("clicks"),
+            func.sum(MetaAdMetric.impressions).label("impressions"),
+        ).where(MetaAdMetric.date >= start_date)
+        .group_by(MetaAdMetric.account_name)
+        .order_by(func.sum(MetaAdMetric.spend).desc())
+        .limit(15))
 
         context["meta_ads"] = {
-            "spend": float(meta_data[0] or 0),
-            "conversions": float(meta_data[1] or 0),
-            "roas": float(meta_data[2] or 0),
+            "total_spend": float(mt[0] or 0),
+            "total_conversions": float(mt[1] or 0),
+            "avg_roas": float(mt[2] or 0),
+            "total_records": int(mt[3] or 0),
+            "by_contractor": [
+                {"name": r[0] or "Unknown", "spend": round(float(r[1] or 0), 2),
+                 "leads": int(r[2] or 0), "clicks": int(r[3] or 0),
+                 "impressions": int(r[4] or 0)}
+                for r in meta_by_acct.all()
+            ],
         }
+    except Exception:
+        pass
 
-    if user.department.value in [UserDepartment.SALES.value, UserDepartment.ALL.value] or user.role.value == "admin":
+    # ── Google Ads (all-time + per-customer) ──────────────────────────
+    try:
+        from app.models.metrics import GoogleAdMetric
+        gads_total = await db.execute(select(
+            func.sum(GoogleAdMetric.spend),
+            func.sum(GoogleAdMetric.conversions),
+            func.count(GoogleAdMetric.id),
+        ).where(GoogleAdMetric.date >= start_date))
+        gt = gads_total.first()
+        context["google_ads"] = {
+            "total_spend": float(gt[0] or 0),
+            "total_conversions": float(gt[1] or 0),
+            "total_records": int(gt[2] or 0),
+        }
+    except Exception:
+        pass
+
+    # ── HubSpot (all-time) ────────────────────────────────────────────
+    try:
         hubspot_stmt = select(
-            func.sum(HubSpotMetric.contacts_created).label("contacts"),
-            func.sum(HubSpotMetric.deals_created).label("deals_created"),
-            func.sum(HubSpotMetric.revenue_won).label("revenue_won"),
-        ).where(
-            and_(
-                HubSpotMetric.date >= start_date,
-                HubSpotMetric.date <= end_date,
-            )
-        )
-
-        hubspot_result = await db.execute(hubspot_stmt)
-        hubspot_data = hubspot_result.first()
-
+            func.sum(HubSpotMetric.contacts_created),
+            func.sum(HubSpotMetric.deals_created),
+            func.sum(HubSpotMetric.deals_won),
+            func.sum(HubSpotMetric.revenue_won),
+            func.sum(HubSpotMetric.meetings_booked),
+            func.sum(HubSpotMetric.tasks_completed),
+            func.sum(HubSpotMetric.pipeline_value),
+        ).where(HubSpotMetric.date >= start_date)
+        hr = (await db.execute(hubspot_stmt)).first()
         context["hubspot"] = {
-            "contacts_created": int(hubspot_data[0] or 0),
-            "deals_created": int(hubspot_data[1] or 0),
-            "revenue_won": float(hubspot_data[2] or 0),
+            "contacts_created": int(hr[0] or 0),
+            "deals_created": int(hr[1] or 0),
+            "deals_won": int(hr[2] or 0),
+            "revenue_won": float(hr[3] or 0),
+            "meetings_booked": int(hr[4] or 0),
+            "tasks_completed": int(hr[5] or 0),
+            "pipeline_value": float(hr[6] or 0),
         }
+    except Exception:
+        pass
+
+    # ── GA4 web analytics (all-time, by division) ─────────────────────
+    try:
+        from app.models.metrics import GA4Metric
+        ga4_q = await db.execute(select(
+            func.sum(GA4Metric.sessions),
+            func.sum(GA4Metric.total_users),
+            func.avg(GA4Metric.bounce_rate),
+        ).where(and_(
+            GA4Metric.date >= start_date,
+            GA4Metric.channel == "(all)",
+            GA4Metric.source == "(all)",
+            GA4Metric.device == "(all)",
+        )))
+        ga4 = ga4_q.first()
+        context["ga4"] = {
+            "total_sessions": int(ga4[0] or 0),
+            "total_users": int(ga4[1] or 0),
+            "avg_bounce_rate": round(float(ga4[2] or 0), 1),
+        }
+    except Exception:
+        pass
+
+    # ── WooCommerce (all-time) ────────────────────────────────────────
+    try:
+        from app.models.metrics import WCOrder, WCProduct
+        wc_q = await db.execute(select(
+            func.count(WCOrder.id),
+            func.coalesce(func.sum(WCOrder.total), 0),
+            func.coalesce(func.avg(WCOrder.total), 0),
+        ).where(WCOrder.date_created >= start_date))
+        wc = wc_q.first()
+        prod_count = await db.execute(select(func.count()).select_from(WCProduct))
+        context["woocommerce"] = {
+            "total_orders": int(wc[0] or 0),
+            "total_revenue": float(wc[1] or 0),
+            "avg_order_value": round(float(wc[2] or 0), 2),
+            "product_count": prod_count.scalar() or 0,
+        }
+    except Exception:
+        pass
+
+    # ── Google Sheets KPIs (exec:: TCP MAIN) ──────────────────────────
+    try:
+        from app.models.metrics import GoogleSheetMetric
+        sheets_q = await db.execute(
+            select(
+                GoogleSheetMetric.metric_name,
+                func.sum(GoogleSheetMetric.metric_value),
+            ).where(GoogleSheetMetric.sheet_name.like("exec::%"))
+            .group_by(GoogleSheetMetric.metric_name)
+        )
+        sheets_kpis = {r[0]: round(float(r[1] or 0), 2) for r in sheets_q.all()}
+        if sheets_kpis:
+            context["google_sheets_kpis"] = sheets_kpis
+    except Exception:
+        pass
+
+    # ── Active contractors summary ────────────────────────────────────
+    try:
+        from app.models.contractor import Contractor
+        contractors_q = await db.execute(
+            select(Contractor.name, Contractor.meta_account_id, Contractor.meta_account_status)
+            .where(and_(Contractor.active == True, Contractor.status == "active"))
+            .order_by(Contractor.name)
+        )
+        context["active_contractors"] = [
+            {"name": r[0], "meta_id": r[1], "ad_status": r[2]}
+            for r in contractors_q.all()
+        ]
+    except Exception:
+        pass
 
     return context
 
