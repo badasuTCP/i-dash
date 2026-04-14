@@ -34,11 +34,21 @@ const CPWebAnalytics = () => {
           onSelect={handlePropertySelect}
         />
       }
-      pageInsights={[
-        'Select individual CP properties from the dropdown to see per-site analytics',
-        'Traffic source mix and device breakdown update automatically with the date range',
-        'Connect GA4 properties to see live session, bounce rate, and engagement data',
-      ]}
+      pageInsights={(() => {
+        const sc = ga4.scorecards || [];
+        const visits = sc[0]?.value || 0;
+        const users = sc[1]?.value || 0;
+        const bounce = sc[2]?.value || 0;
+        if (!ga4.hasLiveData || visits === 0) return [
+          'Run the GA4 pipeline to see live CP web analytics.',
+          'Use the dropdown to select individual properties for per-site detail.',
+        ];
+        return [
+          `${visits.toLocaleString()} total visits across CP properties.`,
+          users > 0 ? `${users.toLocaleString()} returning visitors · ${bounce}% bounce rate.` : null,
+          selectedPropertyName !== 'All Properties' ? `Viewing: ${selectedPropertyName}` : `Viewing all ${ga4.websiteBreakdown?.length || 0} CP properties combined.`,
+        ].filter(Boolean);
+      })()}
       scorecards={ga4.scorecards}
       visitorTrend={ga4.visitorTrend}
       websiteBreakdown={ga4.websiteBreakdown || []}

@@ -56,11 +56,18 @@ const DCKNWebAnalytics = () => {
           onSelect={handlePropertySelect}
         />
       }
-      pageInsights={[
-        'Use the Property Switcher above to view analytics for individual DCKN contractor sites',
-        'Enable or disable properties from Admin Controls → GA4 Properties',
-        'New properties discovered by the pipeline appear as Pending in Contractor Management',
-      ]}
+      pageInsights={(() => {
+        const sc = ga4.scorecards || [];
+        const visits = sc[0]?.value || 0;
+        if (!ga4.hasLiveData || visits === 0) return [
+          'Run the GA4 pipeline to see live DCKN lead generator web traffic.',
+          'Use the Property Switcher above to view individual contractor sites.',
+        ];
+        return [
+          `${visits.toLocaleString()} total visits across DCKN lead generator properties.`,
+          ga4.trafficSources?.length > 0 ? `Top traffic source: ${ga4.trafficSources[0]?.source_medium || ga4.trafficSources[0]?.name || 'direct'}.` : null,
+        ].filter(Boolean);
+      })()}
       scorecards={ga4.scorecards}
       visitorTrend={ga4.visitorTrend}
       deviceData={ga4.deviceData}

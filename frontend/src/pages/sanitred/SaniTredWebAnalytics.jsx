@@ -62,11 +62,20 @@ const SaniTredWebAnalytics = () => {
       loading={ga4.loading}
       apiReachable={ga4.apiReachable}
       propertyId={ga4.propertyId}
-      pageInsights={[
-        'Organic search is top acquisition channel — 37% of users, lowest bounce rate of paid sources',
-        'Email newsletter highest engagement: 32% bounce, 4:12 avg session — high-intent audience',
-        'Dec 2024 traffic peak (6.2K visits) aligns with revenue peak — seasonal SEO opportunity',
-      ]}
+      pageInsights={(() => {
+        const sc = ga4.scorecards || [];
+        const visits = sc[0]?.value || 0;
+        const bounce = sc[2]?.value || 0;
+        if (!ga4.hasLiveData || visits === 0) return [
+          'Run the GA4 pipeline to see live Sani-Tred web analytics.',
+          'Traffic sources, device data, and session metrics will populate automatically.',
+        ];
+        return [
+          `${visits.toLocaleString()} total visits to Sani-Tred properties · ${bounce}% bounce rate.`,
+          ga4.trafficSources?.length > 0 ? `Top traffic source: ${ga4.trafficSources[0]?.source_medium || 'organic search'}.` : null,
+          ga4.deviceData?.length > 0 ? `Top device: ${ga4.deviceData[0]?.name || ga4.deviceData[0]?.device || 'desktop'}.` : null,
+        ].filter(Boolean);
+      })()}
       scorecards={ga4.scorecards}
       visitorTrend={ga4.visitorTrend}
       websiteBreakdown={[

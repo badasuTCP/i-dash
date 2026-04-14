@@ -53,11 +53,21 @@ const IBOSSWebAnalytics = () => {
           onSelect={handlePropertySelect}
         />
       }
-      pageInsights={[
-        'Connect the I-BOS GA4 properties to see live per-contractor web traffic',
-        'Traffic source mix (organic vs paid) will populate once pipeline syncs',
-        'Contractor table and pie chart reflect the selected date range automatically',
-      ]}
+      pageInsights={(() => {
+        const sc = ga4.scorecards || [];
+        const visits = sc[0]?.value || 0;
+        const users = sc[1]?.value || 0;
+        const bounce = sc[2]?.value || 0;
+        if (!ga4.hasLiveData || visits === 0) return [
+          'Run the GA4 pipeline to populate live per-contractor web traffic.',
+          'Traffic source mix and contractor breakdown will appear once data syncs.',
+        ];
+        return [
+          `${visits.toLocaleString()} total visits across all I-BOS contractor sites.`,
+          users > 0 ? `${users.toLocaleString()} unique users · ${bounce}% bounce rate.` : null,
+          ga4.trafficSources?.length > 0 ? `Top source: ${ga4.trafficSources[0]?.source_medium || ga4.trafficSources[0]?.name || 'organic'}.` : null,
+        ].filter(Boolean);
+      })()}
       scorecards={ga4.scorecards}
       visitorTrend={ga4.visitorTrend}
       websiteBreakdown={websiteBreakdown}
