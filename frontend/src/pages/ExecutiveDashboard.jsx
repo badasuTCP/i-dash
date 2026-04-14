@@ -544,7 +544,7 @@ const ExecutiveSummary = () => {
                     { label: 'Tasks Completed',   value: hubspot?.scorecards?.tasks_completed || hubspot?.scorecards?.tasksCompleted || 0 },
                   ].map((kpi, idx) => (
                     <div key={idx} className={`p-3 rounded-lg ${isDark ? 'bg-slate-800/40' : 'bg-slate-50'}`}>
-                      <p className={`text-xs uppercase tracking-wide mb-1 ${textSec}`}>{kpi.label}</p>
+                      <p className={`text-xs uppercase tracking-wide mb-1 ${textSecondary}`}>{kpi.label}</p>
                       <p className={`text-lg font-bold ${textPrimary}`}>
                         {kpi.fmt === 'currency' ? fmtCurrency(kpi.value) : fmtNumber(kpi.value)}
                       </p>
