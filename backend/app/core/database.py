@@ -219,22 +219,52 @@ async def _reconcile_ga4_property_enabled(conn) -> None:
                AND (enabled IS DISTINCT FROM TRUE OR status IS DISTINCT FROM 'active')
         """))
 
-        # 2. Division-level catch-all: if there are ANY active contractors
-        #    in the I-BOS division, enable ALL I-BOS GA4 properties.
-        #    This handles the slug mismatch where the GA4 discovery creates
-        #    contractor_ids like 'columbus-concrete-coatings' but the seed
-        #    contractor table has 'columbus'. The user approved 12
-        #    I-BOS contractors so they want ALL I-BOS properties active.
+        # 2. Fuzzy name match: link I-BOS GA4 properties to active
+        #    contractors by checking if the contractor's name appears inside
+        #    the property's display_name (case-insensitive). This bridges the
+        #    slug mismatch (contractors.id='columbus' but GA4 contractor_id=
+        #    'columbus-concrete-coatings').
+        #    Once linked, the property inherits the contractor's active state.
+        await conn.execute(text("""
+            UPDATE ga4_properties p
+               SET contractor_id = sub.cid,
+                   enabled = TRUE,
+                   status = 'active',
+                   updated_at = NOW()
+              FROM (
+                  SELECT DISTINCT ON (p2.property_id)
+                         p2.property_id AS pid,
+                         c.id           AS cid
+                    FROM ga4_properties p2
+                    JOIN contractors c
+                      ON c.active = TRUE
+                     AND c.status = 'active'
+                     AND c.division IN ('i-bos', 'ibos')
+                     AND (
+                         LOWER(p2.display_name) LIKE '%' || LOWER(c.name) || '%'
+                         OR LOWER(c.name) LIKE '%' || LOWER(
+                             REPLACE(REPLACE(REPLACE(p2.display_name, '[GA4] ', ''), ' - GA4', ''), '.com', '')
+                         ) || '%'
+                     )
+                   WHERE p2.division = 'ibos'
+                   ORDER BY p2.property_id, LENGTH(c.name) DESC
+              ) sub
+             WHERE p.property_id = sub.pid
+               AND (p.contractor_id IS DISTINCT FROM sub.cid
+                    OR p.enabled IS DISTINCT FROM TRUE)
+        """))
+
+        # 2b. Any I-BOS property that did NOT match an active contractor
+        #     stays disabled so the dropdown only shows relevant sites.
         await conn.execute(text("""
             UPDATE ga4_properties
-               SET enabled = TRUE, status = 'active', updated_at = NOW()
+               SET enabled = FALSE, status = 'inactive', updated_at = NOW()
              WHERE division = 'ibos'
-               AND (enabled IS DISTINCT FROM TRUE OR status IS DISTINCT FROM 'active')
-               AND EXISTS (
-                   SELECT 1 FROM contractors
+               AND contractor_id NOT IN (
+                   SELECT id FROM contractors
                     WHERE active = TRUE AND status = 'active'
-                      AND division IN ('i-bos', 'ibos')
                )
+               AND (enabled IS DISTINCT FROM FALSE OR status IS DISTINCT FROM 'inactive')
         """))
 
         # 3. CP + Sani-Tred properties: always enabled (no contractor gating).
