@@ -2363,6 +2363,8 @@ async def get_contractor_breakdown(
             c["revenue"] = round(c["leads"] * 2500, 2)
             c["revenue_source"] = "estimate"
 
+    total_revenue = sum(c.get("revenue", 0) for c in contractors)
+
     return {
         "period": f"{start_date} to {end_date}",
         "hasLiveData": len(contractors) > 0,
@@ -2370,6 +2372,7 @@ async def get_contractor_breakdown(
         "total_users": total_users,
         "total_spend": round(total_spend, 2),
         "total_leads": total_leads,
+        "total_revenue": round(total_revenue, 2),
         "contractors": contractors,
     }
 
@@ -3086,4 +3089,127 @@ async def get_wc_store(
         "ordersByStatus": orders_by_status,
         "paymentMethods": payment_methods,
         "regions": regions,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# QB Contractor Revenue — aggregated for Executive Summary + I-BOS Overview
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get(
+    "/contractor-revenue",
+    summary="QB contractor revenue — top performers, totals, spend vs revenue",
+)
+async def get_contractor_revenue(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+) -> dict:
+    """Aggregated QuickBooks contractor revenue for executive-level views."""
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    # QB revenue by contractor
+    qb_by_contractor = []
+    total_qb_revenue = 0.0
+    try:
+        qb_q = await db.execute(
+            select(
+                GoogleSheetMetric.metric_name,
+                func.sum(GoogleSheetMetric.metric_value).label("revenue"),
+            ).where(and_(
+                GoogleSheetMetric.sheet_name.like("qb_revenue::%"),
+                GoogleSheetMetric.date >= start_date,
+                GoogleSheetMetric.date <= end_date,
+            )).group_by(GoogleSheetMetric.metric_name)
+            .order_by(func.sum(GoogleSheetMetric.metric_value).desc())
+        )
+        for row in qb_q.all():
+            rev = float(row[1] or 0)
+            if rev > 0:
+                qb_by_contractor.append({
+                    "name": row[0].strip(),
+                    "revenue": round(rev, 2),
+                })
+                total_qb_revenue += rev
+    except Exception as exc:
+        logger.warning("QB contractor revenue query failed: %s", exc)
+
+    # QB monthly trend (total across all contractors)
+    qb_monthly = []
+    try:
+        from sqlalchemy import extract
+        qb_month_q = await db.execute(
+            select(
+                extract("year", GoogleSheetMetric.date).label("yr"),
+                extract("month", GoogleSheetMetric.date).label("mn"),
+                func.sum(GoogleSheetMetric.metric_value).label("revenue"),
+            ).where(and_(
+                GoogleSheetMetric.sheet_name.like("qb_revenue::%"),
+                GoogleSheetMetric.date >= start_date,
+                GoogleSheetMetric.date <= end_date,
+            )).group_by(
+                extract("year", GoogleSheetMetric.date),
+                extract("month", GoogleSheetMetric.date),
+            ).order_by(
+                extract("year", GoogleSheetMetric.date),
+                extract("month", GoogleSheetMetric.date),
+            )
+        )
+        import calendar
+        for row in qb_month_q.all():
+            if row.yr and row.mn:
+                qb_monthly.append({
+                    "month": f"{calendar.month_abbr[int(row.mn)]} {int(row.yr)}",
+                    "revenue": round(float(row.revenue or 0), 2),
+                })
+    except Exception as exc:
+        logger.warning("QB monthly revenue query failed: %s", exc)
+
+    # Ad spend by contractor (for spend vs revenue comparison)
+    ad_spend_by_contractor = {}
+    try:
+        meta_spend_q = await db.execute(
+            select(
+                MetaAdMetric.account_name,
+                func.sum(MetaAdMetric.spend).label("spend"),
+            ).where(and_(
+                MetaAdMetric.date >= start_date,
+                MetaAdMetric.date <= end_date,
+                MetaAdMetric.division == "ibos",
+            )).group_by(MetaAdMetric.account_name)
+        )
+        for row in meta_spend_q.all():
+            name = (row[0] or "").replace("[META] ", "").strip().lower()
+            ad_spend_by_contractor[name] = float(row[1] or 0)
+    except Exception:
+        pass
+
+    # Merge spend into contractor list
+    for c in qb_by_contractor:
+        c_lower = c["name"].lower()
+        matched_spend = 0.0
+        for spend_name, spend_val in ad_spend_by_contractor.items():
+            if c_lower in spend_name or spend_name in c_lower:
+                matched_spend = spend_val
+                break
+            c_words = c_lower.split()[:2]
+            s_words = spend_name.split()[:2]
+            if len(c_words) >= 2 and c_words == s_words:
+                matched_spend = spend_val
+                break
+        c["ad_spend"] = round(matched_spend, 2)
+        c["roi"] = round(c["revenue"] / max(matched_spend, 1), 1) if matched_spend > 0 else None
+
+    # Pct of total
+    for c in qb_by_contractor:
+        c["pct_of_total"] = round((c["revenue"] / max(total_qb_revenue, 1)) * 100, 1)
+
+    return {
+        "period": f"{start_date} to {end_date}",
+        "hasData": len(qb_by_contractor) > 0,
+        "totalRevenue": round(total_qb_revenue, 2),
+        "contractorCount": len(qb_by_contractor),
+        "contractors": qb_by_contractor[:20],
+        "monthly": qb_monthly,
     }

@@ -109,6 +109,10 @@ export const dashboardAPI = {
     apiClient.get('/dashboard/woocommerce/store', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
     }),
+  getContractorRevenue: (startDate, endDate) =>
+    apiClient.get('/dashboard/contractor-revenue', {
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
+    }),
   getCustomMetric: (metric, startDate, endDate, granularity = 'daily') =>
     apiClient.get('/dashboard/custom', {
       params: { metric, date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), granularity },

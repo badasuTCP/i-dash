@@ -82,6 +82,7 @@ const ExecutiveSummary = () => {
   const [mktByBrand, setMktByBrand]         = useState({ cp: null, sanitred: null, ibos: null });
   const [wcStore, setWcStore]               = useState(null);
   const [hubspot, setHubspot]               = useState(null);
+  const [contractorRev, setContractorRev]   = useState(null);
   const [loading, setLoading]               = useState(true);
   const [error, setError]                   = useState(null);
   const [lastUpdated, setLastUpdated]       = useState(null);
@@ -96,7 +97,7 @@ const ExecutiveSummary = () => {
       try {
         // Core executive summary + per-brand rollups + per-brand live metrics.
         // All fired in parallel so the page isn't waterfalling on 10 requests.
-        const [summaryRes, brandsRes, webRes, mktRes, wcRes, hubRes] = await Promise.all([
+        const [summaryRes, brandsRes, webRes, mktRes, wcRes, hubRes, contRevRes] = await Promise.all([
           dashboardAPI.getExecutiveSummary(start, end).catch(() => null),
           Promise.all(['cp', 'sanitred', 'ibos'].map((b) =>
             dashboardAPI.getBrandSummary(b, start, end).catch(() => null),
@@ -109,12 +110,14 @@ const ExecutiveSummary = () => {
           )),
           dashboardAPI.getWCStore(start, end).catch(() => null),
           dashboardAPI.getHubspot(start, end).catch(() => null),
+          dashboardAPI.getContractorRevenue(start, end).catch(() => null),
         ]);
         if (cancelled) return;
 
         setSummary(summaryRes?.data || null);
         setWcStore(wcRes?.data || null);
         setHubspot(hubRes?.data || null);
+        setContractorRev(contRevRes?.data || null);
         setBrandSummaries({
           cp:       brandsRes[0]?.data || null,
           sanitred: brandsRes[1]?.data || null,
@@ -258,14 +261,20 @@ const ExecutiveSummary = () => {
     if (wcRev > 0) {
       bullets.push(`Sani-Tred Store: ${fmtCurrency(wcRev)} revenue from ${fmtNumber(wcOrders)} orders (WooCommerce live).`);
     }
+    const qbRev = contractorRev?.totalRevenue || 0;
+    const qbCount = contractorRev?.contractorCount || 0;
+    if (qbRev > 0) {
+      const topName = contractorRev?.contractors?.[0]?.name || 'Unknown';
+      bullets.push(`Contractor revenue (QB): ${fmtCurrency(qbRev)} from ${qbCount} contractors · Top: ${topName}.`);
+    }
     const topRev = Math.max(divisionRevenue.cp, divisionRevenue.sanitred, divisionRevenue.ibos);
     const topName = topRev === divisionRevenue.cp ? 'CP' : topRev === divisionRevenue.sanitred ? 'Sani-Tred' : 'I-BOS';
     bullets.push(`${topName} is top-revenue division at ${fmtCurrency(topRev)} cumulative.`);
     if (!hasExecData) {
       bullets.push('TCP MAIN sheet pending pivot-detection — quarterly table showing curated snapshot.');
     }
-    return bullets.slice(0, 4);
-  }, [mktByBrand, webByBrand, divisionRevenue, hasExecData, wcStore]);
+    return bullets.slice(0, 5);
+  }, [mktByBrand, webByBrand, divisionRevenue, hasExecData, wcStore, contractorRev]);
 
   // ── Render ─────────────────────────────────────────────────────────────
   if (loading) {
@@ -336,6 +345,23 @@ const ExecutiveSummary = () => {
           <ScoreCard label="HubSpot Deals Won"
             value={hubspot?.scorecards?.deals_won || hubspot?.scorecards?.dealsWon || 0}
             color="amber" format="number" />
+        </motion.div>
+
+        {/* ── ROW 3 SCORECARDS (revenue + future pipelines) ────────────── */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.115 }}
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <ScoreCard label="Contractor Revenue (QB)"
+            value={contractorRev?.totalRevenue || 0}
+            color="amber" format="currency" />
+          <ScoreCard label="Active Contractors"
+            value={contractorRev?.contractorCount || 0}
+            color="blue" format="number" />
+          <ScoreCard label="Avg Revenue / Contractor"
+            value={contractorRev?.contractorCount > 0 ? (contractorRev.totalRevenue / contractorRev.contractorCount) : 0}
+            color="emerald" format="currency" />
+          <ScoreCard label="CP Shopify Revenue"
+            value={0}
+            color="violet" format="currency" />
         </motion.div>
 
         {/* ── LIVE SUMMARY (full width) ────────────────────────────────── */}
@@ -554,6 +580,69 @@ const ExecutiveSummary = () => {
               </motion.div>
             )}
           </div>
+        )}
+
+        {/* ── ROW 4: Top Contractors by Revenue + Spend vs Revenue ────── */}
+        {contractorRev?.contractors?.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.49 }}
+              className={`rounded-xl p-6 ${cardBg}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-xl">💰</span>
+                <h3 className={`text-lg font-semibold ${textPrimary}`}>Top Contractors by Revenue (QB)</h3>
+              </div>
+              <ResponsiveContainer width="100%" height={Math.max(280, Math.min(contractorRev.contractors.length, 10) * 35)}>
+                <BarChart data={contractorRev.contractors.slice(0, 10)} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
+                  <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
+                  <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 10 }} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtCurrency(v)} />
+                  <Bar dataKey="revenue" name="Revenue (QB)" fill="#F59E0B" radius={[0,4,4,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+              className={`rounded-xl p-6 ${cardBg}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-xl">📊</span>
+                <h3 className={`text-lg font-semibold ${textPrimary}`}>Ad Spend vs Revenue by Contractor</h3>
+              </div>
+              <ResponsiveContainer width="100%" height={Math.max(280, Math.min(contractorRev.contractors.filter(c => c.ad_spend > 0).length, 10) * 35)}>
+                <BarChart
+                  data={contractorRev.contractors.filter(c => c.ad_spend > 0 || c.revenue > 0).slice(0, 10)}
+                  layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
+                  <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
+                  <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 10 }} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtCurrency(v)} />
+                  <Legend />
+                  <Bar dataKey="revenue"  name="Revenue (QB)" fill="#F59E0B" radius={[0,4,4,0]} />
+                  <Bar dataKey="ad_spend" name="Ad Spend"     fill="#8B5CF6" radius={[0,4,4,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </motion.div>
+          </div>
+        )}
+
+        {/* ── QB Monthly Contractor Revenue Trend ─────────────────────── */}
+        {contractorRev?.monthly?.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.51 }}
+            className={`rounded-xl p-6 mb-8 ${cardBg}`}>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-xl">📈</span>
+              <h3 className={`text-lg font-semibold ${textPrimary}`}>Contractor Revenue Trend (QuickBooks)</h3>
+            </div>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={contractorRev.monthly}>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
+                <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={(v) => fmtCurrency(v)} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtCurrency(v)} />
+                <Bar dataKey="revenue" name="Revenue" fill="#F59E0B" radius={[4,4,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </motion.div>
         )}
 
         {/* ── Executive Performance Summary ────────────────────────────── */}
