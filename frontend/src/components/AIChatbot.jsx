@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, X, Send, Loader, WifiOff } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { aiAPI } from '../services/api';
@@ -142,7 +143,27 @@ const AIChatbot = () => {
                     {msg.error && (
                       <WifiOff size={12} className="inline mr-1.5 opacity-60" />
                     )}
-                    {msg.content}
+                    {msg.role === 'user' ? (
+                      msg.content
+                    ) : (
+                      <ReactMarkdown
+                        components={{
+                          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                          ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
+                          li: ({ children }) => <li>{children}</li>,
+                          h1: ({ children }) => <h1 className="text-base font-bold mb-1">{children}</h1>,
+                          h2: ({ children }) => <h2 className="text-sm font-bold mb-1">{children}</h2>,
+                          h3: ({ children }) => <h3 className="text-sm font-semibold mb-1">{children}</h3>,
+                          code: ({ children }) => (
+                            <code className="px-1 py-0.5 rounded bg-black/10 text-xs font-mono">{children}</code>
+                          ),
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
+                    )}
                   </div>
                 </div>
               ))}
