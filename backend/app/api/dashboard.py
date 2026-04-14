@@ -2788,10 +2788,23 @@ async def get_wc_store(
 
     start_date, end_date = _get_date_range(date_from, date_to)
 
-    # ── Check if pipeline has ever run ────────────────────────────────
+    # ── Check if pipeline has ever run OR if records exist ──────────
     pipeline_ran = await _has_pipeline_run(
         db, "woocommerce", "woocommerce_pipeline",
     )
+    if not pipeline_ran:
+        # Fallback: check if wc_orders or wc_products have any rows at all
+        try:
+            wc_count = await db.execute(
+                select(func.count()).select_from(WCOrder)
+            )
+            prod_count = await db.execute(
+                select(func.count()).select_from(WCProduct)
+            )
+            if (wc_count.scalar() or 0) > 0 or (prod_count.scalar() or 0) > 0:
+                pipeline_ran = True
+        except Exception:
+            pass
     if not pipeline_ran:
         return {
             "period": f"{start_date} to {end_date}",
@@ -2805,6 +2818,9 @@ async def get_wc_store(
         }
 
     # ── Scorecards ────────────────────────────────────────────────────
+    # Try date-filtered first; fall back to all orders if none match
+    # (handles cases where date_created is NULL or pipeline only fetched
+    # the default 30-day window which doesn't overlap the date picker).
     totals = await db.execute(
         select(
             func.count(WCOrder.id).label("total_orders"),
@@ -2822,6 +2838,30 @@ async def get_wc_store(
     total_orders = int(t.total_orders or 0)
     total_revenue = float(t.total_revenue or 0)
     avg_order = float(t.avg_order_value or 0)
+
+    # If date-filtered returns 0 orders, show all orders as a fallback
+    # so the page isn't empty after a successful pipeline run.
+    if total_orders == 0:
+        totals_all = await db.execute(
+            select(
+                func.count(WCOrder.id).label("total_orders"),
+                func.coalesce(func.sum(WCOrder.total), 0).label("total_revenue"),
+                func.coalesce(func.avg(WCOrder.total), 0).label("avg_order_value"),
+                func.coalesce(func.sum(WCOrder.discount), 0).label("total_discount"),
+                func.coalesce(func.sum(WCOrder.shipping), 0).label("total_shipping"),
+                func.coalesce(func.sum(WCOrder.tax), 0).label("total_tax"),
+            )
+        )
+        ta = totals_all.first()
+        if int(ta.total_orders or 0) > 0:
+            t = ta
+            total_orders = int(t.total_orders or 0)
+            total_revenue = float(t.total_revenue or 0)
+            avg_order = float(t.avg_order_value or 0)
+            logger.info(
+                "WC store: date-filtered returned 0, showing all %d orders",
+                total_orders,
+            )
 
     # Completed vs refunded for refund rate
     completed_q = await db.execute(
