@@ -2251,9 +2251,14 @@ async def get_contractor_breakdown(
     total_spend = sum(c["spend"] for c in contractors)
     total_leads = sum(c["leads"] for c in contractors)
 
-    # Google Ads spend folded into totals (not split per contractor yet —
-    # I-BOS has only 2 Google Ads CIDs so proportional share is the best
-    # we can do until we map Google customer IDs → contractor slugs).
+    # Google Ads spend: map CIDs to specific contractors by name match
+    # against brand_assets.account_name, then attribute directly.
+    # 6754610688 → Tailored Concrete Coatings
+    # 2957400868 → SLG Contracting Inc.
+    GADS_CONTRACTOR_MAP = {
+        "6754610688": "tailored",   # Tailored Concrete Coatings
+        "2957400868": "slg",        # SLG Contracting Inc.
+    }
     try:
         from app.models.brand_asset import BrandAsset
         ba_g = await db.execute(
@@ -2263,32 +2268,50 @@ async def get_contractor_breakdown(
         )
         ibos_gads = [r[0] for r in ba_g.fetchall()]
         if ibos_gads:
-            gads_q = await db.execute(
+            # Fetch per-CID spend
+            gads_per_cid = await db.execute(
                 select(
+                    GoogleAdMetric.customer_id,
                     func.coalesce(func.sum(GoogleAdMetric.spend), 0),
                     func.coalesce(func.sum(GoogleAdMetric.conversions), 0),
                 ).where(and_(
                     GoogleAdMetric.date >= start_date,
                     GoogleAdMetric.date <= end_date,
                     GoogleAdMetric.customer_id.in_(ibos_gads),
-                ))
+                )).group_by(GoogleAdMetric.customer_id)
             )
-            g = gads_q.fetchone()
-            gads_spend = float(g[0] or 0)
-            gads_leads = int(g[1] or 0)
-            total_spend += gads_spend
-            total_leads += gads_leads
-            # Distribute Google Ads across contractors with positive visits
-            visits_total = sum(c["visits"] for c in contractors) or 1
-            for c in contractors:
-                if c["visits"] <= 0:
-                    continue
-                share = c["visits"] / visits_total
-                c["spend"] = round(c["spend"] + gads_spend * share, 2)
-                c["leads"] = int(round(c["leads"] + gads_leads * share))
-                c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
-                if "G-ADS" not in c["sources"]:
-                    c["sources"].append("G-ADS")
+            for cid, gspend, gleads in gads_per_cid.all():
+                gspend = float(gspend or 0)
+                gleads = int(gleads or 0)
+                total_spend += gspend
+                total_leads += gleads
+
+                # Try to find the matching contractor by slug prefix
+                target_slug = GADS_CONTRACTOR_MAP.get(cid)
+                matched = False
+                if target_slug:
+                    for c in contractors:
+                        cid_lower = (c["id"] or "").lower()
+                        name_lower = (c["name"] or "").lower()
+                        if target_slug in cid_lower or target_slug in name_lower:
+                            c["spend"] = round(c["spend"] + gspend, 2)
+                            c["leads"] = c["leads"] + gleads
+                            c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
+                            if "G-ADS" not in c["sources"]:
+                                c["sources"].append("G-ADS")
+                            matched = True
+                            break
+
+                # Fallback: if no direct map, distribute proportionally
+                if not matched:
+                    visits_total = sum(c2["visits"] for c2 in contractors) or 1
+                    for c in contractors:
+                        if c["visits"] <= 0:
+                            continue
+                        share = c["visits"] / visits_total
+                        c["spend"] = round(c["spend"] + gspend * share, 2)
+                        c["leads"] = int(round(c["leads"] + gleads * share))
+                        c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
     except Exception as e:
         logger.warning("Contractor breakdown Google Ads fold-in failed: %s", e)
 

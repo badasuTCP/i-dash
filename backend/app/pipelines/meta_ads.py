@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 # Any ad account under META_BUSINESS_ID is I-BOS by default. The CP training
 # account is the sole explicit CP override. Approved here = active immediately.
 META_PORTFOLIO_BUSINESS_ID = "1785037011813074"
+# CP training account — must NEVER appear as an I-BOS contractor.
+# Excluded from reconcile_meta_contractors and from I-BOS brand queries.
 META_CP_ACCOUNT_IDS = {"144305066", "act_144305066"}
 META_SOURCE_PREFIX = "[META]"
 

@@ -207,6 +207,15 @@ async def _reconcile_ga4_property_enabled(conn) -> None:
     Safe to run every boot: every UPDATE is a no-op once the values agree.
     """
     try:
+        # 0. Purge act_144305066 (CP Internal Training) from I-BOS contractors.
+        #    It sometimes gets auto-discovered and inserted because it sits
+        #    inside the same Meta Business portfolio. It is NOT a contractor.
+        await conn.execute(text("""
+            DELETE FROM contractors
+             WHERE meta_account_id = 'act_144305066'
+               AND division IN ('i-bos', 'ibos')
+        """))
+
         # 1. Exact contractor_id match — any GA4 property whose contractor
         #    is active/approved must be enabled.
         await conn.execute(text("""

@@ -158,8 +158,8 @@ async def _seed_ibos_brand_assets() -> None:
                 # act_144305066 intentionally NOT mapped to ibos — it is the
                 # CP Internal Training account. Mapping it to ibos would
                 # double-count CP spend inside the I-BOS portfolio.
-                ("google_ads", "6754610688", "Tailored Concrete (Google)", "ibos"),
-                ("google_ads", "2957400868", "SLG Concrete (Google)", "ibos"),
+                ("google_ads", "6754610688", "Tailored Concrete Coatings (Google Ads)", "ibos"),
+                ("google_ads", "2957400868", "SLG Contracting Inc. (Google Ads)", "ibos"),
             ]
             for platform, acct_id, name, brand in ALL_BRAND_ASSETS:
                 session.add(BrandAsset(
