@@ -21,6 +21,7 @@ from app.pipelines.google_sheets import GoogleSheetsPipeline
 from app.pipelines.hubspot import HubSpotPipeline
 from app.pipelines.meta_ads import MetaAdsPipeline, reconcile_meta_contractors
 from app.pipelines.snapshot import SnapshotPipeline
+from app.pipelines.woocommerce import WooCommercePipeline
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class PipelineService:
             ("google_ads", lambda: GoogleAdsPipeline()),
             ("google_analytics", lambda: GoogleAnalyticsPipeline()),
             ("google_sheets", lambda: GoogleSheetsPipeline()),
+            ("woocommerce", lambda: WooCommercePipeline()),
             ("snapshot", lambda: SnapshotPipeline()),
         ]
 

@@ -17,6 +17,8 @@ from app.models.metrics import (
     HubSpotDeal,
     HubSpotMetric,
     MetaAdMetric,
+    WCOrder,
+    WCProduct,
 )
 from app.models.pipeline_log import PipelineLog, PipelineStatus
 from app.models.user import User, UserDepartment, UserRole
@@ -37,6 +39,8 @@ __all__ = [
     "GoogleSheetMetric",
     "GA4Metric",
     "DashboardSnapshot",
+    "WCOrder",
+    "WCProduct",
     "PipelineLog",
     "PipelineStatus",
 ]

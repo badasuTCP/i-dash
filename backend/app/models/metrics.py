@@ -355,3 +355,65 @@ class DashboardSnapshot(Base):
             f"<DashboardSnapshot(date={self.date}, "
             f"revenue={self.total_revenue}, roas={self.blended_roas})>"
         )
+
+
+class WCOrder(Base):
+    """
+    WooCommerce order from Sani-Tred retail store.
+
+    One row per order. Line-item detail is stored in WCOrderItem.
+    """
+
+    __tablename__ = "wc_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    order_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed")
+    total: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    subtotal: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    tax: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    shipping: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    discount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    payment_method: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    customer_email: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    billing_state: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    billing_country: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    items_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    date_created: Mapped[Optional[datetime]] = mapped_column(Date, index=True, nullable=True)
+    date_completed: Mapped[Optional[datetime]] = mapped_column(Date, nullable=True)
+    division: Mapped[str] = mapped_column(String(32), nullable=False, default="sanitred")
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class WCProduct(Base):
+    """
+    WooCommerce product snapshot from Sani-Tred retail store.
+
+    Full product catalog refreshed on each pipeline run.
+    """
+
+    __tablename__ = "wc_products"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    product_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    sku: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    regular_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sale_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    stock_quantity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    stock_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    total_sales: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    categories: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    division: Mapped[str] = mapped_column(String(32), nullable=False, default="sanitred")
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )

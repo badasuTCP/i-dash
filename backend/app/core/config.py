@@ -199,6 +199,20 @@ class Settings(BaseSettings):
         description="Google Sheets ID for Sheet B (retail/contractor heuristic pipeline)",
     )
 
+    # WooCommerce (Sani-Tred retail)
+    WC_STORE_URL: str = Field(
+        default="",
+        description="WooCommerce store URL (e.g. https://sanitred.com)",
+    )
+    WC_CONSUMER_KEY: str = Field(
+        default="",
+        description="WooCommerce REST API consumer key (read-only)",
+    )
+    WC_CONSUMER_SECRET: str = Field(
+        default="",
+        description="WooCommerce REST API consumer secret",
+    )
+
     # Groq API configuration
     GROQ_API_KEY: str = Field(
         default="",
