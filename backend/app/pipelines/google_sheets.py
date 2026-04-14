@@ -359,21 +359,55 @@ class GoogleSheetsPipeline(BasePipeline):
     # ──────────────────────────────────────────────────────────────────────────
 
     _QUARTER_RE = re.compile(r"^\s*Q([1-4])\s+(\d{4})\s*$", re.IGNORECASE)
+    # Matches: "Jul 24", "Aug 24", "Jan 25", "Mar 2026", "December 2025"
+    _MONTH_RE = re.compile(
+        r"^\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
+        r"\s+(\d{2,4})\s*$",
+        re.IGNORECASE,
+    )
+    _MONTH_MAP = {
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    }
 
-    def _parse_quarter_header(self, header: str) -> Optional[datetime]:
-        """If ``header`` is a quarter label like 'Q1 2025', return its start date."""
+    def _parse_period_header(self, header: str) -> Optional[datetime]:
+        """Parse quarter ('Q1 2025') or month ('Jul 24', 'Mar 2026') column headers."""
         if not header:
             return None
-        m = self._QUARTER_RE.match(str(header).strip())
-        if not m:
-            return None
-        q = int(m.group(1))
-        year = int(m.group(2))
-        month = {1: 1, 2: 4, 3: 7, 4: 10}[q]
-        try:
-            return datetime(year, month, 1).date()
-        except ValueError:
-            return None
+        h = str(header).strip()
+
+        # Try quarter first
+        m = self._QUARTER_RE.match(h)
+        if m:
+            q = int(m.group(1))
+            year = int(m.group(2))
+            month = {1: 1, 2: 4, 3: 7, 4: 10}[q]
+            try:
+                return datetime(year, month, 1).date()
+            except ValueError:
+                return None
+
+        # Try month-year
+        m = self._MONTH_RE.match(h)
+        if m:
+            mon_str = m.group(1).lower()[:3]
+            year_str = m.group(2)
+            month = self._MONTH_MAP.get(mon_str)
+            if not month:
+                return None
+            year = int(year_str)
+            if year < 100:
+                year += 2000  # "24" → 2024
+            try:
+                return datetime(year, month, 1).date()
+            except ValueError:
+                return None
+
+        return None
+
+    def _parse_quarter_header(self, header: str) -> Optional[datetime]:
+        """Alias for backwards compat — delegates to _parse_period_header."""
+        return self._parse_period_header(header)
 
     def _try_pivot_transform(
         self, sheet_name: str, rows: List[Dict[str, Any]]
@@ -400,7 +434,7 @@ class GoogleSheetsPipeline(BasePipeline):
         first_col = headers[0]
         period_cols: List[tuple] = []  # (header, date)
         for h in headers[1:]:
-            dt = self._parse_quarter_header(h)
+            dt = self._parse_period_header(h)
             if dt:
                 period_cols.append((h, dt))
 
@@ -412,14 +446,37 @@ class GoogleSheetsPipeline(BasePipeline):
         if len(period_cols) < max(2, (len(headers) - 1) // 2):
             return None
 
-        # Normalize the sheet_name to 'exec::' so queries can find it cleanly.
+        # Tag the sheet_name based on content type.
         # Strip any prior retail::/contractor:: prefix from the classifier.
         bare = sheet_name.split("::", 1)[1] if "::" in sheet_name else sheet_name
-        tagged = f"exec::{bare}"
+        bare_lower = bare.lower()
+        # QB contractor revenue sheets get a special prefix for easy querying.
+        if "qb" in bare_lower or "contractor_revenue" in bare_lower or "contractor revenue" in bare_lower:
+            tagged = f"qb_revenue::{bare}"
+        else:
+            tagged = f"exec::{bare}"
+
+        # Identify non-period columns (label columns). If there are multiple
+        # (e.g. "QB Name" + "Active Contractor"), use the LAST one as the
+        # canonical metric_name — that's the user-mapped display name.
+        label_cols = [h for h in headers if self._parse_period_header(h) is None]
+        # Exclude obvious total/summary columns from label candidates
+        label_cols = [h for h in label_cols if not any(
+            kw in h.lower() for kw in ["total", "sum", "grand", "jan 25 - mar"]
+        )]
 
         out: List[GoogleSheetMetric] = []
         for row in rows:
-            metric_label = (row.get(first_col) or "").strip()
+            # Use the last label column as the display name (user-mapped name);
+            # fall back to the first label column (QB original name).
+            metric_label = ""
+            for lc in reversed(label_cols):
+                val = (row.get(lc) or "").strip()
+                if val:
+                    metric_label = val
+                    break
+            if not metric_label:
+                metric_label = (row.get(first_col) or "").strip()
             if not metric_label:
                 continue
             for header, period_date in period_cols:
