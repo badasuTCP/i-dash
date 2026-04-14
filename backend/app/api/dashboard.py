@@ -2789,11 +2789,15 @@ async def get_wc_store(
     start_date, end_date = _get_date_range(date_from, date_to)
 
     # ── Check if pipeline has ever run OR if records exist ──────────
-    pipeline_ran = await _has_pipeline_run(
-        db, "woocommerce", "woocommerce_pipeline",
-    )
+    pipeline_ran = False
+    try:
+        pipeline_ran = await _has_pipeline_run(
+            db, "woocommerce", "woocommerce_pipeline",
+        )
+    except Exception as exc:
+        logger.warning("WC store: pipeline check failed: %s", exc)
+
     if not pipeline_ran:
-        # Fallback: check if wc_orders or wc_products have any rows at all
         try:
             wc_count = await db.execute(
                 select(func.count()).select_from(WCOrder)
@@ -2803,8 +2807,10 @@ async def get_wc_store(
             )
             if (wc_count.scalar() or 0) > 0 or (prod_count.scalar() or 0) > 0:
                 pipeline_ran = True
-        except Exception:
-            pass
+        except Exception as exc:
+            # Tables might not exist yet — that's fine, just means no data
+            logger.warning("WC store: table check failed (tables may not exist): %s", exc)
+
     if not pipeline_ran:
         return {
             "period": f"{start_date} to {end_date}",
@@ -2883,113 +2889,140 @@ async def get_wc_store(
     refund_rate = round((refunded / max(total_orders, 1)) * 100, 1)
 
     # ── Monthly performance ───────────────────────────────────────────
-    from sqlalchemy import case
-    monthly_q = await db.execute(
-        select(
-            func.date_trunc("month", WCOrder.date_created).label("month"),
-            func.count(WCOrder.id).label("orders"),
-            func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
-            func.coalesce(func.avg(WCOrder.total), 0).label("avg_order"),
-            func.sum(case((WCOrder.status == "refunded", 1), else_=0)).label("refunds"),
-        ).where(and_(
-            WCOrder.date_created >= start_date,
-            WCOrder.date_created <= end_date,
-        )).group_by(func.date_trunc("month", WCOrder.date_created))
-        .order_by(func.date_trunc("month", WCOrder.date_created))
-    )
-    monthly = [
-        {
-            "month": row.month.strftime("%b %Y") if row.month else "—",
-            "orders": int(row.orders or 0),
-            "revenue": round(float(row.revenue or 0), 2),
-            "avg_order": round(float(row.avg_order or 0), 2),
-            "refunds": int(row.refunds or 0),
-        }
-        for row in monthly_q.all()
-    ]
+    # Monthly performance — use extract(year/month) instead of date_trunc
+    # for better compatibility with Date columns across SQLAlchemy versions.
+    from sqlalchemy import case, extract
+    monthly = []
+    try:
+        year_col = extract("year", WCOrder.date_created)
+        month_col = extract("month", WCOrder.date_created)
+        monthly_q = await db.execute(
+            select(
+                year_col.label("yr"),
+                month_col.label("mn"),
+                func.count(WCOrder.id).label("orders"),
+                func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
+                func.coalesce(func.avg(WCOrder.total), 0).label("avg_order"),
+                func.sum(case((WCOrder.status == "refunded", 1), else_=0)).label("refunds"),
+            ).where(and_(
+                WCOrder.date_created >= start_date,
+                WCOrder.date_created <= end_date,
+                WCOrder.date_created.isnot(None),
+            )).group_by(year_col, month_col)
+            .order_by(year_col, month_col)
+        )
+        import calendar
+        monthly = [
+            {
+                "month": f"{calendar.month_abbr[int(row.mn)]} {int(row.yr)}" if row.yr and row.mn else "—",
+                "orders": int(row.orders or 0),
+                "revenue": round(float(row.revenue or 0), 2),
+                "avg_order": round(float(row.avg_order or 0), 2),
+                "refunds": int(row.refunds or 0),
+            }
+            for row in monthly_q.all()
+        ]
+    except Exception as exc:
+        logger.warning("WC store monthly query failed: %s", exc)
 
     # ── Product performance (from wc_products snapshot) ───────────────
-    products_q = await db.execute(
-        select(WCProduct)
-        .order_by(WCProduct.total_sales.desc())
-        .limit(20)
-    )
-    products = [
-        {
-            "product_id": p.product_id,
-            "name": p.name,
-            "sku": p.sku or "—",
-            "price": float(p.price or 0),
-            "total_sales": int(p.total_sales or 0),
-            "revenue": round(float(p.price or 0) * int(p.total_sales or 0), 2),
-            "stock_status": p.stock_status or "—",
-            "categories": p.categories or "—",
-        }
-        for p in products_q.scalars().all()
-    ]
+    products = []
+    try:
+        products_q = await db.execute(
+            select(WCProduct)
+            .order_by(WCProduct.total_sales.desc())
+            .limit(20)
+        )
+        products = [
+            {
+                "product_id": p.product_id,
+                "name": p.name,
+                "sku": p.sku or "—",
+                "price": float(p.price or 0),
+                "total_sales": int(p.total_sales or 0),
+                "revenue": round(float(p.price or 0) * int(p.total_sales or 0), 2),
+                "stock_status": p.stock_status or "—",
+                "categories": p.categories or "—",
+            }
+            for p in products_q.scalars().all()
+        ]
+    except Exception as exc:
+        logger.warning("WC store products query failed: %s", exc)
 
     # ── Orders by status ──────────────────────────────────────────────
-    status_q = await db.execute(
-        select(
-            WCOrder.status,
-            func.count(WCOrder.id).label("count"),
-            func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
-        ).where(and_(
-            WCOrder.date_created >= start_date,
-            WCOrder.date_created <= end_date,
-        )).group_by(WCOrder.status)
-        .order_by(func.count(WCOrder.id).desc())
-    )
-    orders_by_status = [
-        {"status": row.status, "count": int(row.count), "revenue": round(float(row.revenue), 2)}
-        for row in status_q.all()
-    ]
+    orders_by_status = []
+    try:
+        status_q = await db.execute(
+            select(
+                WCOrder.status,
+                func.count(WCOrder.id).label("count"),
+                func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
+            ).where(and_(
+                WCOrder.date_created >= start_date,
+                WCOrder.date_created <= end_date,
+            )).group_by(WCOrder.status)
+            .order_by(func.count(WCOrder.id).desc())
+        )
+        orders_by_status = [
+            {"status": row.status, "count": int(row.count), "revenue": round(float(row.revenue), 2)}
+            for row in status_q.all()
+        ]
+    except Exception as exc:
+        logger.warning("WC store orders-by-status query failed: %s", exc)
 
     # ── Payment methods ───────────────────────────────────────────────
-    payment_q = await db.execute(
-        select(
-            WCOrder.payment_method,
-            func.count(WCOrder.id).label("count"),
-            func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
-        ).where(and_(
-            WCOrder.date_created >= start_date,
-            WCOrder.date_created <= end_date,
-            WCOrder.payment_method.isnot(None),
-            WCOrder.payment_method != "",
-        )).group_by(WCOrder.payment_method)
-        .order_by(func.sum(WCOrder.total).desc())
-    )
-    payment_methods = [
-        {"method": row.payment_method or "Unknown", "count": int(row.count), "revenue": round(float(row.revenue), 2)}
-        for row in payment_q.all()
-    ]
+    payment_methods = []
+    try:
+        payment_q = await db.execute(
+            select(
+                WCOrder.payment_method,
+                func.count(WCOrder.id).label("count"),
+                func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
+            ).where(and_(
+                WCOrder.date_created >= start_date,
+                WCOrder.date_created <= end_date,
+                WCOrder.payment_method.isnot(None),
+                WCOrder.payment_method != "",
+            )).group_by(WCOrder.payment_method)
+            .order_by(func.sum(WCOrder.total).desc())
+        )
+        payment_methods = [
+            {"method": row.payment_method or "Unknown", "count": int(row.count), "revenue": round(float(row.revenue), 2)}
+            for row in payment_q.all()
+        ]
+    except Exception as exc:
+        logger.warning("WC store payment methods query failed: %s", exc)
 
     # ── Regional breakdown ────────────────────────────────────────────
-    region_q = await db.execute(
-        select(
-            WCOrder.billing_state,
-            func.count(WCOrder.id).label("orders"),
-            func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
-            func.coalesce(func.avg(WCOrder.total), 0).label("avg_order"),
-        ).where(and_(
-            WCOrder.date_created >= start_date,
-            WCOrder.date_created <= end_date,
-            WCOrder.billing_state.isnot(None),
-            WCOrder.billing_state != "",
-        )).group_by(WCOrder.billing_state)
-        .order_by(func.sum(WCOrder.total).desc())
-        .limit(20)
-    )
-    regions = [
-        {
-            "state": row.billing_state,
-            "orders": int(row.orders),
-            "revenue": round(float(row.revenue), 2),
-            "avg_order": round(float(row.avg_order), 2),
-            "pct_of_total": round((float(row.revenue) / max(total_revenue, 1)) * 100, 1),
-        }
-        for row in region_q.all()
-    ]
+    regions = []
+    try:
+        region_q = await db.execute(
+            select(
+                WCOrder.billing_state,
+                func.count(WCOrder.id).label("orders"),
+                func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
+                func.coalesce(func.avg(WCOrder.total), 0).label("avg_order"),
+            ).where(and_(
+                WCOrder.date_created >= start_date,
+                WCOrder.date_created <= end_date,
+                WCOrder.billing_state.isnot(None),
+                WCOrder.billing_state != "",
+            )).group_by(WCOrder.billing_state)
+            .order_by(func.sum(WCOrder.total).desc())
+            .limit(20)
+        )
+        regions = [
+            {
+                "state": row.billing_state,
+                "orders": int(row.orders),
+                "revenue": round(float(row.revenue), 2),
+                "avg_order": round(float(row.avg_order), 2),
+                "pct_of_total": round((float(row.revenue) / max(total_revenue, 1)) * 100, 1),
+            }
+            for row in region_q.all()
+        ]
+    except Exception as exc:
+        logger.warning("WC store regional query failed: %s", exc)
 
     return {
         "period": f"{start_date} to {end_date}",
