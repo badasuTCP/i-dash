@@ -2315,10 +2315,53 @@ async def get_contractor_breakdown(
     except Exception as e:
         logger.warning("Contractor breakdown Google Ads fold-in failed: %s", e)
 
-    # Revenue heuristic fallback when Meta didn't report conversion_value
+    # ── QB Revenue: replace heuristic with real QuickBooks data ─────
+    # The QB_Contractor_Revenue tab is stored as qb_revenue:: prefixed
+    # GoogleSheetMetric rows. Match by contractor name (fuzzy).
+    try:
+        qb_q = await db.execute(
+            select(
+                GoogleSheetMetric.metric_name,
+                func.sum(GoogleSheetMetric.metric_value).label("revenue"),
+            ).where(and_(
+                GoogleSheetMetric.sheet_name.like("qb_revenue::%"),
+                GoogleSheetMetric.date >= start_date,
+                GoogleSheetMetric.date <= end_date,
+            )).group_by(GoogleSheetMetric.metric_name)
+        )
+        qb_data = {row[0].strip().lower(): float(row[1] or 0) for row in qb_q.all()}
+
+        if qb_data:
+            logger.info("QB revenue data found: %d contractors", len(qb_data))
+            for c in contractors:
+                c_name = (c["name"] or "").lower().strip()
+                # Try exact match first, then substring match
+                matched_rev = qb_data.get(c_name)
+                if matched_rev is None:
+                    # Fuzzy: check if contractor name is contained in any QB name or vice versa
+                    for qb_name, qb_rev in qb_data.items():
+                        if c_name in qb_name or qb_name in c_name:
+                            matched_rev = qb_rev
+                            break
+                        # Also try matching just the first two words
+                        c_words = c_name.split()[:2]
+                        qb_words = qb_name.split()[:2]
+                        if len(c_words) >= 2 and c_words == qb_words:
+                            matched_rev = qb_rev
+                            break
+                if matched_rev is not None and matched_rev > 0:
+                    c["revenue"] = round(matched_rev, 2)
+                    c["revenue_source"] = "quickbooks"
+                    if "QB" not in c.get("sources", []):
+                        c.setdefault("sources", []).append("QB")
+    except Exception as exc:
+        logger.warning("QB revenue lookup failed: %s", exc)
+
+    # Heuristic fallback ONLY for contractors with no QB match AND no Meta conversion_value
     for c in contractors:
-        if c["revenue"] == 0 and c["leads"] > 0:
+        if c.get("revenue", 0) == 0 and c["leads"] > 0:
             c["revenue"] = round(c["leads"] * 2500, 2)
+            c["revenue_source"] = "estimate"
 
     return {
         "period": f"{start_date} to {end_date}",
