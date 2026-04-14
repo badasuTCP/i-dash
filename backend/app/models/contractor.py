@@ -49,6 +49,12 @@ class Contractor(Base):
     meta_account_id: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True, default=None,
     )
+    # Meta ad account status from the API: 1=active, 2=disabled, 3=unsettled,
+    # 7=pending_risk_review, 9=pending_settlement, 101=closed, 201=temp_unavail.
+    # Stored as a human-readable label by the discovery pipeline.
+    meta_account_status: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, default=None,
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

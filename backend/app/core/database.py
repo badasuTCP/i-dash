@@ -102,6 +102,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_meta_ad_metrics_schema(conn)
         await _ensure_google_ad_metrics_schema(conn)
+        await _ensure_contractors_schema(conn)
         await _backfill_ad_metric_divisions(conn)
         await _reconcile_ga4_property_enabled(conn)
 
@@ -161,6 +162,17 @@ async def _ensure_meta_ad_metrics_schema(conn) -> None:
         logger.warning("ensure_schema: could not create division index: %s", exc)
 
     logger.info("ensure_schema: meta_ad_metrics reconciled (idempotent)")
+
+
+async def _ensure_contractors_schema(conn) -> None:
+    """Add meta_account_status column to contractors table if missing."""
+    try:
+        await conn.execute(text(
+            "ALTER TABLE contractors "
+            "ADD COLUMN IF NOT EXISTS meta_account_status VARCHAR(64)"
+        ))
+    except Exception as exc:
+        logger.warning("ensure_schema: contractors.meta_account_status: %s", exc)
 
 
 async def _ensure_google_ad_metrics_schema(conn) -> None:
@@ -228,12 +240,44 @@ async def _reconcile_ga4_property_enabled(conn) -> None:
                AND (enabled IS DISTINCT FROM TRUE OR status IS DISTINCT FROM 'active')
         """))
 
-        # 2. Fuzzy name match: link I-BOS GA4 properties to active
-        #    contractors by checking if the contractor's name appears inside
-        #    the property's display_name (case-insensitive). This bridges the
-        #    slug mismatch (contractors.id='columbus' but GA4 contractor_id=
-        #    'columbus-concrete-coatings').
-        #    Once linked, the property inherits the contractor's active state.
+        # 2. Explicit property-to-contractor mapping (canonical source of truth).
+        #    GA4 property IDs → contractor short IDs. This is the most
+        #    reliable way to link them since display_names and slugs are
+        #    inconsistent across discovery runs.
+        PROPERTY_CONTRACTOR_MAP = {
+            # Contractor: Columbus Concrete Coatings
+            "510563271": "columbus",
+            # Contractor: Tailored Concrete Coatings
+            "355408548": "tailored",
+            "513309293": "tailored",      # DCKN account duplicate
+            # Contractor: Floor Warriors
+            "355414836": "floorwarriors",
+            # Contractor: Graber Design Coatings
+            "519168501": "graber",
+            # Contractor: Reeves Concrete Solutions (2 properties)
+            "355429527": "reeves",
+            "345201025": "reeves",        # reevesconcretesolutions.com
+            # Contractor: SLG Concrete Coatings
+            "509516664": "slg",
+            # Contractor: Elite Pool Coatings
+            "530878511": "elitepool",
+            # Contractor: Beckley Concrete Decor
+            "347767965": "beckley",
+        }
+        for prop_id, contractor_id in PROPERTY_CONTRACTOR_MAP.items():
+            await conn.execute(text("""
+                UPDATE ga4_properties
+                   SET contractor_id = :cid,
+                       enabled = TRUE,
+                       status = 'active',
+                       updated_at = NOW()
+                 WHERE property_id = :pid
+                   AND (contractor_id IS DISTINCT FROM :cid
+                        OR enabled IS DISTINCT FROM TRUE)
+            """), {"pid": prop_id, "cid": contractor_id})
+
+        # 2b. Fuzzy name match for any remaining I-BOS properties not in
+        #     the explicit map above.
         await conn.execute(text("""
             UPDATE ga4_properties p
                SET contractor_id = sub.cid,
@@ -256,6 +300,9 @@ async def _reconcile_ga4_property_enabled(conn) -> None:
                          ) || '%'
                      )
                    WHERE p2.division = 'ibos'
+                     AND p2.contractor_id NOT IN (
+                         SELECT id FROM contractors WHERE active = TRUE AND status = 'active'
+                     )
                    ORDER BY p2.property_id, LENGTH(c.name) DESC
               ) sub
              WHERE p.property_id = sub.pid
@@ -263,7 +310,7 @@ async def _reconcile_ga4_property_enabled(conn) -> None:
                     OR p.enabled IS DISTINCT FROM TRUE)
         """))
 
-        # 2b. Any I-BOS property that did NOT match an active contractor
+        # 2c. Any I-BOS property that did NOT match an active contractor
         #     stays disabled so the dropdown only shows relevant sites.
         await conn.execute(text("""
             UPDATE ga4_properties

@@ -49,6 +49,34 @@ def _with_meta_prefix(name: str) -> str:
     return name if name.startswith(META_SOURCE_PREFIX) else f"{META_SOURCE_PREFIX} {name}"
 
 
+def _parse_meta_account_status(raw_status) -> str:
+    """Convert Meta's numeric account_status to a human-readable label.
+
+    Meta API account_status values:
+      1 = ACTIVE, 2 = DISABLED, 3 = UNSETTLED,
+      7 = PENDING_RISK_REVIEW, 9 = PENDING_SETTLEMENT,
+      100 = IN_GRACE_PERIOD, 101 = PENDING_CLOSURE,
+      201 = ANY_ACTIVE, 202 = ANY_CLOSED.
+    """
+    STATUS_MAP = {
+        1: "active",
+        2: "disabled",
+        3: "unsettled",
+        7: "pending_review",
+        9: "pending_settlement",
+        100: "grace_period",
+        101: "closed",
+        201: "active",
+        202: "closed",
+    }
+    if raw_status is None:
+        return "unknown"
+    try:
+        return STATUS_MAP.get(int(raw_status), f"status_{raw_status}")
+    except (ValueError, TypeError):
+        return str(raw_status)
+
+
 def _division_for_meta_account(meta_id: str) -> str:
     """Friday's rule: CP only for the training account, else I-BOS."""
     bare = (meta_id or "").replace("act_", "")
@@ -412,7 +440,7 @@ async def fetch_meta_ad_accounts() -> List[Dict[str, str]]:
             try:
                 biz = Business(business_id)
                 owned = biz.get_owned_ad_accounts(
-                    fields=["account_id", "name"],
+                    fields=["account_id", "name", "account_status"],
                     params={"limit": 200},
                 )
                 for acct in owned:
@@ -423,12 +451,15 @@ async def fetch_meta_ad_accounts() -> List[Dict[str, str]]:
                     discovered.append({
                         "id": act_id,
                         "name": acct_dict.get("name", act_id),
+                        "account_status": _parse_meta_account_status(
+                            acct_dict.get("account_status")
+                        ),
                     })
 
                 # Also check client ad accounts
                 try:
                     client_accounts = biz.get_client_ad_accounts(
-                        fields=["account_id", "name"],
+                        fields=["account_id", "name", "account_status"],
                         params={"limit": 200},
                     )
                     for acct in client_accounts:
@@ -441,6 +472,9 @@ async def fetch_meta_ad_accounts() -> List[Dict[str, str]]:
                             discovered.append({
                                 "id": act_id,
                                 "name": acct_dict.get("name", act_id),
+                                "account_status": _parse_meta_account_status(
+                                    acct_dict.get("account_status")
+                                ),
                             })
                 except Exception as e:
                     logger.debug(f"No client ad accounts or error: {e}")
@@ -591,6 +625,22 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
 
                 # Already tracked or already decided (approved/rejected)?
                 if meta_id in existing_meta_ids or meta_id in already_decided:
+                    # Update the ad status on existing contractors so the UI
+                    # always reflects the latest account health.
+                    acct_status = acct.get("account_status", "unknown")
+                    if meta_id in existing_meta_ids:
+                        try:
+                            existing_c = await session.execute(
+                                select(Contractor).where(
+                                    Contractor.meta_account_id == meta_id
+                                )
+                            )
+                            for ec in existing_c.scalars().all():
+                                if ec.meta_account_status != acct_status:
+                                    ec.meta_account_status = acct_status
+                                    ec.updated_at = now
+                        except Exception:
+                            pass
                     continue
 
                 # Brand + status assignment (Friday's logic)
@@ -622,6 +672,7 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                     active=auto_active,
                     status=new_status,
                     meta_account_id=meta_id,
+                    meta_account_status=acct.get("account_status", "unknown"),
                     updated_at=now,
                 )
                 session.add(new_contractor)

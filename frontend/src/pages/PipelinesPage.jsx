@@ -810,9 +810,22 @@ const PipelinesPage = () => {
                       </div>
                       <div>
                         <p className={`text-sm font-medium ${textPrimary}`}>{contractor.name}</p>
-                        <p className={`text-xs ${textSec}`}>
-                          {contractor.active ? '✅ Visible on dashboards' : '🚫 Hidden from dashboards'}
-                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className={`text-xs ${textSec}`}>
+                            {contractor.active ? '✅ Visible on dashboards' : '🚫 Hidden from dashboards'}
+                          </p>
+                          {contractor.meta_account_status && contractor.meta_account_status !== 'unknown' && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide ${
+                              contractor.meta_account_status === 'active'
+                                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                                : contractor.meta_account_status === 'disabled'
+                                  ? 'bg-red-500/15 text-red-400 border border-red-500/25'
+                                  : 'bg-amber-500/15 text-amber-400 border border-amber-500/25'
+                            }`}>
+                              Ad: {contractor.meta_account_status}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <button
@@ -866,6 +879,17 @@ const PipelinesPage = () => {
                               <p className={`text-xs ${textSec} truncate`}>
                                 Meta: {contractor.meta_account_id}
                               </p>
+                            )}
+                            {contractor.meta_account_status && contractor.meta_account_status !== 'unknown' && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide inline-block mt-1 ${
+                                contractor.meta_account_status === 'active'
+                                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                                  : contractor.meta_account_status === 'disabled'
+                                    ? 'bg-red-500/15 text-red-400 border border-red-500/25'
+                                    : 'bg-amber-500/15 text-amber-400 border border-amber-500/25'
+                              }`}>
+                                Ad: {contractor.meta_account_status}
+                              </span>
                             )}
                           </div>
                         </div>
