@@ -80,6 +80,8 @@ const ExecutiveSummary = () => {
   const [brandSummaries, setBrandSummaries] = useState({ cp: null, sanitred: null, ibos: null });
   const [webByBrand, setWebByBrand]         = useState({ cp: null, sanitred: null, ibos: null });
   const [mktByBrand, setMktByBrand]         = useState({ cp: null, sanitred: null, ibos: null });
+  const [wcStore, setWcStore]               = useState(null);
+  const [hubspot, setHubspot]               = useState(null);
   const [loading, setLoading]               = useState(true);
   const [error, setError]                   = useState(null);
   const [lastUpdated, setLastUpdated]       = useState(null);
@@ -94,7 +96,7 @@ const ExecutiveSummary = () => {
       try {
         // Core executive summary + per-brand rollups + per-brand live metrics.
         // All fired in parallel so the page isn't waterfalling on 10 requests.
-        const [summaryRes, brandsRes, webRes, mktRes] = await Promise.all([
+        const [summaryRes, brandsRes, webRes, mktRes, wcRes, hubRes] = await Promise.all([
           dashboardAPI.getExecutiveSummary(start, end).catch(() => null),
           Promise.all(['cp', 'sanitred', 'ibos'].map((b) =>
             dashboardAPI.getBrandSummary(b, start, end).catch(() => null),
@@ -105,10 +107,14 @@ const ExecutiveSummary = () => {
           Promise.all(['cp', 'sanitred', 'ibos'].map((b) =>
             dashboardAPI.getMarketing(b, start, end).catch(() => null),
           )),
+          dashboardAPI.getWCStore(start, end).catch(() => null),
+          dashboardAPI.getHubspot(start, end).catch(() => null),
         ]);
         if (cancelled) return;
 
         setSummary(summaryRes?.data || null);
+        setWcStore(wcRes?.data || null);
+        setHubspot(hubRes?.data || null);
         setBrandSummaries({
           cp:       brandsRes[0]?.data || null,
           sanitred: brandsRes[1]?.data || null,
@@ -239,6 +245,9 @@ const ExecutiveSummary = () => {
     const allSpend = Object.values(mktByBrand).reduce((a, m) => a + (m?.scorecards?.totalSpend || 0), 0);
     const allLeads = Object.values(mktByBrand).reduce((a, m) => a + (m?.scorecards?.totalLeads || 0), 0);
     const allVisits = Object.values(webByBrand).reduce((a, w) => a + (w?.scorecards?.totalVisits || 0), 0);
+    const wcRev = wcStore?.scorecards?.totalRevenue || 0;
+    const wcOrders = wcStore?.scorecards?.totalOrders || 0;
+
     if (allSpend > 0) {
       const cpl = allLeads > 0 ? (allSpend / allLeads).toFixed(2) : '—';
       bullets.push(`Combined marketing: ${fmtCurrency(allSpend)} spend · ${fmtNumber(allLeads)} leads · CPL ${cpl === '—' ? '—' : `$${cpl}`}.`);
@@ -246,14 +255,17 @@ const ExecutiveSummary = () => {
     if (allVisits > 0) {
       bullets.push(`Combined web traffic: ${fmtNumber(allVisits)} visits across all divisions (GA4 live).`);
     }
+    if (wcRev > 0) {
+      bullets.push(`Sani-Tred Store: ${fmtCurrency(wcRev)} revenue from ${fmtNumber(wcOrders)} orders (WooCommerce live).`);
+    }
     const topRev = Math.max(divisionRevenue.cp, divisionRevenue.sanitred, divisionRevenue.ibos);
     const topName = topRev === divisionRevenue.cp ? 'CP' : topRev === divisionRevenue.sanitred ? 'Sani-Tred' : 'I-BOS';
     bullets.push(`${topName} is top-revenue division at ${fmtCurrency(topRev)} cumulative.`);
     if (!hasExecData) {
       bullets.push('TCP MAIN sheet pending pivot-detection — quarterly table showing curated snapshot.');
     }
-    return bullets.slice(0, 3);
-  }, [mktByBrand, webByBrand, divisionRevenue, hasExecData]);
+    return bullets.slice(0, 4);
+  }, [mktByBrand, webByBrand, divisionRevenue, hasExecData, wcStore]);
 
   // ── Render ─────────────────────────────────────────────────────────────
   if (loading) {
@@ -307,6 +319,23 @@ const ExecutiveSummary = () => {
           {scorecards.map((kpi, idx) => (
             <ScoreCard key={idx} {...kpi} />
           ))}
+        </motion.div>
+
+        {/* ── ROW 2 SCORECARDS (operational KPIs) ──────────────────────── */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <ScoreCard label="Sani-Tred Store Revenue"
+            value={wcStore?.scorecards?.totalRevenue || 0}
+            color="emerald" format="currency" />
+          <ScoreCard label="Total Web Visits"
+            value={Object.values(webByBrand).reduce((a, w) => a + (w?.scorecards?.totalVisits || 0), 0)}
+            color="cyan" format="number" />
+          <ScoreCard label="WooCommerce Orders"
+            value={wcStore?.scorecards?.totalOrders || 0}
+            color="violet" format="number" />
+          <ScoreCard label="HubSpot Deals Won"
+            value={hubspot?.scorecards?.deals_won || hubspot?.scorecards?.dealsWon || 0}
+            color="amber" format="number" />
         </motion.div>
 
         {/* ── LIVE SUMMARY (full width) ────────────────────────────────── */}
@@ -476,6 +505,56 @@ const ExecutiveSummary = () => {
             </ResponsiveContainer>
           </motion.div>
         </div>
+
+        {/* ── ROW 3: Sani-Tred Store Revenue + HubSpot Summary ──────── */}
+        {(wcStore?.monthly?.length > 0 || hubspot) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {wcStore?.monthly?.length > 0 && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.46 }}
+                className={`rounded-xl p-6 ${cardBg}`}>
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-xl">🛒</span>
+                  <h3 className={`text-lg font-semibold ${textPrimary}`}>Sani-Tred Store — Monthly Revenue</h3>
+                </div>
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={wcStore.monthly}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
+                    <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                    <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={(v) => fmtCurrency(v)} />
+                    <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtCurrency(v)} />
+                    <Bar dataKey="revenue" name="Revenue" fill="#10B981" radius={[4,4,0,0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </motion.div>
+            )}
+            {hubspot && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.48 }}
+                className={`rounded-xl p-6 ${cardBg}`}>
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-xl">🟠</span>
+                  <h3 className={`text-lg font-semibold ${textPrimary}`}>HubSpot CRM Snapshot</h3>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { label: 'Contacts Created',  value: hubspot?.scorecards?.contacts_created || hubspot?.scorecards?.contactsCreated || 0 },
+                    { label: 'Deals Won',         value: hubspot?.scorecards?.deals_won || hubspot?.scorecards?.dealsWon || 0 },
+                    { label: 'Revenue Won',       value: hubspot?.scorecards?.revenue_won || hubspot?.scorecards?.revenueWon || 0, fmt: 'currency' },
+                    { label: 'Meetings Booked',   value: hubspot?.scorecards?.meetings_booked || hubspot?.scorecards?.meetingsBooked || 0 },
+                    { label: 'Pipeline Value',    value: hubspot?.scorecards?.pipeline_value || hubspot?.scorecards?.pipelineValue || 0, fmt: 'currency' },
+                    { label: 'Tasks Completed',   value: hubspot?.scorecards?.tasks_completed || hubspot?.scorecards?.tasksCompleted || 0 },
+                  ].map((kpi, idx) => (
+                    <div key={idx} className={`p-3 rounded-lg ${isDark ? 'bg-slate-800/40' : 'bg-slate-50'}`}>
+                      <p className={`text-xs uppercase tracking-wide mb-1 ${textSec}`}>{kpi.label}</p>
+                      <p className={`text-lg font-bold ${textPrimary}`}>
+                        {kpi.fmt === 'currency' ? fmtCurrency(kpi.value) : fmtNumber(kpi.value)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
 
         {/* ── Executive Performance Summary ────────────────────────────── */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
