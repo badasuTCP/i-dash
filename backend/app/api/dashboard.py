@@ -2883,13 +2883,14 @@ async def get_wc_store(
     refund_rate = round((refunded / max(total_orders, 1)) * 100, 1)
 
     # ── Monthly performance ───────────────────────────────────────────
+    from sqlalchemy import case
     monthly_q = await db.execute(
         select(
             func.date_trunc("month", WCOrder.date_created).label("month"),
             func.count(WCOrder.id).label("orders"),
             func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
             func.coalesce(func.avg(WCOrder.total), 0).label("avg_order"),
-            func.count(WCOrder.id).filter(WCOrder.status == "refunded").label("refunds"),
+            func.sum(case((WCOrder.status == "refunded", 1), else_=0)).label("refunds"),
         ).where(and_(
             WCOrder.date_created >= start_date,
             WCOrder.date_created <= end_date,
