@@ -2761,3 +2761,212 @@ async def get_executive_summary(
             "marketing_leads": "meta_ad_metrics + google_ad_metrics (conversions)",
         },
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WooCommerce Store — Sani-Tred retail orders + products
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get(
+    "/woocommerce/store",
+    summary="WooCommerce store metrics — orders, products, revenue",
+)
+async def get_wc_store(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+) -> dict:
+    """
+    Aggregated WooCommerce store data for the Sani-Tred Retail Breakdown.
+
+    Returns scorecards, monthly performance, product performance, orders
+    by status, payment methods, and regional breakdown — all from
+    wc_orders + wc_products tables.
+    """
+    from app.models.metrics import WCOrder, WCProduct
+
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    # ── Check if pipeline has ever run ────────────────────────────────
+    pipeline_ran = await _has_pipeline_run(
+        db, "woocommerce", "woocommerce_pipeline",
+    )
+    if not pipeline_ran:
+        return {
+            "period": f"{start_date} to {end_date}",
+            "hasLiveData": False,
+            "scorecards": {},
+            "monthly": [],
+            "products": [],
+            "ordersByStatus": [],
+            "paymentMethods": [],
+            "regions": [],
+        }
+
+    # ── Scorecards ────────────────────────────────────────────────────
+    totals = await db.execute(
+        select(
+            func.count(WCOrder.id).label("total_orders"),
+            func.coalesce(func.sum(WCOrder.total), 0).label("total_revenue"),
+            func.coalesce(func.avg(WCOrder.total), 0).label("avg_order_value"),
+            func.coalesce(func.sum(WCOrder.discount), 0).label("total_discount"),
+            func.coalesce(func.sum(WCOrder.shipping), 0).label("total_shipping"),
+            func.coalesce(func.sum(WCOrder.tax), 0).label("total_tax"),
+        ).where(and_(
+            WCOrder.date_created >= start_date,
+            WCOrder.date_created <= end_date,
+        ))
+    )
+    t = totals.first()
+    total_orders = int(t.total_orders or 0)
+    total_revenue = float(t.total_revenue or 0)
+    avg_order = float(t.avg_order_value or 0)
+
+    # Completed vs refunded for refund rate
+    completed_q = await db.execute(
+        select(func.count()).select_from(WCOrder).where(and_(
+            WCOrder.date_created >= start_date,
+            WCOrder.date_created <= end_date,
+            WCOrder.status == "completed",
+        ))
+    )
+    completed = completed_q.scalar() or 0
+    refunded_q = await db.execute(
+        select(func.count()).select_from(WCOrder).where(and_(
+            WCOrder.date_created >= start_date,
+            WCOrder.date_created <= end_date,
+            WCOrder.status == "refunded",
+        ))
+    )
+    refunded = refunded_q.scalar() or 0
+    refund_rate = round((refunded / max(total_orders, 1)) * 100, 1)
+
+    # ── Monthly performance ───────────────────────────────────────────
+    monthly_q = await db.execute(
+        select(
+            func.date_trunc("month", WCOrder.date_created).label("month"),
+            func.count(WCOrder.id).label("orders"),
+            func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
+            func.coalesce(func.avg(WCOrder.total), 0).label("avg_order"),
+            func.count(WCOrder.id).filter(WCOrder.status == "refunded").label("refunds"),
+        ).where(and_(
+            WCOrder.date_created >= start_date,
+            WCOrder.date_created <= end_date,
+        )).group_by(func.date_trunc("month", WCOrder.date_created))
+        .order_by(func.date_trunc("month", WCOrder.date_created))
+    )
+    monthly = [
+        {
+            "month": row.month.strftime("%b %Y") if row.month else "—",
+            "orders": int(row.orders or 0),
+            "revenue": round(float(row.revenue or 0), 2),
+            "avg_order": round(float(row.avg_order or 0), 2),
+            "refunds": int(row.refunds or 0),
+        }
+        for row in monthly_q.all()
+    ]
+
+    # ── Product performance (from wc_products snapshot) ───────────────
+    products_q = await db.execute(
+        select(WCProduct)
+        .order_by(WCProduct.total_sales.desc())
+        .limit(20)
+    )
+    products = [
+        {
+            "product_id": p.product_id,
+            "name": p.name,
+            "sku": p.sku or "—",
+            "price": float(p.price or 0),
+            "total_sales": int(p.total_sales or 0),
+            "revenue": round(float(p.price or 0) * int(p.total_sales or 0), 2),
+            "stock_status": p.stock_status or "—",
+            "categories": p.categories or "—",
+        }
+        for p in products_q.scalars().all()
+    ]
+
+    # ── Orders by status ──────────────────────────────────────────────
+    status_q = await db.execute(
+        select(
+            WCOrder.status,
+            func.count(WCOrder.id).label("count"),
+            func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
+        ).where(and_(
+            WCOrder.date_created >= start_date,
+            WCOrder.date_created <= end_date,
+        )).group_by(WCOrder.status)
+        .order_by(func.count(WCOrder.id).desc())
+    )
+    orders_by_status = [
+        {"status": row.status, "count": int(row.count), "revenue": round(float(row.revenue), 2)}
+        for row in status_q.all()
+    ]
+
+    # ── Payment methods ───────────────────────────────────────────────
+    payment_q = await db.execute(
+        select(
+            WCOrder.payment_method,
+            func.count(WCOrder.id).label("count"),
+            func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
+        ).where(and_(
+            WCOrder.date_created >= start_date,
+            WCOrder.date_created <= end_date,
+            WCOrder.payment_method.isnot(None),
+            WCOrder.payment_method != "",
+        )).group_by(WCOrder.payment_method)
+        .order_by(func.sum(WCOrder.total).desc())
+    )
+    payment_methods = [
+        {"method": row.payment_method or "Unknown", "count": int(row.count), "revenue": round(float(row.revenue), 2)}
+        for row in payment_q.all()
+    ]
+
+    # ── Regional breakdown ────────────────────────────────────────────
+    region_q = await db.execute(
+        select(
+            WCOrder.billing_state,
+            func.count(WCOrder.id).label("orders"),
+            func.coalesce(func.sum(WCOrder.total), 0).label("revenue"),
+            func.coalesce(func.avg(WCOrder.total), 0).label("avg_order"),
+        ).where(and_(
+            WCOrder.date_created >= start_date,
+            WCOrder.date_created <= end_date,
+            WCOrder.billing_state.isnot(None),
+            WCOrder.billing_state != "",
+        )).group_by(WCOrder.billing_state)
+        .order_by(func.sum(WCOrder.total).desc())
+        .limit(20)
+    )
+    regions = [
+        {
+            "state": row.billing_state,
+            "orders": int(row.orders),
+            "revenue": round(float(row.revenue), 2),
+            "avg_order": round(float(row.avg_order), 2),
+            "pct_of_total": round((float(row.revenue) / max(total_revenue, 1)) * 100, 1),
+        }
+        for row in region_q.all()
+    ]
+
+    return {
+        "period": f"{start_date} to {end_date}",
+        "hasLiveData": True,
+        "scorecards": {
+            "totalRevenue": round(total_revenue, 2),
+            "totalOrders": total_orders,
+            "avgOrderValue": round(avg_order, 2),
+            "completedOrders": completed,
+            "refundedOrders": refunded,
+            "refundRate": refund_rate,
+            "totalDiscount": round(float(t.total_discount or 0), 2),
+            "totalShipping": round(float(t.total_shipping or 0), 2),
+            "totalTax": round(float(t.total_tax or 0), 2),
+        },
+        "monthly": monthly,
+        "products": products,
+        "ordersByStatus": orders_by_status,
+        "paymentMethods": payment_methods,
+        "regions": regions,
+    }

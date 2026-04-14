@@ -623,6 +623,12 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                 raw_name = acct["name"]
                 meta_name = _with_meta_prefix(raw_name)
 
+                # Skip the CP Internal Training account — it must NEVER
+                # appear as an I-BOS contractor. It is tracked under CP only.
+                bare_id = meta_id.replace("act_", "")
+                if bare_id in {a.replace("act_", "") for a in META_CP_ACCOUNT_IDS}:
+                    continue
+
                 # Already tracked or already decided (approved/rejected)?
                 if meta_id in existing_meta_ids or meta_id in already_decided:
                     # Update the ad status on existing contractors so the UI

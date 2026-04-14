@@ -70,7 +70,7 @@ export const brandPages = {
     { to: '/dashboard/sanitred',                label: 'Overview',           icon: LayoutDashboard },
     { to: '/dashboard/sanitred/web-analytics',  label: 'Web Analytics',      icon: Globe },
     { to: '/dashboard/sanitred/marketing',      label: 'Marketing Campaign', icon: Megaphone },
-    { to: '/dashboard/sanitred/retail',         label: 'Retail Breakdown',   icon: ShoppingBag },
+    { to: '/dashboard/sanitred/retail',         label: 'Sani-Tred Store',    icon: ShoppingBag },
   ],
   ibos: [
     { to: '/dashboard/ibos',                label: 'Overview',             icon: LayoutDashboard },

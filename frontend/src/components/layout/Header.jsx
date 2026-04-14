@@ -24,6 +24,7 @@ export const Header = () => {
     if (path.includes('/ibos')) return { title: 'I-BOS Dashboard', badge: 'Contractor' };
     if (path.includes('/sanitred/web-analytics')) return { title: 'Sani-Tred Web Analytics', badge: 'Retail' };
     if (path.includes('/sanitred/marketing')) return { title: 'Sani-Tred Marketing', badge: 'Retail' };
+    if (path.includes('/sanitred/retail')) return { title: 'Sani-Tred Store', badge: 'Retail' };
     if (path.includes('/sanitred')) return { title: 'Sani-Tred Dashboard', badge: 'Retail' };
     if (path.includes('/cp/web-analytics')) return { title: 'CP Web Analytics', badge: 'Main' };
     if (path.includes('/cp/marketing')) return { title: 'CP Marketing Campaign', badge: 'Main' };
