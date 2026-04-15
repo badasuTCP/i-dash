@@ -3213,3 +3213,54 @@ async def get_contractor_revenue(
         "contractors": qb_by_contractor[:20],
         "monthly": qb_monthly,
     }
+
+
+@router.get(
+    "/debug/qb-revenue",
+    summary="Debug: show all qb_revenue:: GoogleSheetMetric rows",
+)
+async def debug_qb_revenue(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Diagnostic endpoint to verify QB sheet ingestion."""
+    rows = await db.execute(
+        select(
+            GoogleSheetMetric.sheet_name,
+            GoogleSheetMetric.metric_name,
+            GoogleSheetMetric.date,
+            GoogleSheetMetric.metric_value,
+        )
+        .where(GoogleSheetMetric.sheet_name.like("qb_revenue::%"))
+        .order_by(GoogleSheetMetric.metric_name, GoogleSheetMetric.date)
+        .limit(500)
+    )
+    data = [
+        {"sheet": r[0], "contractor": r[1], "date": r[2].isoformat() if r[2] else None,
+         "revenue": float(r[3] or 0)}
+        for r in rows.all()
+    ]
+    # Also count exec:: rows for comparison
+    exec_count = await db.execute(
+        select(func.count()).select_from(GoogleSheetMetric)
+        .where(GoogleSheetMetric.sheet_name.like("exec::%"))
+    )
+    qb_count = await db.execute(
+        select(func.count()).select_from(GoogleSheetMetric)
+        .where(GoogleSheetMetric.sheet_name.like("qb_revenue::%"))
+    )
+    # Distinct sheet_names to see what's actually in the DB
+    distinct_sheets = await db.execute(
+        select(
+            GoogleSheetMetric.sheet_name,
+            func.count(GoogleSheetMetric.id),
+        ).group_by(GoogleSheetMetric.sheet_name)
+        .order_by(func.count(GoogleSheetMetric.id).desc())
+        .limit(20)
+    )
+    return {
+        "qb_revenue_count": qb_count.scalar() or 0,
+        "exec_count": exec_count.scalar() or 0,
+        "all_sheets": [{"sheet_name": r[0], "row_count": r[1]} for r in distinct_sheets.all()],
+        "sample_qb_rows": data[:50],
+    }

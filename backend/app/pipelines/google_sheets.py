@@ -359,11 +359,16 @@ class GoogleSheetsPipeline(BasePipeline):
     # ──────────────────────────────────────────────────────────────────────────
 
     _QUARTER_RE = re.compile(r"^\s*Q([1-4])\s+(\d{4})\s*$", re.IGNORECASE)
-    # Matches: "Jul 24", "Aug 24", "Jan 25", "Mar 2026", "December 2025"
+    # Matches: "Jul 24", "Aug 24", "Jan 25", "Mar 2026", "December 2025",
+    #          "Jul-24", "Jul'24", "Jul/24", "Jul.24"
     _MONTH_RE = re.compile(
         r"^\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
-        r"\s+(\d{2,4})\s*$",
+        r"[\s\-/'\.]+(\d{2,4})\s*$",
         re.IGNORECASE,
+    )
+    # Also accept numeric month-year: "07/24", "07-2024", "7/2025"
+    _NUMERIC_MONTH_RE = re.compile(
+        r"^\s*(\d{1,2})[\s\-/](\d{2,4})\s*$",
     )
     _MONTH_MAP = {
         "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -387,7 +392,7 @@ class GoogleSheetsPipeline(BasePipeline):
             except ValueError:
                 return None
 
-        # Try month-year
+        # Try month-year (text format: "Jul 24", "Jul-24", etc.)
         m = self._MONTH_RE.match(h)
         if m:
             mon_str = m.group(1).lower()[:3]
@@ -402,6 +407,19 @@ class GoogleSheetsPipeline(BasePipeline):
                 return datetime(year, month, 1).date()
             except ValueError:
                 return None
+
+        # Try numeric month-year ("07/24", "7/2025", "07-2024")
+        m = self._NUMERIC_MONTH_RE.match(h)
+        if m:
+            try:
+                month = int(m.group(1))
+                year = int(m.group(2))
+                if year < 100:
+                    year += 2000
+                if 1 <= month <= 12 and 1900 < year < 2200:
+                    return datetime(year, month, 1).date()
+            except (ValueError, TypeError):
+                pass
 
         return None
 
@@ -425,10 +443,16 @@ class GoogleSheetsPipeline(BasePipeline):
         Executive Summary endpoint can pull them with a single indexed query.
         """
         if not rows:
+            self.logger.debug("Pivot check '%s': no rows", sheet_name)
             return None
 
         headers = list(rows[0].keys())
+        self.logger.info(
+            "Pivot check '%s': %d headers — %s",
+            sheet_name, len(headers), headers[:30],
+        )
         if len(headers) < 3:
+            self.logger.info("Pivot check '%s': fewer than 3 headers — skipping", sheet_name)
             return None
 
         first_col = headers[0]
@@ -438,13 +462,19 @@ class GoogleSheetsPipeline(BasePipeline):
             if dt:
                 period_cols.append((h, dt))
 
+        self.logger.info(
+            "Pivot check '%s': matched %d period columns out of %d non-first headers — %s",
+            sheet_name, len(period_cols), len(headers) - 1,
+            [p[0] for p in period_cols[:10]],
+        )
+
         # Require at least 3 period columns to call this a pivot (prevents
         # false positives on single-date-column sheets).
-        # Previously required half of non-first columns to be periods — but
-        # sheets like QB_Contractor_Revenue have extra label columns (QB Name,
-        # Active Name, Total, YTD) that made the ratio fail. 3+ month/quarter
-        # columns is a strong enough signal.
         if len(period_cols) < 3:
+            self.logger.info(
+                "Pivot check '%s': only %d period columns — not a pivot, falling through to normal transform",
+                sheet_name, len(period_cols),
+            )
             return None
 
         # Tag the sheet_name based on content type.
@@ -457,6 +487,11 @@ class GoogleSheetsPipeline(BasePipeline):
         else:
             tagged = f"exec::{bare}"
 
+        self.logger.info(
+            "Pivot accepted '%s' → tagged '%s' with %d period columns",
+            sheet_name, tagged, len(period_cols),
+        )
+
         # Identify non-period columns (label columns). If there are multiple
         # (e.g. "QB Name" + "Active Contractor"), use the LAST one as the
         # canonical metric_name — that's the user-mapped display name.
@@ -465,6 +500,9 @@ class GoogleSheetsPipeline(BasePipeline):
         label_cols = [h for h in label_cols if not any(
             kw in h.lower() for kw in ["total", "sum", "grand", "jan 25 - mar"]
         )]
+        self.logger.info(
+            "Pivot '%s': label columns = %s", sheet_name, label_cols,
+        )
 
         out: List[GoogleSheetMetric] = []
         for row in rows:
