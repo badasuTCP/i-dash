@@ -3264,3 +3264,51 @@ async def debug_qb_revenue(
         "all_sheets": [{"sheet_name": r[0], "row_count": r[1]} for r in distinct_sheets.all()],
         "sample_qb_rows": data[:50],
     }
+
+
+@router.get(
+    "/debug/sheet-headers",
+    summary="Debug: show metric_names from each sheet to diagnose pivot detection",
+)
+async def debug_sheet_headers(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    sheet: str = Query(..., description="Sheet name to inspect"),
+) -> dict:
+    """Return distinct metric_names + sample dates for a given sheet_name."""
+    distinct_metrics = await db.execute(
+        select(GoogleSheetMetric.metric_name, func.count(GoogleSheetMetric.id))
+        .where(GoogleSheetMetric.sheet_name == sheet)
+        .group_by(GoogleSheetMetric.metric_name)
+        .order_by(func.count(GoogleSheetMetric.id).desc())
+        .limit(100)
+    )
+    metrics = [{"metric_name": r[0], "count": r[1]} for r in distinct_metrics.all()]
+    distinct_dates = await db.execute(
+        select(GoogleSheetMetric.date, func.count(GoogleSheetMetric.id))
+        .where(GoogleSheetMetric.sheet_name == sheet)
+        .group_by(GoogleSheetMetric.date)
+        .order_by(GoogleSheetMetric.date)
+        .limit(50)
+    )
+    dates = [{"date": r[0].isoformat() if r[0] else None, "count": r[1]} for r in distinct_dates.all()]
+    sample = await db.execute(
+        select(
+            GoogleSheetMetric.metric_name,
+            GoogleSheetMetric.date,
+            GoogleSheetMetric.metric_value,
+            GoogleSheetMetric.category,
+        )
+        .where(GoogleSheetMetric.sheet_name == sheet)
+        .limit(20)
+    )
+    return {
+        "sheet_name": sheet,
+        "distinct_metrics_top_100": metrics,
+        "distinct_dates_top_50": dates,
+        "sample_rows": [
+            {"metric": r[0], "date": r[1].isoformat() if r[1] else None,
+             "value": float(r[2] or 0), "category": r[3]}
+            for r in sample.all()
+        ],
+    }
