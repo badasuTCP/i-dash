@@ -46,7 +46,7 @@ const PendingContractorNotifier = () => {
                 </span>
                 <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                   <a
-                    href="/data/pipelines"
+                    href="/dashboard/pipelines?tab=contractors&filter=pending"
                     style={{
                       color: '#265AA9',
                       fontWeight: 600,

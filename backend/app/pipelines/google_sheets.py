@@ -438,12 +438,13 @@ class GoogleSheetsPipeline(BasePipeline):
             if dt:
                 period_cols.append((h, dt))
 
-        # Require at least 2 period columns to call this a pivot (single-quarter
-        # tabs are probably normal row-per-date layouts with one metric).
-        if len(period_cols) < 2:
-            return None
-        # And at least half of the non-first columns must be quarter labels.
-        if len(period_cols) < max(2, (len(headers) - 1) // 2):
+        # Require at least 3 period columns to call this a pivot (prevents
+        # false positives on single-date-column sheets).
+        # Previously required half of non-first columns to be periods — but
+        # sheets like QB_Contractor_Revenue have extra label columns (QB Name,
+        # Active Name, Total, YTD) that made the ratio fail. 3+ month/quarter
+        # columns is a strong enough signal.
+        if len(period_cols) < 3:
             return None
 
         # Tag the sheet_name based on content type.

@@ -81,7 +81,17 @@ const PipelinesPage = () => {
   const { config, updatePipeline, updateContractor, setAllContractors } = useDashboardConfig();
 
   // ── UI state ────────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState('pipelines'); // 'pipelines' | 'contractors' | 'logs'
+  // Read initial tab/filter from URL so notifications can deep-link
+  // straight to "Contractor Management → Pending" with one click.
+  const _initialParams = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search)
+    : new URLSearchParams();
+  const _initialTab = _initialParams.get('tab') === 'contractors' ? 'contractors'
+                    : _initialParams.get('tab') === 'logs' ? 'logs'
+                    : 'pipelines';
+  const _initialFilter = _initialParams.get('filter') || 'all';
+
+  const [activeTab, setActiveTab] = useState(_initialTab);
   const [expandedHistory, setExpandedHistory] = useState(null);
 
   // ── Pipeline state ───────────────────────────────────────────────────────────
@@ -108,7 +118,7 @@ const PipelinesPage = () => {
   });
 
   // ── Contractor state — driven by DashboardConfigContext ──────────────────────
-  const [contractorFilter, setContractorFilter] = useState('all');
+  const [contractorFilter, setContractorFilter] = useState(_initialFilter);
   const [pendingContractors, setPendingContractors] = useState([]);
   const [approvingId, setApprovingId] = useState(null);
 
@@ -853,27 +863,44 @@ const PipelinesPage = () => {
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {pendingContractors.map((contractor) => (
+                    {[...pendingContractors]
+                      .sort((a, b) => {
+                        const da = new Date(a.updated_at || 0).getTime();
+                        const db = new Date(b.updated_at || 0).getTime();
+                        return db - da; // newest first
+                      })
+                      .map((contractor) => {
+                        const ageMs = Date.now() - new Date(contractor.updated_at || 0).getTime();
+                        const isRecent = ageMs < 24 * 60 * 60 * 1000; // last 24h
+                        return (
                       <motion.div
                         key={contractor.id}
                         layout
                         initial={{ opacity: 0, scale: 0.97 }}
                         animate={{ opacity: 1, scale: 1 }}
                         className={`rounded-xl p-4 ${cardBg} border-2 ${
-                          isDark ? 'border-amber-500/30' : 'border-amber-400/40'
+                          isRecent
+                            ? 'border-emerald-500 shadow-lg shadow-emerald-500/20 animate-pulse-slow'
+                            : isDark ? 'border-amber-500/30' : 'border-amber-400/40'
                         }`}
                       >
                         <div className="flex items-center gap-3 mb-3">
                           <div className={`w-9 h-9 rounded-full flex items-center justify-center text-lg ${
-                            isDark ? 'bg-amber-900/30' : 'bg-amber-50'
+                            isRecent
+                              ? 'bg-emerald-500/20'
+                              : isDark ? 'bg-amber-900/30' : 'bg-amber-50'
                           }`}>
                             🆕
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <p className={`text-sm font-medium truncate ${textPrimary}`}>{contractor.name}</p>
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex-shrink-0">
-                                NEW
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold flex-shrink-0 ${
+                                isRecent
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                              }`}>
+                                {isRecent ? 'JUST ADDED' : 'NEW'}
                               </span>
                             </div>
                             {contractor.meta_account_id && (
@@ -911,7 +938,8 @@ const PipelinesPage = () => {
                           </button>
                         </div>
                       </motion.div>
-                    ))}
+                    );
+                    })}
                   </div>
                 )}
               </div>
