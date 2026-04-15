@@ -702,14 +702,18 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                     new_status,
                 )
 
+            # Always commit — even when no new contractors found, the loop
+            # may have updated meta_account_status on existing contractors.
+            await session.commit()
             if new_count > 0:
-                await session.commit()
                 logger.info(
                     "Meta reconciliation complete: %d new contractor(s) pending approval",
                     new_count,
                 )
             else:
-                logger.info("Meta reconciliation complete: no new contractors found")
+                logger.info(
+                    "Meta reconciliation complete: 0 new, status updates committed for existing contractors"
+                )
 
     except Exception as e:
         error_msg = f"Meta reconciliation error: {type(e).__name__}: {e}"
