@@ -558,26 +558,51 @@ class GoogleSheetsPipeline(BasePipeline):
         # (e.g. "QB Name" + "Active Contractor"), use the LAST one as the
         # canonical metric_name — that's the user-mapped display name.
         label_cols = [h for h in headers if self._parse_period_header(h) is None]
-        # Exclude obvious total/summary columns from label candidates
-        label_cols = [h for h in label_cols if not any(
-            kw in h.lower() for kw in ["total", "sum", "grand", "jan 25 - mar"]
-        )]
+        # Exclude obvious total/summary columns from label candidates.
+        # Catches header forms like "Jan 25 - Mar 26", "Jan '25 - Mar 26",
+        # "2025 Total", etc. — these hold numeric grand-totals, not names.
+        _range_total_re = re.compile(
+            r"[a-z]{3}\s*'?\d{2,4}\s*-\s*[a-z]{3}\s*'?\d{2,4}",
+            re.IGNORECASE,
+        )
+        label_cols = [
+            h for h in label_cols
+            if not any(kw in h.lower() for kw in ["total", "sum", "grand"])
+            and not _range_total_re.search(h)
+        ]
         self.logger.info(
             "Pivot '%s': label columns = %s", sheet_name, label_cols,
         )
 
+        def _looks_numeric(s: str) -> bool:
+            """True if s parses as a number (incl. $/,/% formatting)."""
+            if not s:
+                return False
+            cleaned = s.replace("$", "").replace(",", "").replace("%", "").strip()
+            # Strip shorthand suffix (e.g. "1.4M")
+            if cleaned and cleaned[-1] in "KkMmBb":
+                cleaned = cleaned[:-1]
+            try:
+                float(cleaned)
+                return True
+            except (ValueError, TypeError):
+                return False
+
         out: List[GoogleSheetMetric] = []
         for row in rows:
-            # Use the last label column as the display name (user-mapped name);
-            # fall back to the first label column (QB original name).
+            # Prefer the LAST label column whose value is non-empty AND non-numeric
+            # (contractor names can never be pure numbers). This protects against
+            # trailing total columns that slipped past the header filter.
             metric_label = ""
             for lc in reversed(label_cols):
                 val = (row.get(lc) or "").strip()
-                if val:
+                if val and not _looks_numeric(val):
                     metric_label = val
                     break
             if not metric_label:
-                metric_label = (row.get(first_col) or "").strip()
+                first_val = (row.get(first_col) or "").strip()
+                if first_val and not _looks_numeric(first_val):
+                    metric_label = first_val
             if not metric_label:
                 continue
             for header, period_date in period_cols:
