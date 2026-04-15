@@ -649,6 +649,55 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                             pass
                     continue
 
+                # ── Dedup: try to LINK to an existing contractor by name ─
+                # before creating a duplicate. Many seed contractors exist
+                # with short names like "Floor Warriors" — when Meta
+                # discovers "Floor Warriors" or similar, we should attach
+                # the meta_account_id to that row instead of creating a
+                # new "[META] Floor Warriors" duplicate.
+                def _norm(n: str) -> str:
+                    if not n:
+                        return ""
+                    n = n.lower().replace("[meta]", "").replace("[ga4]", "")
+                    for tok in (" - ga4", "(greg haber)", " llc", " inc.", " inc"):
+                        n = n.replace(tok, "")
+                    return "".join(ch for ch in n if ch.isalnum())
+
+                raw_norm = _norm(raw_name)
+                acct_status = acct.get("account_status", "unknown")
+                merged_into_existing = False
+                if raw_norm:
+                    try:
+                        all_existing = await session.execute(
+                            select(Contractor).where(Contractor.division.in_(["ibos", "i-bos"]))
+                        )
+                        for ec in all_existing.scalars().all():
+                            if ec.meta_account_id:
+                                continue  # already has a Meta link
+                            ec_norm = _norm(ec.name)
+                            if not ec_norm:
+                                continue
+                            # Match if normalized names are equal or one contains the other
+                            if (
+                                ec_norm == raw_norm
+                                or ec_norm in raw_norm
+                                or raw_norm in ec_norm
+                            ):
+                                ec.meta_account_id = meta_id
+                                ec.meta_account_status = acct_status
+                                ec.updated_at = now
+                                existing_meta_ids.add(meta_id)
+                                merged_into_existing = True
+                                logger.info(
+                                    "Meta auto-discovery: linked '%s' (%s) → existing contractor '%s'",
+                                    raw_name, meta_id, ec.id,
+                                )
+                                break
+                    except Exception as merge_exc:
+                        logger.debug("Meta dedup merge skipped: %s", merge_exc)
+                if merged_into_existing:
+                    continue
+
                 # Brand + status assignment (Friday's logic)
                 division = _division_for_meta_account(meta_id)
                 under_portfolio = (

@@ -220,13 +220,40 @@ async def _reconcile_ga4_property_enabled(conn) -> None:
     """
     try:
         # 0. Purge act_144305066 (CP Internal Training) from I-BOS contractors.
-        #    It sometimes gets auto-discovered and inserted because it sits
-        #    inside the same Meta Business portfolio. It is NOT a contractor.
         await conn.execute(text("""
             DELETE FROM contractors
              WHERE meta_account_id = 'act_144305066'
                AND division IN ('i-bos', 'ibos')
         """))
+
+        # 0b. Merge [META]-prefixed duplicate contractors back into their
+        #     non-prefixed counterparts. Many seed contractors exist with
+        #     short names ("Floor Warriors") and Meta discovery created
+        #     duplicates ("[META] Floor Warriors"). For each duplicate pair,
+        #     copy the meta_account_id + status onto the original and
+        #     delete the duplicate.
+        try:
+            await conn.execute(text("""
+                UPDATE contractors AS orig
+                   SET meta_account_id = COALESCE(orig.meta_account_id, dup.meta_account_id),
+                       meta_account_status = COALESCE(orig.meta_account_status, dup.meta_account_status),
+                       updated_at = NOW()
+                  FROM contractors AS dup
+                 WHERE dup.name LIKE '[META]%'
+                   AND orig.id <> dup.id
+                   AND LOWER(orig.name) = LOWER(REPLACE(dup.name, '[META] ', ''))
+            """))
+            await conn.execute(text("""
+                DELETE FROM contractors
+                 WHERE name LIKE '[META]%'
+                   AND EXISTS (
+                       SELECT 1 FROM contractors orig
+                        WHERE orig.id <> contractors.id
+                          AND LOWER(orig.name) = LOWER(REPLACE(contractors.name, '[META] ', ''))
+                   )
+            """))
+        except Exception as merge_exc:
+            logger.warning("ensure_schema: meta duplicate merge skipped: %s", merge_exc)
 
         # 1. Exact contractor_id match — any GA4 property whose contractor
         #    is active/approved must be enabled.
