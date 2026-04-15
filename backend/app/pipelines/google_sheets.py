@@ -151,8 +151,43 @@ class GoogleSheetsPipeline(BasePipeline):
 
         return {"worksheets": all_worksheets}
 
+    def _detect_header_row(self, all_values: List[List[str]]) -> int:
+        """Find the most likely header row.
+
+        QuickBooks exports often have title rows ("Income by Customer"),
+        date subtitles, blank rows, etc. before the actual column headers.
+        Scan the first 10 rows and pick the one that:
+          (a) has the most non-empty cells, AND
+          (b) contains at least one period-like header (Jul-24, Q1 2025, etc.)
+            OR has 5+ non-empty cells (fallback).
+
+        Returns the row INDEX (0-based). Falls back to 0 if nothing better.
+        """
+        best_idx = 0
+        best_score = -1
+        scan_limit = min(10, len(all_values))
+        for i in range(scan_limit):
+            row = all_values[i]
+            non_empty = [c for c in row if c and str(c).strip()]
+            if len(non_empty) < 3:
+                continue
+            score = len(non_empty)
+            # Bonus if the row contains date-like headers
+            for cell in non_empty:
+                if self._parse_period_header(str(cell)):
+                    score += 50  # heavy bias toward rows with month/quarter labels
+                    break
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        return best_idx
+
     async def _extract_worksheet(self, worksheet: Worksheet) -> List[Dict[str, Any]]:
-        """Extract all rows from a single worksheet as a list of dicts."""
+        """Extract all rows from a single worksheet as a list of dicts.
+
+        Auto-detects the header row to handle QuickBooks-style exports
+        with title/section rows above the actual columns.
+        """
         try:
             all_values = worksheet.get_all_values()
 
@@ -160,15 +195,42 @@ class GoogleSheetsPipeline(BasePipeline):
                 self.logger.debug(f"Worksheet '{worksheet.title}' is empty")
                 return []
 
-            headers = all_values[0]
-            data_rows = all_values[1:]
+            header_idx = self._detect_header_row(all_values)
+            headers = all_values[header_idx]
+            data_rows = all_values[header_idx + 1:]
+            self.logger.info(
+                "Worksheet '%s': header row detected at index %d, %d data rows",
+                worksheet.title, header_idx, len(data_rows),
+            )
+
+            # De-duplicate empty header columns by giving them placeholder names
+            # so dict(zip(...)) doesn't collapse multiple empty-key columns into one.
+            cleaned_headers = []
+            seen = {}
+            for idx, h in enumerate(headers):
+                key = (h or "").strip()
+                if not key:
+                    key = f"_col_{idx}"
+                if key in seen:
+                    seen[key] += 1
+                    key = f"{key}_{seen[key]}"
+                else:
+                    seen[key] = 1
+                cleaned_headers.append(key)
 
             data = []
             for row in data_rows:
-                while len(row) < len(headers):
+                while len(row) < len(cleaned_headers):
                     row.append("")
-                row_dict = dict(zip(headers, row[: len(headers)]))
-                if any(row_dict.values()):
+                row_dict = dict(zip(cleaned_headers, row[: len(cleaned_headers)]))
+                # Keep rows that have at least one non-empty value in a NAMED column
+                # (i.e. ignore rows that only fill placeholder _col_N columns)
+                has_real_data = any(
+                    v and str(v).strip()
+                    for k, v in row_dict.items()
+                    if not k.startswith("_col_")
+                )
+                if has_real_data or any(row_dict.values()):
                     data.append(row_dict)
 
             return data
