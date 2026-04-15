@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, role_required
 from app.models.metrics import (
     DashboardSnapshot,
     GA4Metric,
@@ -3217,11 +3217,12 @@ async def get_contractor_revenue(
 
 @router.get(
     "/debug/qb-revenue",
-    summary="Debug: show all qb_revenue:: GoogleSheetMetric rows",
+    summary="Debug: show all qb_revenue:: GoogleSheetMetric rows (admin only)",
 )
 async def debug_qb_revenue(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin"])),
 ) -> dict:
     """Diagnostic endpoint to verify QB sheet ingestion."""
     rows = await db.execute(
@@ -3268,11 +3269,12 @@ async def debug_qb_revenue(
 
 @router.get(
     "/debug/sheet-headers",
-    summary="Debug: show metric_names from each sheet to diagnose pivot detection",
+    summary="Debug: show metric_names from each sheet to diagnose pivot detection (admin only)",
 )
 async def debug_sheet_headers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin"])),
     sheet: str = Query(..., description="Sheet name to inspect"),
 ) -> dict:
     """Return distinct metric_names + sample dates for a given sheet_name."""
@@ -3310,5 +3312,52 @@ async def debug_sheet_headers(
             {"metric": r[0], "date": r[1].isoformat() if r[1] else None,
              "value": float(r[2] or 0), "category": r[3]}
             for r in sample.all()
+        ],
+    }
+
+
+@router.get(
+    "/debug/revenue-source-audit",
+    summary="Admin audit: contractor revenue source breakdown for a date range",
+)
+async def revenue_source_audit(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin"])),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+) -> dict:
+    """
+    Calls the contractor-breakdown logic and reports each contractor's revenue
+    along with its source (`quickbooks` vs `estimate`). Use this to spot-check
+    whether any contractor is silently falling back to the leads×$2,500
+    heuristic instead of pulling real QB data.
+    """
+    breakdown = await get_contractor_breakdown(
+        db=db,
+        current_user=current_user,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    contractors = breakdown.get("contractors", [])
+    counts: dict[str, int] = {}
+    for c in contractors:
+        src = c.get("revenue_source") or "none"
+        counts[src] = counts.get(src, 0) + 1
+    return {
+        "period": breakdown.get("period"),
+        "total_contractors": len(contractors),
+        "source_counts": counts,
+        "contractors": [
+            {
+                "name": c.get("name"),
+                "revenue": c.get("revenue", 0),
+                "revenue_source": c.get("revenue_source", "none"),
+                "leads": c.get("leads", 0),
+                "spend": c.get("spend", 0),
+            }
+            for c in sorted(
+                contractors, key=lambda x: x.get("revenue", 0), reverse=True
+            )
         ],
     }

@@ -225,8 +225,12 @@ const IBOSContractors = () => {
                             <p className={`text-lg font-bold ${textPri}`}>{c.leads || 0}</p>
                           </div>
                           <div>
-                            <p className={`text-[10px] uppercase ${textSec}`}>Est. Revenue</p>
-                            <p className={`text-lg font-bold text-emerald-400`}>${c.revenue > 0 ? c.revenue.toLocaleString() : '0'}</p>
+                            <p className={`text-[10px] uppercase ${textSec}`}>
+                              {c.revenue_source === 'quickbooks' ? 'QB Revenue' : 'Est. Revenue'}
+                            </p>
+                            <p className={`text-lg font-bold ${c.revenue_source === 'quickbooks' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                              ${c.revenue > 0 ? c.revenue.toLocaleString() : '0'}
+                            </p>
                           </div>
                         </div>
                         <div className="mt-3 flex items-center gap-4 text-[10px]">
