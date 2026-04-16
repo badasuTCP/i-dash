@@ -2274,9 +2274,31 @@ async def get_contractor_breakdown(
         or _norm(c["name"]) in active_names_norm
     ]
 
-    # Sort by visits desc then spend desc, and cap to 20
+    # Ensure ALL active contractors appear — even those with zero data for
+    # the selected date range. The executive needs to see every active
+    # contractor regardless of whether they generated revenue this period.
+    _colors = ["#3B82F6","#10B981","#F59E0B","#8B5CF6","#EF4444","#06B6D4","#EC4899","#F97316","#14B8A6","#6366F1"]
+    present_ids = {c["id"] for c in contractors}
+    present_norms = {_norm(c["name"]) for c in contractors}
+    for row in active_rows:
+        cid, cname, _ = row
+        if cid in present_ids or _norm(cname) in present_norms:
+            continue
+        contractors.append({
+            "id": cid,
+            "name": cname,
+            "property_id": None,
+            "visits": 0, "users": 0, "bounce_rate": 0.0,
+            "color": _colors[len(contractors) % len(_colors)],
+            "meta_account_id": None,
+            "meta_account_name": None,
+            "sources": [],
+            "spend": 0.0, "leads": 0, "revenue": 0.0, "cpl": 0.0,
+        })
+
+    # Sort by visits desc then spend desc, and cap to 30
     contractors.sort(key=lambda c: (c["visits"], c["spend"]), reverse=True)
-    contractors = contractors[:20]
+    contractors = contractors[:30]
 
     # ── 5. Portfolio totals (I-BOS only — CP already excluded) ──────────
     total_visits = sum(c["visits"] for c in contractors)
