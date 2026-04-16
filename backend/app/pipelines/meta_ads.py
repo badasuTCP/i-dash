@@ -155,31 +155,50 @@ class MetaAdsPipeline(BasePipeline):
                 self.logger.warning("No Meta ad accounts discovered — nothing to extract")
                 return {"campaigns": []}
 
-            # Supplement with known accounts from brand_assets that the API
-            # didn't return (e.g. disabled accounts). This ensures we still
-            # fetch historical spend data for accounts with payment issues.
+            # Supplement with known accounts that the API didn't return
+            # (e.g. disabled/payment-hold accounts). Check both brand_assets
+            # and contractors tables so we never miss historical spend data.
             try:
                 from app.core.database import async_session_maker
                 from app.models.brand_asset import BrandAsset
+                from app.models.contractor import Contractor
                 from sqlalchemy import select
                 async with async_session_maker() as db:
+                    discovered_ids = {a["id"] for a in accounts}
+                    # From brand_assets
                     ba_rows = await db.execute(
                         select(BrandAsset.account_id, BrandAsset.account_name)
                         .where(BrandAsset.platform == "meta")
                     )
-                    discovered_ids = {a["id"] for a in accounts}
                     for acct_id, acct_name in ba_rows.all():
-                        if acct_id not in discovered_ids:
+                        if acct_id and acct_id not in discovered_ids:
                             accounts.append({
                                 "id": acct_id,
                                 "name": acct_name,
                                 "account_status": "disabled",
                             })
+                            discovered_ids.add(acct_id)
                             self.logger.info(
-                                f"Supplemented missing account from brand_assets: {acct_name} ({acct_id})"
+                                f"Supplemented from brand_assets: {acct_name} ({acct_id})"
+                            )
+                    # From contractors table (meta_account_id field)
+                    c_rows = await db.execute(
+                        select(Contractor.meta_account_id, Contractor.name)
+                        .where(Contractor.meta_account_id.isnot(None))
+                    )
+                    for acct_id, cname in c_rows.all():
+                        if acct_id and acct_id not in discovered_ids:
+                            accounts.append({
+                                "id": acct_id,
+                                "name": cname,
+                                "account_status": "disabled",
+                            })
+                            discovered_ids.add(acct_id)
+                            self.logger.info(
+                                f"Supplemented from contractors: {cname} ({acct_id})"
                             )
             except Exception as e:
-                self.logger.debug(f"brand_assets supplement skipped: {e}")
+                self.logger.debug(f"Account supplement skipped: {e}")
 
             self.logger.info(
                 f"Meta multi-account discovery: {len(accounts)} account(s) — "
