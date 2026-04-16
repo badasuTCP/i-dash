@@ -258,6 +258,11 @@ async def list_contractors(
     # 3. Google Ads: Tailored + SLG have active Google Ads campaigns
     GADS_SLUGS = {"tailored", "slg"}
 
+    logger.info(
+        "Source enrichment: ga4_ids=%s, meta_contractors=%s, gads=%s",
+        ga4_source_ids, list(meta_by_contractor.keys()), GADS_SLUGS,
+    )
+
     responses: List[ContractorResponse] = []
     for c in contractors:
         resp = ContractorResponse.model_validate(c)
@@ -275,6 +280,8 @@ async def list_contractors(
         if cid in GADS_SLUGS:
             sources.append("G-ADS")
         resp.sources = sources
+        if sources:
+            logger.info("Contractor '%s' (id=%s) → sources=%s", resp.name, cid, sources)
         responses.append(resp)
 
     return responses
