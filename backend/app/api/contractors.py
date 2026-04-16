@@ -100,6 +100,72 @@ async def _ensure_seeded(db: AsyncSession) -> None:
     logger.info("Seeded %d contractors into database", len(CONTRACTOR_DEFAULTS))
 
 
+def _norm_name(s: str) -> str:
+    """Normalize a contractor name for fuzzy matching."""
+    if not s:
+        return ""
+    s = s.lower()
+    for tok in ("[meta]", "[ga4]", "[g-ads]", "- ga4", "(concrete transformations)"):
+        s = s.replace(tok, "")
+    return "".join(ch for ch in s if ch.isalnum())
+
+
+async def _dedup_meta_contractors(db: AsyncSession) -> None:
+    """
+    Merge Meta-discovered contractor duplicates into their seed entries.
+
+    When the Meta pipeline discovers an ad account, it inserts a new row like
+    '[META] Beckley Concrete Decor (Concrete Transformations)'.  If a seed
+    contractor named 'Beckley Concrete Decor' already exists, this function:
+      1. Copies the ``meta_account_id`` onto the seed entry.
+      2. Deactivates the duplicate (sets active=False, status='merged').
+    Runs idempotently on every /contractors list call (fast — one query).
+    """
+    result = await db.execute(select(Contractor))
+    all_rows = result.scalars().all()
+
+    # Seed entries: those whose id is NOT a Meta account ID (act_…) and
+    # whose name does not start with [META] or [GA4].
+    seed_by_norm: Dict[str, Contractor] = {}
+    discovered: list[Contractor] = []
+    for c in all_rows:
+        name = c.name or ""
+        if name.startswith("[META]") or name.startswith("[GA4]") or (c.id or "").startswith("act_"):
+            discovered.append(c)
+        else:
+            seed_by_norm[_norm_name(name)] = c
+
+    merged_any = False
+    for dup in discovered:
+        dup_norm = _norm_name(dup.name)
+        if not dup_norm:
+            continue
+        # Find a seed match by substring containment
+        matched_seed = None
+        for seed_norm, seed_obj in seed_by_norm.items():
+            if seed_norm == dup_norm or seed_norm in dup_norm or dup_norm in seed_norm:
+                matched_seed = seed_obj
+                break
+        if matched_seed is None:
+            continue
+        # Copy meta_account_id if the duplicate has one and seed doesn't
+        if dup.meta_account_id and not matched_seed.meta_account_id:
+            matched_seed.meta_account_id = dup.meta_account_id
+            matched_seed.meta_account_status = dup.meta_account_status
+        # Deactivate the duplicate
+        if dup.status != "merged":
+            dup.active = False
+            dup.status = "merged"
+            merged_any = True
+            logger.info(
+                "Merged duplicate '%s' → '%s' (meta_account_id=%s)",
+                dup.name, matched_seed.name, dup.meta_account_id,
+            )
+
+    if merged_any:
+        await db.commit()
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────
 
 @router.get(
@@ -122,38 +188,13 @@ async def list_contractors(
     included as pending_admin entries so they appear in the Admin Controls UI.
     """
     await _ensure_seeded(db)
+    await _dedup_meta_contractors(db)
 
-    # 1. All contractors from the dedicated table
+    # All contractors from the dedicated table — the single source of truth.
+    # GA4 properties are NOT synthesized as separate entries; they appear as
+    # source labels on the contractor that owns them via contractor_id.
     result = await db.execute(select(Contractor).order_by(Contractor.name))
     contractors = result.scalars().all()
-    seen_ids = {c.id for c in contractors}
-
-    # 2. Merge GA4-discovered contractor properties not yet in contractors table
-    try:
-        from app.models.ga4_property import GA4Property
-
-        ga4_result = await db.execute(
-            select(GA4Property)
-            .where(
-                GA4Property.contractor_id.isnot(None),
-                GA4Property.division == "ibos",
-            )
-            .order_by(GA4Property.display_name)
-        )
-        ga4_props = ga4_result.scalars().all()
-
-        for prop in ga4_props:
-            if prop.contractor_id not in seen_ids:
-                # Synthesize a ContractorResponse from the GA4 property
-                contractors.append(
-                    _ga4_prop_to_contractor(prop)
-                )
-                seen_ids.add(prop.contractor_id)
-    except Exception as exc:
-        logger.warning("Could not merge GA4 properties into contractor list: %s", exc)
-
-    # Sort combined list by name
-    contractors.sort(key=lambda c: getattr(c, 'name', '') or '')
 
     # ── Enrich with source labels (GA4 / META / G-ADS) ───────────────
     # Build lookup: contractor_id → set of GA4 property IDs
