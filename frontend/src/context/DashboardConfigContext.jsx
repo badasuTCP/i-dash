@@ -85,15 +85,24 @@ export const DashboardConfigProvider = ({ children }) => {
         const serverMap = {};
         data.forEach((c) => { serverMap[c.id] = c.active; });
 
-        // Merge server contractors into the full list (includes GA4-discovered)
-        const merged = [...ALL_CONTRACTORS];
-        const seenIds = new Set(ALL_CONTRACTORS.map((c) => c.id));
-        data.forEach((c) => {
-          if (!seenIds.has(c.id)) {
-            merged.push({ id: c.id, name: c.name, division: c.division || 'i-bos', active: c.active, status: c.status });
-            seenIds.add(c.id);
-          }
-        });
+        // Use backend data as the source of truth (includes sources,
+        // meta_account_id, meta_account_status from the enrichment).
+        // Fall back to ALL_CONTRACTORS seed only for contractors the
+        // backend doesn't know about (shouldn't happen in practice).
+        const backendIds = new Set(data.map((c) => c.id));
+        const merged = [
+          ...data.map((c) => ({
+            id: c.id,
+            name: c.name,
+            division: c.division || 'i-bos',
+            active: c.active,
+            status: c.status,
+            sources: c.sources || [],
+            meta_account_id: c.meta_account_id || null,
+            meta_account_status: c.meta_account_status || null,
+          })),
+          ...ALL_CONTRACTORS.filter((c) => !backendIds.has(c.id)),
+        ];
         setServerContractors(merged);
 
         setConfig((prev) => ({
