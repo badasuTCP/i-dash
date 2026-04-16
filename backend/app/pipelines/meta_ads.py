@@ -633,7 +633,7 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                 if meta_id in existing_meta_ids or meta_id in already_decided:
                     # Update the ad status on existing contractors so the UI
                     # always reflects the latest account health.
-                    acct_status = acct.get("account_status", "unknown")
+                    acct_status = _parse_meta_account_status(acct.get("account_status"))
                     if meta_id in existing_meta_ids:
                         try:
                             existing_c = await session.execute(
@@ -664,7 +664,7 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                     return "".join(ch for ch in n if ch.isalnum())
 
                 raw_norm = _norm(raw_name)
-                acct_status = acct.get("account_status", "unknown")
+                acct_status = _parse_meta_account_status(acct.get("account_status"))
                 merged_into_existing = False
                 if raw_norm:
                     try:
@@ -727,7 +727,7 @@ async def reconcile_meta_contractors() -> Dict[str, Any]:
                     active=auto_active,
                     status=new_status,
                     meta_account_id=meta_id,
-                    meta_account_status=acct.get("account_status", "unknown"),
+                    meta_account_status=_parse_meta_account_status(acct.get("account_status")),
                     updated_at=now,
                 )
                 session.add(new_contractor)

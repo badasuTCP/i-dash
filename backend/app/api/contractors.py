@@ -106,7 +106,8 @@ def _norm_name(s: str) -> str:
         return ""
     s = s.lower()
     for tok in ("[meta]", "[ga4]", "[g-ads]", "- ga4",
-                "(concrete transformations)", "(greg haber)"):
+                "(concrete transformations)", "(greg haber)",
+                ".com", ".co", ".net", ".org", " llc", " inc.", " inc"):
         s = s.replace(tok, "")
     return "".join(ch for ch in s if ch.isalnum())
 
@@ -217,6 +218,36 @@ async def _cleanup_contractors(db: AsyncSession) -> None:
             changed = True
         else:
             seen_pending[norm] = c
+
+    # ── Step 5: Merge non-seed duplicates by normalized name ─────────
+    # e.g. "LNS Concrete Coatings" (id=lns-concrete-coatings) and
+    # "lnsconcretecoatings.com" (id=lnsconcretecoatings-com) — keep the
+    # one with the cleaner display name, merge the other.
+    seen_active: Dict[str, Contractor] = {}
+    for c in all_rows:
+        if c.status in ("merged", "inactive", "rejected") or c.division == "cp":
+            continue
+        norm = _norm_name(c.name)
+        if not norm:
+            continue
+        existing = seen_active.get(norm)
+        if existing is None:
+            seen_active[norm] = c
+        elif existing.id != c.id:
+            # Duplicate! Keep the one with a cleaner name (no dots/dashes in name)
+            keeper = existing
+            loser = c
+            if "." in (existing.name or "") and "." not in (c.name or ""):
+                keeper, loser = c, existing
+                seen_active[norm] = c
+            # Copy meta data from loser to keeper
+            if loser.meta_account_id and not keeper.meta_account_id:
+                keeper.meta_account_id = loser.meta_account_id
+                keeper.meta_account_status = loser.meta_account_status
+            loser.active = False
+            loser.status = "merged"
+            changed = True
+            logger.info("Merged non-seed dup '%s' → '%s'", loser.name, keeper.name)
 
     if changed:
         await db.commit()
