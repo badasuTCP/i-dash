@@ -155,9 +155,35 @@ class MetaAdsPipeline(BasePipeline):
                 self.logger.warning("No Meta ad accounts discovered — nothing to extract")
                 return {"campaigns": []}
 
+            # Supplement with known accounts from brand_assets that the API
+            # didn't return (e.g. disabled accounts). This ensures we still
+            # fetch historical spend data for accounts with payment issues.
+            try:
+                from app.core.database import async_session_maker
+                from app.models.brand_asset import BrandAsset
+                from sqlalchemy import select
+                async with async_session_maker() as db:
+                    ba_rows = await db.execute(
+                        select(BrandAsset.account_id, BrandAsset.account_name)
+                        .where(BrandAsset.platform == "meta")
+                    )
+                    discovered_ids = {a["id"] for a in accounts}
+                    for acct_id, acct_name in ba_rows.all():
+                        if acct_id not in discovered_ids:
+                            accounts.append({
+                                "id": acct_id,
+                                "name": acct_name,
+                                "account_status": "disabled",
+                            })
+                            self.logger.info(
+                                f"Supplemented missing account from brand_assets: {acct_name} ({acct_id})"
+                            )
+            except Exception as e:
+                self.logger.debug(f"brand_assets supplement skipped: {e}")
+
             self.logger.info(
                 f"Meta multi-account discovery: {len(accounts)} account(s) — "
-                + ", ".join(f"{a['name']} ({a['id']})" for a in accounts[:10])
+                + ", ".join(f"{a['name']} ({a['id']})" for a in accounts[:15])
             )
 
             all_campaigns: List[Dict[str, Any]] = []
