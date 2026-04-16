@@ -196,8 +196,8 @@ async def list_contractors(
     result = await db.execute(select(Contractor).order_by(Contractor.name))
     contractors = result.scalars().all()
 
-    # ── Enrich with source labels (GA4 / META / G-ADS) ───────────────
-    # Build lookup: contractor_id → set of GA4 property IDs
+    # ── Enrich with source labels (GA4 / META / G-ADS) + ad status ────
+    # 1. GA4: which contractor_ids have GA4 properties?
     ga4_source_ids: set[str] = set()
     try:
         from app.models.ga4_property import GA4Property as _GP
@@ -211,7 +211,51 @@ async def list_contractors(
     except Exception:
         pass
 
-    # Google Ads hardcoded CID → contractor slug map
+    # 2. META: check brand_assets for ibos Meta accounts and fuzzy-match
+    #    to contractors. Also pull meta_account_status from [META] entries
+    #    (merged or not) in the contractors table for ad-status display.
+    meta_by_contractor: Dict[str, dict] = {}  # contractor_id → {account_id, account_name, status}
+    try:
+        from app.models.brand_asset import BrandAsset as _BA
+        ba_rows = await db.execute(
+            select(_BA.account_id, _BA.account_name).where(
+                _BA.platform == "meta",
+                _BA.brand == "ibos",
+            )
+        )
+        meta_accounts = [(r[0], r[1]) for r in ba_rows.all()]
+
+        # Also grab meta_account_status from ALL contractor records (incl. merged)
+        status_rows = await db.execute(
+            select(Contractor.meta_account_id, Contractor.meta_account_status)
+            .where(Contractor.meta_account_id.isnot(None))
+        )
+        meta_status_map = {r[0]: r[1] for r in status_rows.all() if r[1]}
+
+        for c in contractors:
+            c_norm = _norm_name(c.name)
+            if not c_norm:
+                continue
+            # Check if this contractor already has a meta_account_id (from dedup)
+            if c.meta_account_id:
+                meta_by_contractor[c.id] = {
+                    "account_id": c.meta_account_id,
+                    "status": c.meta_account_status or meta_status_map.get(c.meta_account_id),
+                }
+                continue
+            # Fuzzy-match against brand_assets Meta accounts
+            for acct_id, acct_name in meta_accounts:
+                acct_norm = _norm_name(acct_name)
+                if c_norm == acct_norm or c_norm in acct_norm or acct_norm in c_norm:
+                    meta_by_contractor[c.id] = {
+                        "account_id": acct_id,
+                        "status": meta_status_map.get(acct_id),
+                    }
+                    break
+    except Exception as exc:
+        logger.warning("Meta source enrichment failed: %s", exc)
+
+    # 3. Google Ads: Tailored + SLG have active Google Ads campaigns
     GADS_SLUGS = {"tailored", "slg"}
 
     responses: List[ContractorResponse] = []
@@ -221,8 +265,13 @@ async def list_contractors(
         cid = resp.id
         if cid in ga4_source_ids:
             sources.append("GA4")
-        if resp.meta_account_id:
+        if cid in meta_by_contractor:
             sources.append("META")
+            meta_info = meta_by_contractor[cid]
+            if not resp.meta_account_id:
+                resp.meta_account_id = meta_info["account_id"]
+            if meta_info.get("status"):
+                resp.meta_account_status = meta_info["status"]
         if cid in GADS_SLUGS:
             sources.append("G-ADS")
         resp.sources = sources

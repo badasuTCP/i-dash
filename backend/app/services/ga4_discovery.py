@@ -323,8 +323,14 @@ async def get_properties_for_division(
     result = await db.execute(stmt)
     rows = result.scalars().all()
 
-    return [
-        {
+    # Deduplicate: when multiple properties share the same contractor_id,
+    # keep only the primary one (prefer the display_name without "- GA4" suffix).
+    # "All Properties" aggregation in the web-analytics endpoint still uses
+    # all property_ids; this dedup is only for the Property Switcher dropdown.
+    seen_contractors: Dict[str, dict] = {}  # contractor_id → best property dict
+    orphans: list[dict] = []  # properties with no contractor_id
+    for row in rows:
+        entry = {
             "property_id": row.property_id,
             "display_name": row.display_name,
             "account_name": row.account_name,
@@ -334,8 +340,21 @@ async def get_properties_for_division(
             "status": row.status,
             "contractor_id": row.contractor_id,
         }
-        for row in rows
-    ]
+        cid = row.contractor_id
+        if not cid:
+            orphans.append(entry)
+            continue
+        existing = seen_contractors.get(cid)
+        if existing is None:
+            seen_contractors[cid] = entry
+        else:
+            # Prefer the name that does NOT end in "- GA4" (cleaner display name)
+            new_name = (row.display_name or "").strip()
+            old_name = (existing["display_name"] or "").strip()
+            if old_name.endswith("- GA4") and not new_name.endswith("- GA4"):
+                seen_contractors[cid] = entry
+
+    return list(seen_contractors.values()) + orphans
 
 
 async def resolve_primary_property(db, division: str) -> Optional[str]:
