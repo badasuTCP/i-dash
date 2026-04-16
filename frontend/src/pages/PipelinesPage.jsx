@@ -825,6 +825,17 @@ const PipelinesPage = () => {
                           <p className={`text-xs ${textSec}`}>
                             {contractor.active ? '✅ Visible on dashboards' : '🚫 Hidden from dashboards'}
                           </p>
+                          {(contractor.sources || []).map((src) => (
+                            <span key={src} className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide ${
+                              src === 'GA4'
+                                ? 'bg-blue-500/15 text-blue-400 border border-blue-500/25'
+                                : src === 'META'
+                                  ? 'bg-purple-500/15 text-purple-400 border border-purple-500/25'
+                                  : 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/25'
+                            }`}>
+                              {src}
+                            </span>
+                          ))}
                           {contractor.meta_account_status && contractor.meta_account_status !== 'unknown' && (
                             <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide ${
                               contractor.meta_account_status === 'active'

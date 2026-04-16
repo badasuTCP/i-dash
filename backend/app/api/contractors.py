@@ -55,6 +55,7 @@ class ContractorResponse(BaseModel):
     meta_account_id: Optional[str] = None
     meta_account_status: Optional[str] = None  # active, disabled, unsettled, etc.
     platform_source: Optional[str] = None  # meta, google_ads, ga4
+    sources: List[str] = []  # e.g. ["GA4", "META", "G-ADS"]
     updated_at: datetime | None = None
 
     class Config:
@@ -154,7 +155,39 @@ async def list_contractors(
     # Sort combined list by name
     contractors.sort(key=lambda c: getattr(c, 'name', '') or '')
 
-    return [ContractorResponse.model_validate(c) for c in contractors]
+    # ── Enrich with source labels (GA4 / META / G-ADS) ───────────────
+    # Build lookup: contractor_id → set of GA4 property IDs
+    ga4_source_ids: set[str] = set()
+    try:
+        from app.models.ga4_property import GA4Property as _GP
+        ga4_rows = await db.execute(
+            select(_GP.contractor_id).where(
+                _GP.contractor_id.isnot(None),
+                _GP.division == "ibos",
+            ).distinct()
+        )
+        ga4_source_ids = {r[0] for r in ga4_rows.all()}
+    except Exception:
+        pass
+
+    # Google Ads hardcoded CID → contractor slug map
+    GADS_SLUGS = {"tailored", "slg"}
+
+    responses: List[ContractorResponse] = []
+    for c in contractors:
+        resp = ContractorResponse.model_validate(c)
+        sources: List[str] = []
+        cid = resp.id
+        if cid in ga4_source_ids:
+            sources.append("GA4")
+        if resp.meta_account_id:
+            sources.append("META")
+        if cid in GADS_SLUGS:
+            sources.append("G-ADS")
+        resp.sources = sources
+        responses.append(resp)
+
+    return responses
 
 
 def _ga4_prop_to_contractor(prop):

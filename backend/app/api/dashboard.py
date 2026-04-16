@@ -2223,11 +2223,35 @@ async def get_contractor_breakdown(
                 break
 
     # ── 4. Fold Meta-only accounts (no GA4 match) into the list ─────────
+    # Only include Meta accounts that belong to an active contractor
+    # (prevents phantom entries in the breakdown that aren't in Management).
+    from app.models.contractor import Contractor as ContractorModel
+    active_q = await db.execute(
+        select(ContractorModel.id, ContractorModel.name, ContractorModel.meta_account_id)
+        .where(ContractorModel.active == True)
+    )
+    active_rows = active_q.all()
+    active_ids = {r[0] for r in active_rows}
+    active_meta_ids = {r[2] for r in active_rows if r[2]}
+    active_names_norm = {_norm(r[1]): r[0] for r in active_rows}
+
     for acct_id, metrics in meta_spend_by_account.items():
         if acct_id in matched_meta_accounts:
             continue
+        # Only fold in if this Meta account is linked to an active contractor
+        acct_norm = _norm(metrics["account_name"])
+        linked_id = None
+        if acct_id in active_meta_ids:
+            linked_id = acct_id
+        else:
+            for norm_name, cid in active_names_norm.items():
+                if acct_norm == norm_name or acct_norm in norm_name or norm_name in acct_norm:
+                    linked_id = cid
+                    break
+        if linked_id is None:
+            continue  # skip — not an active contractor
         contractors.append({
-            "id": acct_id,
+            "id": linked_id if linked_id in active_ids else acct_id,
             "name": metrics["account_name"],
             "property_id": None,
             "visits": 0, "users": 0, "bounce_rate": 0.0,
@@ -2240,6 +2264,15 @@ async def get_contractor_breakdown(
             "revenue": round(metrics["revenue"], 2),
             "cpl": round(metrics["spend"] / max(metrics["leads"], 1), 2) if metrics["leads"] > 0 else 0,
         })
+
+    # Final gate: only keep contractors that are active in the contractors table.
+    # GA4 entries are already gated by enabled=True (reconciled with active),
+    # but stale or orphaned entries can leak through.
+    contractors = [
+        c for c in contractors
+        if c["id"] in active_ids
+        or _norm(c["name"]) in active_names_norm
+    ]
 
     # Sort by visits desc then spend desc, and cap to 20
     contractors.sort(key=lambda c: (c["visits"], c["spend"]), reverse=True)
