@@ -148,10 +148,12 @@ async def _dedup_meta_contractors(db: AsyncSession) -> None:
                 break
         if matched_seed is None:
             continue
-        # Copy meta_account_id if the duplicate has one and seed doesn't
-        if dup.meta_account_id and not matched_seed.meta_account_id:
-            matched_seed.meta_account_id = dup.meta_account_id
-            matched_seed.meta_account_status = dup.meta_account_status
+        # Copy meta_account_id and always update status (it can change over time)
+        if dup.meta_account_id:
+            if not matched_seed.meta_account_id:
+                matched_seed.meta_account_id = dup.meta_account_id
+            if dup.meta_account_status:
+                matched_seed.meta_account_status = dup.meta_account_status
         # Deactivate the duplicate
         if dup.status != "merged":
             dup.active = False

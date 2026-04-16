@@ -2235,6 +2235,9 @@ async def get_contractor_breakdown(
     active_meta_ids = {r[2] for r in active_rows if r[2]}
     active_names_norm = {_norm(r[1]): r[0] for r in active_rows}
 
+    # Build reverse lookup: contractor_id → clean name from contractors table
+    active_id_to_name = {r[0]: r[1] for r in active_rows}
+
     for acct_id, metrics in meta_spend_by_account.items():
         if acct_id in matched_meta_accounts:
             continue
@@ -2250,9 +2253,11 @@ async def get_contractor_breakdown(
                     break
         if linked_id is None:
             continue  # skip — not an active contractor
+        # Use the CLEAN name from the contractors table, not the Meta account name
+        display_name = active_id_to_name.get(linked_id, metrics["account_name"])
         contractors.append({
             "id": linked_id if linked_id in active_ids else acct_id,
-            "name": metrics["account_name"],
+            "name": display_name,
             "property_id": None,
             "visits": 0, "users": 0, "bounce_rate": 0.0,
             "color": "#64748B",
@@ -2266,13 +2271,27 @@ async def get_contractor_breakdown(
         })
 
     # Final gate: only keep contractors that are active in the contractors table.
-    # GA4 entries are already gated by enabled=True (reconciled with active),
-    # but stale or orphaned entries can leak through.
+    # Also exclude entries whose name starts with [META]/[GA4] or whose id is
+    # the CP training account — those are not I-BOS contractors.
+    CP_META_ID = "act_144305066"
     contractors = [
         c for c in contractors
-        if c["id"] in active_ids
-        or _norm(c["name"]) in active_names_norm
+        if (c["id"] in active_ids or _norm(c["name"]) in active_names_norm)
+        and c["id"] != CP_META_ID
+        and not (c.get("name") or "").startswith("[META]")
+        and not (c.get("name") or "").startswith("[GA4]")
     ]
+
+    # Clean up names: strip [META]/[GA4] prefixes and "- GA4" suffixes.
+    # Breakdown is for executives — no platform tags.
+    for c in contractors:
+        name = c["name"]
+        for prefix in ("[META] ", "[GA4] ", "[META]", "[GA4]"):
+            if name.startswith(prefix):
+                name = name[len(prefix):].strip()
+        if name.endswith("- GA4"):
+            name = name[:-5].strip()
+        c["name"] = name
 
     # Ensure ALL active contractors appear — even those with zero data for
     # the selected date range. The executive needs to see every active
@@ -2282,6 +2301,11 @@ async def get_contractor_breakdown(
     present_norms = {_norm(c["name"]) for c in contractors}
     for row in active_rows:
         cid, cname, _ = row
+        # Skip CP training account and [META]/[GA4] prefixed entries
+        if cid == CP_META_ID:
+            continue
+        if cname.startswith("[META]") or cname.startswith("[GA4]"):
+            continue
         if cid in present_ids or _norm(cname) in present_norms:
             continue
         contractors.append({
@@ -2387,9 +2411,11 @@ async def get_contractor_breakdown(
         qb_data = {row[0].strip().lower(): float(row[1] or 0) for row in qb_q.all()}
 
         if qb_data:
-            logger.info("QB revenue data found: %d contractors", len(qb_data))
+            logger.info("QB revenue data found: %d contractors, names=%s",
+                        len(qb_data), list(qb_data.keys())[:20])
             for c in contractors:
                 c_name = (c["name"] or "").lower().strip()
+                c_id = (c["id"] or "").lower().strip()
                 # Try exact match first, then substring match
                 matched_rev = qb_data.get(c_name)
                 if matched_rev is None:
@@ -2404,11 +2430,22 @@ async def get_contractor_breakdown(
                         if len(c_words) >= 2 and c_words == qb_words:
                             matched_rev = qb_rev
                             break
+                        # Try matching contractor slug/id (e.g. "tvs" in "tvs coatings inc")
+                        if c_id and len(c_id) >= 3 and c_id in qb_name:
+                            matched_rev = qb_rev
+                            break
+                        # Try matching first word of contractor name (for short names)
+                        first_word = c_name.split()[0] if c_name else ""
+                        if first_word and len(first_word) >= 3 and first_word in qb_name.split():
+                            matched_rev = qb_rev
+                            break
                 if matched_rev is not None and matched_rev > 0:
                     c["revenue"] = round(matched_rev, 2)
                     c["revenue_source"] = "quickbooks"
                     if "QB" not in c.get("sources", []):
                         c.setdefault("sources", []).append("QB")
+                else:
+                    logger.debug("QB no match for '%s' (id=%s)", c_name, c_id)
     except Exception as exc:
         logger.warning("QB revenue lookup failed: %s", exc)
 
