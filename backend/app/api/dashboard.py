@@ -2397,6 +2397,11 @@ async def get_contractor_breakdown(
     # ── QB Revenue: replace heuristic with real QuickBooks data ─────
     # The QB_Contractor_Revenue tab is stored as qb_revenue:: prefixed
     # GoogleSheetMetric rows. Match by contractor name (fuzzy).
+    # Manual alias map for contractors whose ad-account name differs from
+    # their QuickBooks business name (no fuzzy match possible).
+    QB_NAME_ALIASES = {
+        "scf concrete promo": "schmidt custom flooring",
+    }
     try:
         qb_q = await db.execute(
             select(
@@ -2416,8 +2421,12 @@ async def get_contractor_breakdown(
             for c in contractors:
                 c_name = (c["name"] or "").lower().strip()
                 c_id = (c["id"] or "").lower().strip()
-                # Try exact match first, then substring match
-                matched_rev = qb_data.get(c_name)
+                # Check alias map first (for names that can't fuzzy-match)
+                alias = QB_NAME_ALIASES.get(c_name)
+                # Try exact match (or alias), then substring match
+                matched_rev = qb_data.get(alias) if alias else None
+                if matched_rev is None:
+                    matched_rev = qb_data.get(c_name)
                 if matched_rev is None:
                     # Fuzzy: check if contractor name is contained in any QB name or vice versa
                     for qb_name, qb_rev in qb_data.items():
