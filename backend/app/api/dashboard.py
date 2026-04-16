@@ -2401,6 +2401,7 @@ async def get_contractor_breakdown(
     # their QuickBooks business name (no fuzzy match possible).
     QB_NAME_ALIASES = {
         "scf concrete promo": "schmidt custom flooring",
+        "schmidt custom flooring": "schmidt custom flooring",  # after rename
     }
     try:
         qb_q = await db.execute(

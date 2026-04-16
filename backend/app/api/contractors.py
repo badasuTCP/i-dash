@@ -125,6 +125,22 @@ def _strip_prefix(name: str) -> str:
 # ── The CP training ad account — never an I-BOS contractor ──────────
 CP_TRAINING_ACCOUNT_ID = "act_144305066"
 
+# ── Display name corrections ──────────────────────────────────────────
+# Ad-platform names that differ from the real business name.
+DISPLAY_NAME_FIXES = {
+    "scf concrete promo": "Schmidt Custom Flooring",
+    "scf-concrete-promo": "Schmidt Custom Flooring",  # also match by id
+}
+
+# ── Known disabled Meta ad accounts (not returned by Meta API) ────────
+# These accounts are disabled/payment-hold and the Meta API doesn't
+# include them in the portfolio response. We track their status manually
+# until the API starts returning them again.
+KNOWN_DISABLED_ACCOUNTS = {
+    "artisan-concrete-coatings": "disabled",
+    "graber": "disabled",
+}
+
 
 async def _cleanup_contractors(db: AsyncSession) -> None:
     """
@@ -143,9 +159,13 @@ async def _cleanup_contractors(db: AsyncSession) -> None:
     all_rows = result.scalars().all()
     changed = False
 
-    # ── Step 1: Strip prefixes from names in the DB ───────────────────
+    # ── Step 1: Strip prefixes + fix display names in the DB ────────
     for c in all_rows:
         clean = _strip_prefix(c.name or "")
+        # Apply display name corrections (e.g. "SCF Concrete Promo" → "Schmidt Custom Flooring")
+        fixed = DISPLAY_NAME_FIXES.get(clean.lower()) or DISPLAY_NAME_FIXES.get(c.id)
+        if fixed:
+            clean = fixed
         if clean != c.name:
             c.name = clean
             changed = True
@@ -173,7 +193,7 @@ async def _cleanup_contractors(db: AsyncSession) -> None:
 
     for dup in non_seed:
         dup_norm = _norm_name(dup.name)
-        if not dup_norm or dup.status == "merged":
+        if not dup_norm:
             continue
         # Find a seed match
         matched_seed = None
@@ -185,17 +205,18 @@ async def _cleanup_contractors(db: AsyncSession) -> None:
                 break
         if matched_seed is None:
             continue
-        # Copy meta data
+        # Always sync meta data (status can change after initial merge)
         if dup.meta_account_id:
             if not matched_seed.meta_account_id:
                 matched_seed.meta_account_id = dup.meta_account_id
-            if dup.meta_account_status:
+            if dup.meta_account_status and dup.meta_account_status != "unknown":
                 matched_seed.meta_account_status = dup.meta_account_status
-        # Mark as merged
-        dup.active = False
-        dup.status = "merged"
-        changed = True
-        logger.info("Merged '%s' → '%s' (meta=%s)", dup.name, matched_seed.name, dup.meta_account_id)
+        # Mark as merged if not already
+        if dup.status != "merged":
+            dup.active = False
+            dup.status = "merged"
+            changed = True
+            logger.info("Merged '%s' → '%s' (meta=%s)", dup.name, matched_seed.name, dup.meta_account_id)
 
     # ── Step 4: Dedup pending entries with same normalized name ────────
     seen_pending: Dict[str, Contractor] = {}
@@ -371,6 +392,11 @@ async def list_contractors(
                 resp.meta_account_status = meta_info["status"]
         if cid in GADS_SLUGS:
             sources.append("G-ADS")
+        # Apply known disabled statuses for accounts the Meta API doesn't return
+        if cid in KNOWN_DISABLED_ACCOUNTS and not resp.meta_account_status:
+            resp.meta_account_status = KNOWN_DISABLED_ACCOUNTS[cid]
+            if "META" not in sources:
+                sources.append("META")
         resp.sources = sources
         if sources:
             logger.info("Contractor '%s' (id=%s) → sources=%s", resp.name, cid, sources)
