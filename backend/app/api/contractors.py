@@ -105,67 +105,122 @@ def _norm_name(s: str) -> str:
     if not s:
         return ""
     s = s.lower()
-    for tok in ("[meta]", "[ga4]", "[g-ads]", "- ga4", "(concrete transformations)"):
+    for tok in ("[meta]", "[ga4]", "[g-ads]", "- ga4",
+                "(concrete transformations)", "(greg haber)"):
         s = s.replace(tok, "")
     return "".join(ch for ch in s if ch.isalnum())
 
 
-async def _dedup_meta_contractors(db: AsyncSession) -> None:
-    """
-    Merge Meta-discovered contractor duplicates into their seed entries.
+def _strip_prefix(name: str) -> str:
+    """Remove [META]/[GA4] prefixes and '- GA4' suffix from a display name."""
+    for prefix in ("[META] ", "[GA4] ", "[META]", "[GA4]"):
+        if name.startswith(prefix):
+            name = name[len(prefix):].strip()
+    if name.endswith("- GA4"):
+        name = name[:-5].strip()
+    return name
 
-    When the Meta pipeline discovers an ad account, it inserts a new row like
-    '[META] Beckley Concrete Decor (Concrete Transformations)'.  If a seed
-    contractor named 'Beckley Concrete Decor' already exists, this function:
-      1. Copies the ``meta_account_id`` onto the seed entry.
-      2. Deactivates the duplicate (sets active=False, status='merged').
-    Runs idempotently on every /contractors list call (fast — one query).
+
+# ── The CP training ad account — never an I-BOS contractor ──────────
+CP_TRAINING_ACCOUNT_ID = "act_144305066"
+
+
+async def _cleanup_contractors(db: AsyncSession) -> None:
+    """
+    Thorough contractor DB cleanup.  Runs idempotently on every
+    /contractors list call (one query, fast).
+
+    What it does:
+      1. Strips [META]/[GA4] prefixes from ALL contractor names in the DB.
+      2. Marks the CP training ad account (act_144305066) as division='cp'
+         and inactive so it never appears in I-BOS views.
+      3. Merges discovered duplicates into their seed entry (copies
+         meta_account_id + status, marks duplicate as 'merged').
+      4. Deduplicates pending entries with the same normalized name.
     """
     result = await db.execute(select(Contractor))
     all_rows = result.scalars().all()
+    changed = False
 
-    # Seed entries: those whose id is NOT a Meta account ID (act_…) and
-    # whose name does not start with [META] or [GA4].
-    seed_by_norm: Dict[str, Contractor] = {}
-    discovered: list[Contractor] = []
+    # ── Step 1: Strip prefixes from names in the DB ───────────────────
     for c in all_rows:
-        name = c.name or ""
-        if name.startswith("[META]") or name.startswith("[GA4]") or (c.id or "").startswith("act_"):
-            discovered.append(c)
-        else:
-            seed_by_norm[_norm_name(name)] = c
+        clean = _strip_prefix(c.name or "")
+        if clean != c.name:
+            c.name = clean
+            changed = True
 
-    merged_any = False
-    for dup in discovered:
+    # ── Step 2: Mark CP training account ──────────────────────────────
+    for c in all_rows:
+        if c.id == CP_TRAINING_ACCOUNT_ID or c.name == "144305066":
+            if c.division != "cp" or c.active:
+                c.division = "cp"
+                c.active = False
+                c.status = "inactive"
+                changed = True
+                logger.info("Marked CP training account '%s' as cp/inactive", c.id)
+
+    # ── Step 3: Merge discovered duplicates into seed entries ─────────
+    # Seed = entries from CONTRACTOR_DEFAULTS (known slugs)
+    seed_ids = {d["id"] for d in CONTRACTOR_DEFAULTS}
+    seed_by_norm: Dict[str, Contractor] = {}
+    non_seed: list[Contractor] = []
+    for c in all_rows:
+        if c.id in seed_ids:
+            seed_by_norm[_norm_name(c.name)] = c
+        else:
+            non_seed.append(c)
+
+    for dup in non_seed:
         dup_norm = _norm_name(dup.name)
-        if not dup_norm:
+        if not dup_norm or dup.status == "merged":
             continue
-        # Find a seed match by substring containment
+        # Find a seed match
         matched_seed = None
         for seed_norm, seed_obj in seed_by_norm.items():
-            if seed_norm == dup_norm or seed_norm in dup_norm or dup_norm in seed_norm:
+            if (seed_norm == dup_norm
+                    or (len(seed_norm) >= 4 and seed_norm in dup_norm)
+                    or (len(dup_norm) >= 4 and dup_norm in seed_norm)):
                 matched_seed = seed_obj
                 break
         if matched_seed is None:
             continue
-        # Copy meta_account_id and always update status (it can change over time)
+        # Copy meta data
         if dup.meta_account_id:
             if not matched_seed.meta_account_id:
                 matched_seed.meta_account_id = dup.meta_account_id
             if dup.meta_account_status:
                 matched_seed.meta_account_status = dup.meta_account_status
-        # Deactivate the duplicate
-        if dup.status != "merged":
-            dup.active = False
-            dup.status = "merged"
-            merged_any = True
-            logger.info(
-                "Merged duplicate '%s' → '%s' (meta_account_id=%s)",
-                dup.name, matched_seed.name, dup.meta_account_id,
-            )
+        # Mark as merged
+        dup.active = False
+        dup.status = "merged"
+        changed = True
+        logger.info("Merged '%s' → '%s' (meta=%s)", dup.name, matched_seed.name, dup.meta_account_id)
 
-    if merged_any:
+    # ── Step 4: Dedup pending entries with same normalized name ────────
+    seen_pending: Dict[str, Contractor] = {}
+    for c in all_rows:
+        if c.status not in ("pending_admin", "pending"):
+            continue
+        norm = _norm_name(c.name)
+        if not norm:
+            continue
+        # Also check if this pending entry matches a seed
+        if norm in {_norm_name(s.name) for s in seed_by_norm.values()}:
+            c.status = "merged"
+            c.active = False
+            changed = True
+            continue
+        if norm in seen_pending:
+            # Duplicate pending — keep the first, merge this one
+            c.status = "merged"
+            c.active = False
+            changed = True
+        else:
+            seen_pending[norm] = c
+
+    if changed:
         await db.commit()
+        logger.info("Contractor cleanup complete")
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
@@ -190,12 +245,16 @@ async def list_contractors(
     included as pending_admin entries so they appear in the Admin Controls UI.
     """
     await _ensure_seeded(db)
-    await _dedup_meta_contractors(db)
+    await _cleanup_contractors(db)
 
-    # All contractors from the dedicated table — the single source of truth.
-    # GA4 properties are NOT synthesized as separate entries; they appear as
-    # source labels on the contractor that owns them via contractor_id.
-    result = await db.execute(select(Contractor).order_by(Contractor.name))
+    # All I-BOS contractors from the dedicated table.
+    # CP-division entries and merged duplicates are excluded.
+    result = await db.execute(
+        select(Contractor)
+        .where(Contractor.division != "cp")
+        .where(Contractor.status != "merged")
+        .order_by(Contractor.name)
+    )
     contractors = result.scalars().all()
 
     # ── Enrich with source labels (GA4 / META / G-ADS) + ad status ────
@@ -458,26 +517,34 @@ async def list_pending_contractors(
         )
 
     await _ensure_seeded(db)
+    await _cleanup_contractors(db)
 
-    # From contractors table — only truly pending ones
+    # From contractors table — only truly pending, not merged, not CP
     result = await db.execute(
         select(Contractor)
-        .where(Contractor.status == "pending_admin")
+        .where(
+            Contractor.status == "pending_admin",
+            Contractor.division != "cp",
+        )
         .order_by(Contractor.updated_at.desc())
     )
     pending = list(result.scalars().all())
     seen_ids = {c.id for c in pending}
+    seen_norms = {_norm_name(c.name) for c in pending}
 
-    # Build set of contractor IDs that have already been reviewed
-    # (approved, rejected, active, inactive) — these must NOT reappear
+    # Build set of contractor IDs/names that have already been reviewed
     reviewed_result = await db.execute(
-        select(Contractor.id).where(
-            Contractor.status.in_(["active", "inactive", "rejected"])
+        select(Contractor.id, Contractor.name).where(
+            Contractor.status.in_(["active", "inactive", "rejected", "merged"])
         )
     )
-    reviewed_ids = {row[0] for row in reviewed_result.fetchall()}
+    reviewed_ids = set()
+    reviewed_norms = set()
+    for row in reviewed_result.fetchall():
+        reviewed_ids.add(row[0])
+        reviewed_norms.add(_norm_name(row[1]))
 
-    # From ga4_properties table — exclude already-reviewed contractors
+    # From ga4_properties table — exclude already-reviewed and duplicates
     try:
         from app.models.ga4_property import GA4Property
 
@@ -491,9 +558,14 @@ async def list_pending_contractors(
         )
         for prop in ga4_result.scalars().all():
             cid = prop.contractor_id
-            if cid not in seen_ids and cid not in reviewed_ids:
-                pending.append(_ga4_prop_to_contractor(prop))
-                seen_ids.add(cid)
+            prop_norm = _norm_name(prop.display_name or "")
+            if cid in seen_ids or cid in reviewed_ids:
+                continue
+            if prop_norm in seen_norms or prop_norm in reviewed_norms:
+                continue
+            pending.append(_ga4_prop_to_contractor(prop))
+            seen_ids.add(cid)
+            seen_norms.add(prop_norm)
     except Exception as exc:
         logger.warning("Could not merge GA4 pending properties: %s", exc)
 
@@ -513,10 +585,14 @@ async def pending_count(
         return {"count": 0}
 
     await _ensure_seeded(db)
+    await _cleanup_contractors(db)
 
-    # Count from contractors table
+    # Count from contractors table (exclude CP and merged)
     result = await db.execute(
-        select(Contractor).where(Contractor.status == "pending_admin")
+        select(Contractor).where(
+            Contractor.status == "pending_admin",
+            Contractor.division != "cp",
+        )
     )
     contractor_ids = {c.id for c in result.scalars().all()}
     count = len(contractor_ids)
@@ -524,7 +600,7 @@ async def pending_count(
     # Already-reviewed contractors must never reappear as pending
     reviewed_result = await db.execute(
         select(Contractor.id).where(
-            Contractor.status.in_(["active", "inactive", "rejected"])
+            Contractor.status.in_(["active", "inactive", "rejected", "merged"])
         )
     )
     reviewed_ids = {row[0] for row in reviewed_result.fetchall()}
