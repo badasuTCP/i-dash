@@ -2204,8 +2204,33 @@ async def get_contractor_breakdown(
         for acct_id, v in meta_spend_by_account.items()
     }
 
+    # Pre-load contractor → meta_account_id mapping from the DB so we can
+    # match directly, not just by fuzzy name. This handles cases where the
+    # display name differs from the Meta ad-account name (e.g. "Schmidt
+    # Custom Flooring" contractor with Meta account "SCF Concrete Promo").
+    from app.models.contractor import Contractor as _C
+    _cmeta_q = await db.execute(
+        select(_C.id, _C.meta_account_id).where(_C.meta_account_id.isnot(None))
+    )
+    contractor_meta_map = {row[0]: row[1] for row in _cmeta_q.all()}
+
     matched_meta_accounts: set[str] = set()
     for c in contractors:
+        # ── First: direct match by stored meta_account_id on the contractor record
+        stored_meta_id = contractor_meta_map.get(c["id"])
+        if stored_meta_id and stored_meta_id in meta_spend_by_account:
+            metrics = meta_spend_by_account[stored_meta_id]
+            c["meta_account_id"] = stored_meta_id
+            c["meta_account_name"] = metrics["account_name"]
+            c["spend"] = round(metrics["spend"], 2)
+            c["leads"] = metrics["leads"]
+            c["revenue"] = round(metrics["revenue"], 2)
+            c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
+            if "META" not in c["sources"]:
+                c["sources"].append("META")
+            matched_meta_accounts.add(stored_meta_id)
+            continue
+        # ── Fallback: fuzzy name match
         key = _norm(c["name"])
         if not key:
             continue
@@ -2572,6 +2597,22 @@ async def get_all_contractors_revenue(
         # If it looks like a company (has words like "concrete", "coatings", "flooring", "inc", "llc"), it's still inactive if not matched
         return "inactive", None, raw.title()
 
+    # Skip aggregate/summary rows that aren't real contractors
+    def _is_aggregate_row(name: str) -> bool:
+        n = (name or "").strip().lower()
+        if not n:
+            return True
+        aggregate_keywords = (
+            "total", "grand total", "subtotal", "sum of",
+            "net income", "gross profit", "n/a",
+        )
+        # Exact match or starts-with for short aggregate names
+        if n in aggregate_keywords:
+            return True
+        # Only treat as aggregate if the full name IS an aggregate term
+        # (not if the name happens to contain the word, e.g. "Grand Coatings")
+        return False
+
     # Aggregate: for each classified entry, accumulate revenue. Merge QB entries
     # that map to the same active contractor (e.g. multiple rows for Tailored).
     active_agg: Dict[str, Dict[str, Any]] = {}
@@ -2579,6 +2620,8 @@ async def get_all_contractors_revenue(
     for qb_name, rev in qb_rows:
         rev_f = float(rev or 0)
         if rev_f <= 0:
+            continue
+        if _is_aggregate_row(qb_name):
             continue
         kind, cid, display = _classify(qb_name)
         bucket = active_agg if kind == "active" else inactive_agg
@@ -3040,6 +3083,34 @@ async def get_executive_summary(
     except Exception as exc:
         logger.warning("Executive summary: QB revenue fetch failed: %s", exc)
         qb_summary = None
+
+    # ── 8b. Rebuild Combined Total Revenue from live sources ──────────
+    # TCP MAIN sheet Total Revenue cells may be empty. Fall back to:
+    #   Combined = QB Contractor Revenue + Sani-Tred Store Revenue
+    # (CP Shopify will be added when that pipeline goes live)
+    if qb_summary and qb_summary.get("grand_total"):
+        qb_total = float(qb_summary.get("grand_total") or 0)
+        # Try to get Sani-Tred retail revenue from its dedicated endpoint logic
+        retail_total = 0.0
+        try:
+            retail_q = await db.execute(
+                select(func.sum(GoogleSheetMetric.metric_value))
+                .where(and_(
+                    GoogleSheetMetric.sheet_name.like("retail::%"),
+                    GoogleSheetMetric.category == "Revenue",
+                    GoogleSheetMetric.date >= start_date,
+                    GoogleSheetMetric.date <= end_date,
+                ))
+            )
+            retail_total = float(retail_q.scalar() or 0)
+        except Exception:
+            pass
+        live_combined = qb_total + retail_total
+        # Override the Combined Total Revenue scorecard if TCP MAIN was empty
+        if scorecards and scorecards[0].get("label") == "Combined Total Revenue":
+            if not scorecards[0].get("value"):
+                scorecards[0]["value"] = round(live_combined, 2)
+                scorecards[0]["source"] = "QB contractor + Sani-Tred retail (live)"
 
     # ── 9. Final payload ──────────────────────────────────────────────
     return {

@@ -357,7 +357,7 @@ const ExecutiveSummary = () => {
             value={summary?.qb_revenue?.active_total || 0}
             change={summary?.qb_revenue?.active_pct}
             color="blue" format="currency" />
-          <ScoreCard label="Past / Inactive Revenue"
+          <ScoreCard label="Past Contractors Revenue"
             value={summary?.qb_revenue?.inactive_total || 0}
             change={summary?.qb_revenue?.inactive_pct}
             color="amber" format="currency" />
