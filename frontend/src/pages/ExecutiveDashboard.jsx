@@ -13,6 +13,7 @@ import {
 import { useDashboardDateFilter } from '../hooks/useDashboardDateFilter';
 import { dashboardAPI } from '../services/api';
 import PageInsight from '../components/common/PageInsight';
+import SortableBarChart from '../components/common/SortableBarChart';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Formatting helpers
@@ -591,7 +592,19 @@ const ExecutiveSummary = () => {
         )}
 
         {/* ── ROW 4: Top Contractors by Revenue + Spend vs Revenue ────── */}
-        {contractorRev?.contractors?.length > 0 && (
+        {contractorRev?.contractors?.length > 0 && (() => {
+          // Filter out aggregate rows (TOTAL, GRAND TOTAL, etc.) — these are
+          // sheet summary rows, not real contractors.
+          const _isAggregate = (name) => {
+            const n = (name || '').trim().toLowerCase();
+            return !n || n === 'total' || n === 'grand total' || n === 'subtotal'
+              || n === 'net income' || n === 'gross profit' || n === 'n/a';
+          };
+          const cleanContractors = contractorRev.contractors.filter(c => !_isAggregate(c.name));
+          // Active contractors only = those who have ad spend (only active
+          // contractors run Meta/Google ads, inactive have no ad data).
+          const activeOnly = cleanContractors.filter(c => (c.ad_spend || 0) > 0);
+          return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.49 }}
               className={`rounded-xl p-6 ${cardBg}`}>
@@ -599,39 +612,32 @@ const ExecutiveSummary = () => {
                 <span className="text-xl">💰</span>
                 <h3 className={`text-lg font-semibold ${textPrimary}`}>Top Contractors by Revenue (QB)</h3>
               </div>
-              <ResponsiveContainer width="100%" height={Math.max(280, Math.min(contractorRev.contractors.length, 10) * 35)}>
-                <BarChart data={contractorRev.contractors.slice(0, 10)} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
-                  <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                  <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 10 }} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtCurrency(v)} />
-                  <Bar dataKey="revenue" name="Revenue (QB)" fill="#F59E0B" radius={[0,4,4,0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <SortableBarChart
+                data={cleanContractors}
+                nameKey="name"
+                metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#F59E0B', format: 'currency' }]}
+              />
             </motion.div>
 
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
               className={`rounded-xl p-6 ${cardBg}`}>
               <div className="flex items-center gap-2 mb-4">
                 <span className="text-xl">📊</span>
-                <h3 className={`text-lg font-semibold ${textPrimary}`}>Ad Spend vs Revenue by Contractor</h3>
+                <h3 className={`text-lg font-semibold ${textPrimary}`}>Ad Spend vs Revenue (Active Contractors)</h3>
               </div>
-              <ResponsiveContainer width="100%" height={Math.max(280, Math.min(contractorRev.contractors.filter(c => c.ad_spend > 0).length, 10) * 35)}>
-                <BarChart
-                  data={contractorRev.contractors.filter(c => c.ad_spend > 0 || c.revenue > 0).slice(0, 10)}
-                  layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
-                  <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                  <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 10 }} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtCurrency(v)} />
-                  <Legend />
-                  <Bar dataKey="revenue"  name="Revenue (QB)" fill="#F59E0B" radius={[0,4,4,0]} />
-                  <Bar dataKey="ad_spend" name="Ad Spend"     fill="#8B5CF6" radius={[0,4,4,0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <SortableBarChart
+                data={activeOnly}
+                nameKey="name"
+                metrics={[
+                  { key: 'revenue',  label: 'Revenue (QB)', color: '#F59E0B', format: 'currency' },
+                  { key: 'ad_spend', label: 'Ad Spend',     color: '#8B5CF6', format: 'currency' },
+                ]}
+                emptyMessage="No active contractors with ad spend in this period"
+              />
             </motion.div>
           </div>
-        )}
+          );
+        })()}
 
         {/* ── QB Monthly Contractor Revenue Trend ─────────────────────── */}
         {contractorRev?.monthly?.length > 0 && (

@@ -4,17 +4,19 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
-import { CheckCircle2, AlertCircle, HardHat, Megaphone, Globe, Award } from 'lucide-react';
+import { CheckCircle2, AlertCircle, HardHat, Megaphone, Globe, Award, TrendingUp } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
+import SortableBarChart from '../../components/common/SortableBarChart';
 
 const IBOSSDashboard = () => {
   const { isDark } = useTheme();
   const { dateFrom, dateTo } = useGlobalDate();
   const [data, setData] = useState(null);
+  const [revenueData, setRevenueData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const ytdStart = `${new Date().getFullYear()}-01-01`;
@@ -25,8 +27,12 @@ const IBOSSDashboard = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: d } = await dashboardAPI.getBrandSummary('ibos', from, to);
-      setData(d);
+      const [sumRes, revRes] = await Promise.all([
+        dashboardAPI.getBrandSummary('ibos', from, to),
+        dashboardAPI.getAllContractorsRevenue(from, to, 10).catch(() => ({ data: null })),
+      ]);
+      setData(sumRes.data);
+      setRevenueData(revRes.data);
     } catch { setData(null); }
     finally { setLoading(false); }
   }, [from, to]);
@@ -81,6 +87,33 @@ const IBOSSDashboard = () => {
             <ScoreCard key={i} {...kpi} change={0} sparkData={[]} />
           ))}
         </div>
+
+        {/* ── QB Revenue split: Active vs In-Active contractors ─────── */}
+        {revenueData && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <ScoreCard label="Total QB Revenue" value={revenueData.grand_total || 0} change={0} color="emerald" format="currency" sparkData={[]} />
+            <ScoreCard label="Active Contractors Revenue" value={revenueData.active_total || 0} change={revenueData.active_pct} color="blue" format="currency" sparkData={[]} />
+            <ScoreCard label="In-Active Contractors Revenue" value={revenueData.inactive_total || 0} change={revenueData.inactive_pct} color="amber" format="currency" sparkData={[]} />
+            <ScoreCard label="Total QB Customers" value={(revenueData.active_count || 0) + (revenueData.inactive_count || 0)} change={0} color="violet" format="number" sparkData={[]} />
+          </div>
+        )}
+
+        {/* ── Top In-Active Contractors (revenue-only, no ads) ────── */}
+        {revenueData?.top_inactive?.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+            className={`rounded-xl p-6 mb-8 ${cardBg}`}>
+            <div className="flex items-center gap-2 mb-4">
+              <TrendingUp size={16} className="text-amber-400" />
+              <h3 className={`text-base font-semibold ${textPri}`}>Top In-Active Contractors by Revenue</h3>
+              <span className={`ml-auto text-xs ${textSec}`}>{revenueData.inactive_count} total</span>
+            </div>
+            <SortableBarChart
+              data={revenueData.top_inactive}
+              nameKey="name"
+              metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#F59E0B', format: 'currency' }]}
+            />
+          </motion.div>
+        )}
 
         {/* Traffic Trend + Marketing Summary */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -140,18 +173,17 @@ const IBOSSDashboard = () => {
             className={`rounded-xl p-6 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">
               <HardHat size={16} className="text-amber-400" />
-              <h3 className={`text-base font-semibold ${textPri}`}>Top Contractor Websites by Users</h3>
+              <h3 className={`text-base font-semibold ${textPri}`}>Top Contractor Websites</h3>
             </div>
-            <ResponsiveContainer width="100%" height={Math.max(200, Math.min(data.top_websites.length * 32, 400))}>
-              <BarChart data={data.top_websites.slice(0, 10)} layout="vertical">
-                <XAxis type="number" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} />
-                <YAxis dataKey="name" type="category" width={200} stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 11 }} />
-                <Tooltip contentStyle={tooltipStyle} formatter={v => [(v || 0).toLocaleString() + ' users']} />
-                <Bar dataKey="users" radius={[0, 6, 6, 0]} animationDuration={500}>
-                  {data.top_websites.slice(0, 10).map((_, i) => <Cell key={i} fill={_clrs[i % _clrs.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <SortableBarChart
+              data={data.top_websites}
+              nameKey="name"
+              metrics={[
+                { key: 'users',  label: 'Users',   color: '#F59E0B', format: 'number' },
+                { key: 'visits', label: 'Visits',  color: '#3B82F6', format: 'number' },
+              ]}
+              yAxisWidth={200}
+            />
           </motion.div>
         )}
       </div>

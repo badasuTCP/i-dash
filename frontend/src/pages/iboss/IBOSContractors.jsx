@@ -10,6 +10,7 @@ import { useGlobalDate } from '../../context/GlobalDateContext';
 import { dashboardAPI } from '../../services/api';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
+import SortableBarChart from '../../components/common/SortableBarChart';
 
 const IBOSContractors = () => {
   const { isDark } = useTheme();
@@ -150,20 +151,12 @@ const IBOSContractors = () => {
                   <h3 className={`text-base font-semibold ${textPri}`}>Top Active Contractors</h3>
                   <span className={`ml-auto text-xs ${textSec}`}>{revenueData.active_count} total</span>
                 </div>
-                {revenueData.top_active?.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={Math.min(revenueData.top_active.length * 35, 400)}>
-                    <BarChart data={revenueData.top_active} layout="vertical">
-                      <XAxis type="number" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
-                      <YAxis dataKey="name" type="category" width={160} stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
-                      <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${(v || 0).toLocaleString()}`]} />
-                      <Bar dataKey="revenue" radius={[0, 6, 6, 0]} animationDuration={500}>
-                        {revenueData.top_active.map((_, i) => <Cell key={i} fill={_clrs[i % _clrs.length]} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <p className={`text-sm text-center py-16 ${textSec}`}>No active contractor revenue</p>
-                )}
+                <SortableBarChart
+                  data={revenueData.top_active}
+                  nameKey="name"
+                  metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#3B82F6', format: 'currency' }]}
+                  emptyMessage="No active contractor revenue"
+                />
               </motion.div>
 
               {/* Top Inactive Contractors */}
@@ -173,20 +166,12 @@ const IBOSContractors = () => {
                   <h3 className={`text-base font-semibold ${textPri}`}>Top In-Active Contractors</h3>
                   <span className={`ml-auto text-xs ${textSec}`}>{revenueData.inactive_count} total</span>
                 </div>
-                {revenueData.top_inactive?.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={Math.min(revenueData.top_inactive.length * 35, 400)}>
-                    <BarChart data={revenueData.top_inactive} layout="vertical">
-                      <XAxis type="number" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
-                      <YAxis dataKey="name" type="category" width={160} stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
-                      <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${(v || 0).toLocaleString()}`]} />
-                      <Bar dataKey="revenue" radius={[0, 6, 6, 0]} animationDuration={500}>
-                        {revenueData.top_inactive.map((_, i) => <Cell key={i} fill="#F59E0B" />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <p className={`text-sm text-center py-16 ${textSec}`}>No inactive contractor revenue</p>
-                )}
+                <SortableBarChart
+                  data={revenueData.top_inactive}
+                  nameKey="name"
+                  metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#F59E0B', format: 'currency' }]}
+                  emptyMessage="No inactive contractor revenue"
+                />
               </motion.div>
             </div>
 
@@ -263,20 +248,16 @@ const IBOSContractors = () => {
               <DollarSign size={16} className="text-emerald-400" />
               <h3 className={`text-base font-semibold ${textPri}`}>Top Contractors by Spend</h3>
             </div>
-            {contractors.filter(c => c.spend > 0).length > 0 ? (
-              <ResponsiveContainer width="100%" height={Math.min(contractors.filter(c => c.spend > 50).length * 35, 350)}>
-                <BarChart data={contractors.filter(c => c.spend > 50).slice(0, 10)} layout="vertical">
-                  <XAxis type="number" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
-                  <YAxis dataKey="name" type="category" width={160} stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${(v || 0).toLocaleString()}`]} />
-                  <Bar dataKey="spend" radius={[0, 6, 6, 0]} animationDuration={500}>
-                    {contractors.filter(c => c.spend > 50).slice(0, 10).map((c, i) => <Cell key={i} fill={c.color || _clrs[i % _clrs.length]} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className={`text-sm text-center py-16 ${textSec}`}>No spend data for this period</p>
-            )}
+            <SortableBarChart
+              data={contractors.filter(c => c.spend > 50)}
+              nameKey="name"
+              metrics={[
+                { key: 'spend',   label: 'Ad Spend', color: '#10B981', format: 'currency' },
+                { key: 'leads',   label: 'Leads',    color: '#8B5CF6', format: 'number' },
+                { key: 'visits',  label: 'Visits',   color: '#3B82F6', format: 'number' },
+              ]}
+              emptyMessage="No spend data for this period"
+            />
           </motion.div>
         </div>
 
