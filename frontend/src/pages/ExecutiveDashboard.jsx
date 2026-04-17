@@ -161,23 +161,53 @@ const ExecutiveSummary = () => {
   // ── Derived view-model ─────────────────────────────────────────────────
   const hasExecData = !!(summary?.has_live_data && summary?.quarterly_kpis?.rows?.length);
 
+  // Compute Equipment Sold from whichever quarterly source is active (live
+  // TCP MAIN if populated, otherwise the curated fallback). This ensures
+  // the scorecard matches the Quarterly KPI Summary table below.
+  const equipmentSoldFromTable = useMemo(() => {
+    const rows = summary?.quarterly_kpis?.rows?.length
+      ? summary.quarterly_kpis.rows
+      : null;
+    if (rows) {
+      const row = rows.find(r => (r.metric || '').toLowerCase() === 'equipment sold');
+      if (!row) return 0;
+      const quarters = summary.quarterly_kpis.quarters || [];
+      return quarters.reduce((sum, q) => sum + (Number(row[q]) || 0), 0);
+    }
+    // Fallback: parse values from the hardcoded curated quarterly snapshot
+    const fallbackRow = FALLBACK_QUARTERLY.find(r => r.metric.toLowerCase() === 'equipment sold');
+    if (!fallbackRow) return 0;
+    return fallbackRow.values.reduce((sum, v) => {
+      const n = parseInt(String(v).replace(/[^\d-]/g, ''), 10);
+      return sum + (isNaN(n) ? 0 : n);
+    }, 0);
+  }, [summary]);
+
   const scorecards = useMemo(() => {
     if (summary?.scorecards?.length) {
       const palette = ['blue', 'violet', 'emerald', 'amber'];
-      return summary.scorecards.map((s, idx) => ({
-        label: s.label,
-        value: s.value ?? 0,
-        change: s.change ?? 0,
-        color: palette[idx % palette.length],
-        format: s.format || 'currency',
-        source: s.source,
-        // Flag Combined Total Revenue as pending until the Head of Sales
-        // confirms how this KPI should be composed.
-        pending: s.label === 'Combined Total Revenue',
-        pendingNote: s.label === 'Combined Total Revenue'
-          ? '* KPI definition pending Head of Sales review'
-          : null,
-      }));
+      return summary.scorecards.map((s, idx) => {
+        // Override Equipment Sold if backend returned 0 but we have
+        // quarterly data (live or curated) that sums to > 0.
+        let value = s.value ?? 0;
+        if (s.label === 'Equipment Sold' && (!value || value === 0) && equipmentSoldFromTable > 0) {
+          value = equipmentSoldFromTable;
+        }
+        return {
+          label: s.label,
+          value,
+          change: s.change ?? 0,
+          color: palette[idx % palette.length],
+          format: s.format || 'currency',
+          source: s.source,
+          // Flag Combined Total Revenue as pending until the Head of Sales
+          // confirms how this KPI should be composed.
+          pending: s.label === 'Combined Total Revenue',
+          pendingNote: s.label === 'Combined Total Revenue'
+            ? '* KPI definition pending Head of Sales review'
+            : null,
+        };
+      });
     }
     // Fallback: derive from per-brand marketing data when TCP MAIN isn't up yet.
     const spend = Object.values(mktByBrand).reduce((a, m) => a + (m?.scorecards?.totalSpend || 0), 0);
@@ -186,9 +216,9 @@ const ExecutiveSummary = () => {
       { label: 'Combined Total Revenue', value: 7123452, change: 14.2, color: 'blue',    format: 'currency' },
       { label: 'Marketing Spend',        value: spend,   change: 19.4, color: 'violet',  format: 'currency' },
       { label: 'Marketing Leads',        value: leads,   change: null, color: 'emerald', format: 'number'   },
-      { label: 'Equipment Sold',         value: 0,       change: null, color: 'amber',  format: 'number'   },
+      { label: 'Equipment Sold',         value: equipmentSoldFromTable, change: null, color: 'amber',  format: 'number'   },
     ];
-  }, [summary, mktByBrand]);
+  }, [summary, mktByBrand, equipmentSoldFromTable]);
 
   const quarters       = hasExecData ? summary.quarterly_kpis.quarters : FALLBACK_QUARTERS;
   // ── Quarterly KPI table sort ─────────────────────────────────────
