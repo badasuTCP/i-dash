@@ -14,6 +14,7 @@ import { useDashboardDateFilter } from '../hooks/useDashboardDateFilter';
 import { dashboardAPI } from '../services/api';
 import PageInsight from '../components/common/PageInsight';
 import SortableBarChart from '../components/common/SortableBarChart';
+import { useExport } from '../context/ExportContext';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Formatting helpers
@@ -76,6 +77,7 @@ const FALLBACK_YOY = [
 const ExecutiveSummary = () => {
   const { isDark } = useTheme();
   const { dateRange } = useDashboardDateFilter();
+  const { registerExport, clearExport } = useExport();
 
   const [summary, setSummary]               = useState(null);
   const [brandSummaries, setBrandSummaries] = useState({ cp: null, sanitred: null, ibos: null });
@@ -253,6 +255,23 @@ const ExecutiveSummary = () => {
     }
     return FALLBACK_QUARTERLY;
   }, [hasExecData, summary]);
+
+  // Register the Quarterly KPI table for CSV export
+  useEffect(() => {
+    if (!quarterlyRowsRaw?.length) return;
+    const qs = hasExecData ? (summary?.quarterly_kpis?.quarters || []) : FALLBACK_QUARTERS;
+    const rows = quarterlyRowsRaw.map((r) => {
+      const obj = { metric: r.metric };
+      qs.forEach((q, i) => { obj[q] = r.values[i]; });
+      return obj;
+    });
+    const columns = [
+      { key: 'metric', label: 'Metric' },
+      ...qs.map((q) => ({ key: q, label: q })),
+    ];
+    registerExport({ title: 'Executive Summary - Quarterly KPIs', rows, columns });
+    return () => clearExport();
+  }, [quarterlyRowsRaw, hasExecData, summary, registerExport, clearExport]);
 
   // Apply sort to the KPI table
   const quarterlyRows = useMemo(() => {

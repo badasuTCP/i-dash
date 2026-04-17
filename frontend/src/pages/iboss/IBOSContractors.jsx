@@ -11,10 +11,12 @@ import { dashboardAPI } from '../../services/api';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
 import SortableBarChart from '../../components/common/SortableBarChart';
+import { useExport } from '../../context/ExportContext';
 
 const IBOSContractors = () => {
   const { isDark } = useTheme();
   const { dateFrom, dateTo } = useGlobalDate();
+  const { registerExport, clearExport } = useExport();
   const [data, setData] = useState(null);
   const [revenueData, setRevenueData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -49,6 +51,41 @@ const IBOSContractors = () => {
   }, [from, to]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Register CSV export data based on the current view
+  useEffect(() => {
+    if (view === 'revenue' && revenueData) {
+      const rows = [
+        ...(revenueData.top_active || []).map(r => ({ ...r, kind: 'Active' })),
+        ...(revenueData.top_inactive || []).map(r => ({ ...r, kind: 'In-Active' })),
+      ];
+      registerExport({
+        title: 'Contractor Breakdown - QB Revenue',
+        rows,
+        columns: [
+          { key: 'kind',    label: 'Status' },
+          { key: 'name',    label: 'Contractor' },
+          { key: 'revenue', label: 'QB Revenue' },
+        ],
+      });
+    } else if (data?.contractors?.length) {
+      registerExport({
+        title: 'Contractor Breakdown',
+        rows: data.contractors,
+        columns: [
+          { key: 'name',    label: 'Contractor' },
+          { key: 'visits',  label: 'Visits' },
+          { key: 'users',   label: 'Users' },
+          { key: 'spend',   label: 'Ad Spend' },
+          { key: 'leads',   label: 'Leads' },
+          { key: 'cpl',     label: 'CPL' },
+          { key: 'revenue', label: 'Revenue' },
+          { key: 'sources', label: 'Sources' },
+        ],
+      });
+    }
+    return () => clearExport();
+  }, [view, data, revenueData, registerExport, clearExport]);
 
   const contractors = data?.contractors || [];
   const filtered = useMemo(() => {
