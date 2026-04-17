@@ -2629,25 +2629,53 @@ async def get_meta_period_reach(
         acct_id_api = account_id if account_id.startswith("act_") else f"act_{account_id}"
         ad_account = AdAccount(acct_id_api)
 
+        HIDDEN_STATUSES = {"ARCHIVED", "DELETED"}
+
         def _blocking_fetch() -> int:
+            # Resolve the visible-campaign whitelist first so the reach
+            # number matches Meta Ads Manager's default "All ads" view.
+            visible_ids: list[str] = []
+            try:
+                campaigns = ad_account.get_campaigns(
+                    fields=["id", "effective_status"],
+                    params={"limit": 500},
+                )
+                for c in campaigns:
+                    status = c.get("effective_status") or ""
+                    if status in HIDDEN_STATUSES:
+                        continue
+                    cid = c.get("id")
+                    if cid:
+                        visible_ids.append(str(cid))
+            except Exception:  # noqa: BLE001
+                visible_ids = []  # fall back to no filter
+
+            params: dict = {
+                "time_range": {
+                    "since": date_from.isoformat(),
+                    "until": date_to.isoformat(),
+                },
+                "level": "account",
+                # No time_increment → single row with period-unique reach
+                "limit": 1,
+            }
+            if visible_ids:
+                params["filtering"] = [{
+                    "field": "campaign.id",
+                    "operator": "IN",
+                    "value": visible_ids,
+                }]
+
             insights = ad_account.get_insights(
                 fields=["reach"],
-                params={
-                    "time_range": {
-                        "since": date_from.isoformat(),
-                        "until": date_to.isoformat(),
-                    },
-                    "level": "account",
-                    # No time_increment → single row with period-unique reach
-                    "limit": 1,
-                },
+                params=params,
             )
             for row in insights:
                 return int(row.get("reach", 0) or 0)
             return 0
 
         reach = await asyncio.wait_for(
-            asyncio.to_thread(_blocking_fetch), timeout=30
+            asyncio.to_thread(_blocking_fetch), timeout=45
         )
     except (FacebookRequestError, Exception) as e:  # noqa: BLE001
         logger.warning(

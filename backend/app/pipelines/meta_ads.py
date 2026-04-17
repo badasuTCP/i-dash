@@ -216,14 +216,28 @@ class MetaAdsPipeline(BasePipeline):
             # block the others.
             async def _fetch_one(acct: Dict[str, Any]) -> None:
                 try:
+                    # Resolve the campaign-ID whitelist once per account so
+                    # both the campaign-insights and account-reach calls use
+                    # the exact same set (archived/deleted campaigns excluded
+                    # to match Meta Ads Manager's default "All ads" view).
+                    visible_ids = await asyncio.wait_for(
+                        self._get_visible_campaign_ids(acct["id"]),
+                        timeout=60,
+                    )
                     # Both API calls for this account run in parallel; a 90s
                     # timeout per call prevents a single slow/throttled
                     # account from hanging the whole pipeline.
                     insights_task = asyncio.wait_for(
-                        self._get_account_insights(acct["id"]), timeout=90
+                        self._get_account_insights_with_filter(
+                            acct["id"], visible_ids
+                        ),
+                        timeout=90,
                     )
                     reach_task = asyncio.wait_for(
-                        self._get_account_daily_reach(acct["id"]), timeout=90
+                        self._get_account_daily_reach(
+                            acct["id"], visible_campaign_ids=visible_ids
+                        ),
+                        timeout=90,
                     )
                     data, acct_rows = await asyncio.gather(
                         insights_task, reach_task, return_exceptions=True
@@ -287,8 +301,58 @@ class MetaAdsPipeline(BasePipeline):
             self.logger.error(f"Error extracting Meta Ads data: {str(e)}")
             raise
 
-    async def _get_account_insights(self, account_id: str) -> List[Dict[str, Any]]:
-        """Fetch campaign insights for a single ad account."""
+    # Statuses Meta Ads Manager's default "All ads" tab HIDES. Anything not
+    # in this set is included by default in the UI and should be in our data.
+    _HIDDEN_CAMPAIGN_STATUSES = frozenset({"ARCHIVED", "DELETED"})
+
+    async def _get_visible_campaign_ids(self, account_id: str) -> Optional[set]:
+        """Fetch the set of campaign IDs Meta Ads Manager shows by default.
+
+        Returns None when we couldn't determine the list (API error, no
+        campaigns returned) — callers should treat that as "no filter".
+        """
+        if not account_id.startswith("act_"):
+            account_id = f"act_{account_id}"
+        ad_account = AdAccount(account_id)
+
+        def _blocking_fetch() -> Optional[set]:
+            campaigns = ad_account.get_campaigns(
+                fields=["id", "effective_status"],
+                params={"limit": 500},
+            )
+            ids: set = set()
+            any_rows = False
+            for c in campaigns:
+                any_rows = True
+                status = c.get("effective_status") or ""
+                if status in self._HIDDEN_CAMPAIGN_STATUSES:
+                    continue
+                cid = c.get("id")
+                if cid:
+                    ids.add(str(cid))
+            return ids if any_rows else None
+
+        try:
+            return await asyncio.to_thread(_blocking_fetch)
+        except FacebookRequestError as e:
+            self.logger.warning(
+                f"Meta campaigns list error for {account_id}: "
+                f"code={e.api_error_code()} msg={e.api_error_message()}"
+            )
+            return None
+
+    async def _get_account_insights_with_filter(
+        self,
+        account_id: str,
+        visible_ids: Optional[set],
+    ) -> List[Dict[str, Any]]:
+        """Fetch campaign insights for a single ad account, restricted to
+        the campaign-ID whitelist so totals match Meta Ads Manager's
+        default "All ads" view (archived/deleted campaigns excluded).
+
+        When visible_ids is None we fall back to fetching everything —
+        better to over-count than to lose data entirely.
+        """
         if not account_id.startswith("act_"):
             account_id = f"act_{account_id}"
 
@@ -325,20 +389,17 @@ class MetaAdsPipeline(BasePipeline):
                     "level": "campaign",
                     "time_increment": 1,
                     "limit": 500,
-                    # Match Meta Ads Manager's default "All ads" view, which
-                    # excludes archived/deleted campaigns. Without this we
-                    # over-count spend/impressions vs what the UI shows.
-                    "filtering": [{
-                        "field": "campaign.effective_status",
-                        "operator": "IN",
-                        "value": ["ACTIVE", "PAUSED", "IN_PROCESS", "WITH_ISSUES"],
-                    }],
                 },
             )
             out: List[Dict[str, Any]] = []
             for insight in insights:
                 insight_dict = dict(insight)
-                if self.campaign_ids and insight_dict.get("campaign_id") not in self.campaign_ids:
+                cid = str(insight_dict.get("campaign_id") or "")
+                # Apply the visible-campaign whitelist (match Meta UI default).
+                if visible_ids is not None and cid not in visible_ids:
+                    continue
+                # Honor any caller-provided campaign restriction.
+                if self.campaign_ids and cid not in self.campaign_ids:
                     continue
                 out.append(insight_dict)
             return out
@@ -353,31 +414,45 @@ class MetaAdsPipeline(BasePipeline):
             )
             return []
 
-    async def _get_account_daily_reach(self, account_id: str) -> List[Dict[str, Any]]:
+    async def _get_account_daily_reach(
+        self,
+        account_id: str,
+        visible_campaign_ids: Optional[set] = None,
+    ) -> List[Dict[str, Any]]:
         """Fetch account-level daily reach (deduplicated across campaigns).
 
         The per-campaign insights call overcounts reach because a person who
         saw 3 campaigns is counted 3 times. Meta Ads Manager shows the
-        account-level deduped number. We fetch that here and stamp it onto
-        each campaign row before the transform step.
+        account-level deduped number. We fetch that here — restricted to the
+        same campaign-ID whitelist used for the campaign insights call so
+        totals reconcile — and stamp it onto each campaign row before the
+        transform step.
         """
         if not account_id.startswith("act_"):
             account_id = f"act_{account_id}"
 
         ad_account = AdAccount(account_id)
 
+        params: Dict[str, Any] = {
+            "time_range": {
+                "since": self.start_date.isoformat(),
+                "until": self.end_date.isoformat(),
+            },
+            "level": "account",
+            "time_increment": 1,
+            "limit": 500,
+        }
+        if visible_campaign_ids:
+            params["filtering"] = [{
+                "field": "campaign.id",
+                "operator": "IN",
+                "value": list(visible_campaign_ids),
+            }]
+
         def _blocking_fetch() -> List[Dict[str, Any]]:
             insights = ad_account.get_insights(
                 fields=["date_start", "reach", "impressions"],
-                params={
-                    "time_range": {
-                        "since": self.start_date.isoformat(),
-                        "until": self.end_date.isoformat(),
-                    },
-                    "level": "account",
-                    "time_increment": 1,
-                    "limit": 500,
-                },
+                params=params,
             )
             return [dict(i) for i in insights]
 
