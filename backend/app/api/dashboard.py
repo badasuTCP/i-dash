@@ -2582,6 +2582,101 @@ async def get_contractor_breakdown(
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Period-unique reach — on-demand Meta call with 1-hour cache
+# ────────────────────────────────────────────────────────────────────────────
+
+# Simple in-process TTL cache. Keys: (account_id, from_iso, to_iso) -> (ts, reach)
+_PERIOD_REACH_CACHE: dict[tuple, tuple[float, int]] = {}
+_PERIOD_REACH_TTL_SECONDS = 3600  # 1 hour
+
+
+@router.get(
+    "/meta-period-reach",
+    summary="Exact period-unique reach for a Meta account (on-demand)",
+)
+async def get_meta_period_reach(
+    account_id: str = Query(..., description="Meta ad account id, e.g. act_1234"),
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Query Meta's Insights API at level=account with NO time_increment so we
+    get the deduplicated period-unique reach (the same number Meta Ads Manager
+    shows under "Accounts Center accounts"). Cached for 1 hour per
+    (account_id, date_from, date_to) to avoid rate-limiting on repeat views.
+    """
+    import time
+    now_ts = time.time()
+    key = (account_id, date_from.isoformat(), date_to.isoformat())
+    cached = _PERIOD_REACH_CACHE.get(key)
+    if cached and (now_ts - cached[0]) < _PERIOD_REACH_TTL_SECONDS:
+        return {
+            "account_id": account_id,
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "reach": cached[1],
+            "cached": True,
+        }
+
+    try:
+        from facebook_business.api import FacebookAdsApi
+        from facebook_business.adobjects.adaccount import AdAccount
+        from facebook_business.exceptions import FacebookRequestError
+        import asyncio
+
+        FacebookAdsApi.init(access_token=settings.META_ACCESS_TOKEN)
+
+        acct_id_api = account_id if account_id.startswith("act_") else f"act_{account_id}"
+        ad_account = AdAccount(acct_id_api)
+
+        def _blocking_fetch() -> int:
+            insights = ad_account.get_insights(
+                fields=["reach"],
+                params={
+                    "time_range": {
+                        "since": date_from.isoformat(),
+                        "until": date_to.isoformat(),
+                    },
+                    "level": "account",
+                    # No time_increment → single row with period-unique reach
+                    "limit": 1,
+                },
+            )
+            for row in insights:
+                return int(row.get("reach", 0) or 0)
+            return 0
+
+        reach = await asyncio.wait_for(
+            asyncio.to_thread(_blocking_fetch), timeout=30
+        )
+    except (FacebookRequestError, Exception) as e:  # noqa: BLE001
+        logger.warning(
+            "meta-period-reach failed for %s %s..%s: %s",
+            account_id, date_from, date_to, e,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Meta API call failed: {e}",
+        )
+
+    _PERIOD_REACH_CACHE[key] = (now_ts, reach)
+    # Trim cache opportunistically to keep memory bounded
+    if len(_PERIOD_REACH_CACHE) > 500:
+        cutoff = now_ts - _PERIOD_REACH_TTL_SECONDS
+        for k, (ts, _) in list(_PERIOD_REACH_CACHE.items()):
+            if ts < cutoff:
+                _PERIOD_REACH_CACHE.pop(k, None)
+
+    return {
+        "account_id": account_id,
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "reach": reach,
+        "cached": False,
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # All Contractors Revenue — QuickBooks-wide view (active + inactive)
 # ────────────────────────────────────────────────────────────────────────────
 
