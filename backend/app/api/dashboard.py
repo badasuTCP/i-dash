@@ -2189,14 +2189,19 @@ async def get_contractor_breakdown(
 
             # Deduped reach per account — take MAX(account_reach) per
             # (account_id, date) to collapse duplicate campaign rows, then
-            # SUM across days. This matches Meta Ads Manager's daily reach
-            # summed over the period (still overstates true period-unique
-            # reach across days, but within-day is correct).
+            # SUM across days. When account_reach is 0 (row was ingested
+            # before the account-level call was added, or the API call
+            # failed that day), fall back to MAX(campaign_reach) for that
+            # day so we never regress below the pre-fix behavior.
+            day_reach_expr = func.coalesce(
+                func.nullif(func.max(MetaAdMetric.account_reach), 0),
+                func.max(MetaAdMetric.reach),
+            )
             daily_reach_sub = (
                 select(
                     MetaAdMetric.account_id.label("aid"),
                     MetaAdMetric.date.label("d"),
-                    func.max(MetaAdMetric.account_reach).label("day_reach"),
+                    day_reach_expr.label("day_reach"),
                 )
                 .where(and_(
                     MetaAdMetric.date >= start_date,
@@ -2217,9 +2222,9 @@ async def get_contractor_breakdown(
 
             for r in agg_rows:
                 impressions = int(r.impressions or 0)
-                # Prefer deduped account-level reach; fall back to summed
-                # campaign reach when the account-level insight was missing
-                # (old rows ingested before the account_reach column existed).
+                # Prefer per-day deduped reach (falls back to MAX campaign
+                # reach per day internally); only drop to the summed
+                # campaign reach if the subquery returned nothing at all.
                 reach = reach_by_account.get(r.account_id, 0) or int(r.campaign_reach_sum or 0)
                 clicks = int(r.clicks or 0)
                 spend = float(r.spend or 0)
