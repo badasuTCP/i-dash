@@ -2928,8 +2928,8 @@ async def get_executive_summary(
     total_revenue_prev = _cell("Total Revenue", prev_quarter)
     contractor_rev_cur = _cell("Contractor Revenue", latest_quarter)
     retail_sales_cur = _cell("Retail Sales", latest_quarter)
-    cost_of_mistakes_cur = _cell("Cost of Mistakes", latest_quarter)
-    cost_of_mistakes_prev = _cell("Cost of Mistakes", prev_quarter)
+    equipment_sold_cur = _cell("Equipment Sold", latest_quarter)
+    equipment_sold_prev = _cell("Equipment Sold", prev_quarter)
     marketing_leads_cur = _cell("Marketing Leads", latest_quarter)
     marketing_leads_prev = _cell("Marketing Leads", prev_quarter)
     marketing_spend_sheet_cur = _cell("Marketing Spend", latest_quarter)
@@ -2981,10 +2981,10 @@ async def get_executive_summary(
             "source": "Ads pipelines",
         },
         {
-            "label": "Cost of Mistakes",
-            "value": round(cost_of_mistakes_cur or 0, 2),
-            "change": _pct_change(cost_of_mistakes_cur, cost_of_mistakes_prev),
-            "format": "currency",
+            "label": "Equipment Sold",
+            "value": int(equipment_sold_cur or 0),
+            "change": _pct_change(equipment_sold_cur, equipment_sold_prev),
+            "format": "number",
             "source": "Google Sheets · TCP MAIN",
         },
     ]

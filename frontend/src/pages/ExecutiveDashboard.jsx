@@ -186,12 +186,28 @@ const ExecutiveSummary = () => {
       { label: 'Combined Total Revenue', value: 7123452, change: 14.2, color: 'blue',    format: 'currency' },
       { label: 'Marketing Spend',        value: spend,   change: 19.4, color: 'violet',  format: 'currency' },
       { label: 'Marketing Leads',        value: leads,   change: null, color: 'emerald', format: 'number'   },
-      { label: 'Cost of Mistakes',       value: 11130,   change: -98.8, color: 'amber',  format: 'currency' },
+      { label: 'Equipment Sold',         value: 0,       change: null, color: 'amber',  format: 'number'   },
     ];
   }, [summary, mktByBrand]);
 
   const quarters       = hasExecData ? summary.quarterly_kpis.quarters : FALLBACK_QUARTERS;
-  const quarterlyRows  = useMemo(() => {
+  // ── Quarterly KPI table sort ─────────────────────────────────────
+  const [kpiSortBy, setKpiSortBy] = useState('metric'); // 'metric' | quarter label
+  const [kpiSortDir, setKpiSortDir] = useState('asc');
+
+  // Parse a display value like "$1.41M", "-21%", "1,331", "$11,130" → number
+  const parseDisplayValue = (v) => {
+    if (v === null || v === undefined || v === '—') return null;
+    let s = String(v).replace(/[$,%\s⚠★]/g, '').trim();
+    let mult = 1;
+    if (s.endsWith('M')) { mult = 1_000_000; s = s.slice(0, -1); }
+    else if (s.endsWith('K')) { mult = 1_000; s = s.slice(0, -1); }
+    else if (s.endsWith('B')) { mult = 1_000_000_000; s = s.slice(0, -1); }
+    const n = parseFloat(s);
+    return isNaN(n) ? null : n * mult;
+  };
+
+  const quarterlyRowsRaw = useMemo(() => {
     if (hasExecData) {
       return summary.quarterly_kpis.rows.map((row) => ({
         metric: row.metric,
@@ -207,6 +223,34 @@ const ExecutiveSummary = () => {
     }
     return FALLBACK_QUARTERLY;
   }, [hasExecData, summary]);
+
+  // Apply sort to the KPI table
+  const quarterlyRows = useMemo(() => {
+    const arr = [...quarterlyRowsRaw];
+    if (kpiSortBy === 'metric') {
+      arr.sort((a, b) => {
+        const cmp = a.metric.localeCompare(b.metric);
+        return kpiSortDir === 'asc' ? cmp : -cmp;
+      });
+    } else {
+      // Sort by a quarter column (identified by index)
+      const qIdx = (() => {
+        const quartersArr = hasExecData ? summary.quarterly_kpis.quarters : FALLBACK_QUARTERS;
+        return quartersArr.indexOf(kpiSortBy);
+      })();
+      if (qIdx >= 0) {
+        arr.sort((a, b) => {
+          const av = parseDisplayValue(a.values[qIdx]);
+          const bv = parseDisplayValue(b.values[qIdx]);
+          if (av === null && bv === null) return 0;
+          if (av === null) return 1;  // nulls always at the bottom
+          if (bv === null) return -1;
+          return kpiSortDir === 'asc' ? av - bv : bv - av;
+        });
+      }
+    }
+    return arr;
+  }, [quarterlyRowsRaw, kpiSortBy, kpiSortDir, hasExecData, summary]);
 
   const revenueByQuarter = hasExecData && summary?.revenue_by_quarter?.length
     ? summary.revenue_by_quarter
@@ -234,6 +278,26 @@ const ExecutiveSummary = () => {
     buildCrossDivisionRow('Total Impressions',   (_w, m) => m?.scorecards?.totalImpressions),
     buildCrossDivisionRow('Total Clicks',        (_w, m) => m?.scorecards?.totalClicks),
   ];
+
+  // Cross-Division table sort state
+  const [cdSortBy, setCdSortBy] = useState('label');
+  const [cdSortDir, setCdSortDir] = useState('asc');
+  const sortedCrossDivisionRows = useMemo(() => {
+    const arr = [...crossDivisionRows];
+    arr.sort((a, b) => {
+      if (cdSortBy === 'label') {
+        const cmp = a.label.localeCompare(b.label);
+        return cdSortDir === 'asc' ? cmp : -cmp;
+      }
+      const av = parseDisplayValue(a[cdSortBy]);
+      const bv = parseDisplayValue(b[cdSortBy]);
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      return cdSortDir === 'asc' ? av - bv : bv - av;
+    });
+    return arr;
+  }, [crossDivisionRows, cdSortBy, cdSortDir]);
 
   // Marketing performance bar chart — cross division spend & leads
   const marketingByBrandChart = [
@@ -405,10 +469,28 @@ const ExecutiveSummary = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className={`border-b ${tableBorder}`}>
-                  <th className={`text-left py-3 px-4 font-semibold ${textSecondary}`}>Metric</th>
+                  <th
+                    className={`text-left py-3 px-4 font-semibold cursor-pointer select-none hover:text-indigo-400 transition-colors ${kpiSortBy === 'metric' ? 'text-indigo-400' : textSecondary}`}
+                    onClick={() => {
+                      if (kpiSortBy === 'metric') setKpiSortDir(kpiSortDir === 'asc' ? 'desc' : 'asc');
+                      else { setKpiSortBy('metric'); setKpiSortDir('asc'); }
+                    }}
+                  >
+                    Metric{kpiSortBy === 'metric' ? (kpiSortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </th>
                   {quarters.map((q, qIdx) => (
-                    <th key={q} className={`text-right py-3 px-4 font-semibold ${isLatestCol(qIdx) ? 'text-blue-500' : textSecondary}`}>
+                    <th
+                      key={q}
+                      className={`text-right py-3 px-4 font-semibold cursor-pointer select-none hover:text-indigo-400 transition-colors ${
+                        kpiSortBy === q ? 'text-indigo-400' : (isLatestCol(qIdx) ? 'text-blue-500' : textSecondary)
+                      }`}
+                      onClick={() => {
+                        if (kpiSortBy === q) setKpiSortDir(kpiSortDir === 'asc' ? 'desc' : 'asc');
+                        else { setKpiSortBy(q); setKpiSortDir('desc'); }
+                      }}
+                    >
                       {q}{isLatestCol(qIdx) ? ' ★' : ''}
+                      {kpiSortBy === q ? (kpiSortDir === 'asc' ? ' ↑' : ' ↓') : ''}
                     </th>
                   ))}
                 </tr>
@@ -427,6 +509,7 @@ const ExecutiveSummary = () => {
               </tbody>
             </table>
           </div>
+          <p className={`text-[10px] mt-2 ${textSecondary}`}>💡 Click any column header to sort</p>
         </motion.div>
 
         {/* ── CROSS-DIVISION LIVE KPIS (NEW) ───────────────────────────── */}
@@ -443,14 +526,28 @@ const ExecutiveSummary = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className={`border-b ${tableBorder}`}>
-                  <th className={`text-left py-3 px-4 font-semibold ${textSecondary}`}>Metric</th>
-                  <th className={`text-right py-3 px-4 font-semibold text-blue-500`}>CP (Main)</th>
-                  <th className={`text-right py-3 px-4 font-semibold text-emerald-500`}>Sani-Tred (Retail)</th>
-                  <th className={`text-right py-3 px-4 font-semibold text-amber-500`}>I-BOS (Contractor)</th>
+                  {[
+                    { key: 'label',    label: 'Metric',             align: 'left',  color: textSecondary },
+                    { key: 'cp',       label: 'CP (Main)',          align: 'right', color: 'text-blue-500' },
+                    { key: 'sanitred', label: 'Sani-Tred (Retail)', align: 'right', color: 'text-emerald-500' },
+                    { key: 'ibos',     label: 'I-BOS (Contractor)', align: 'right', color: 'text-amber-500' },
+                  ].map((col) => (
+                    <th
+                      key={col.key}
+                      className={`py-3 px-4 font-semibold cursor-pointer select-none hover:text-indigo-400 transition-colors text-${col.align} ${cdSortBy === col.key ? 'text-indigo-400' : col.color}`}
+                      onClick={() => {
+                        if (cdSortBy === col.key) setCdSortDir(cdSortDir === 'asc' ? 'desc' : 'asc');
+                        else { setCdSortBy(col.key); setCdSortDir(col.key === 'label' ? 'asc' : 'desc'); }
+                      }}
+                    >
+                      {col.label}
+                      {cdSortBy === col.key ? (cdSortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {crossDivisionRows.map((row, idx) => (
+                {sortedCrossDivisionRows.map((row, idx) => (
                   <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover}`}>
                     <td className={`py-3 px-4 font-medium ${textPrimary}`}>{row.label}</td>
                     <td className={`text-right py-3 px-4 ${textSecondary}`}>{row.cp}</td>
