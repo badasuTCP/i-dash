@@ -2705,6 +2705,203 @@ async def get_meta_period_reach(
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Meta reconciliation debug — what's in the DB vs what Meta's API returns
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/meta-reconcile",
+    summary="Debug: show stored vs Meta-live totals for one account + date range",
+)
+async def meta_reconcile(
+    account_id: str = Query(..., description="Meta ad account id (act_ or bare)"),
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """For a single Meta ad account + date window, return three things:
+
+    1. ``stored`` — what's currently summed from our DB (the numbers the
+       contractor card shows).
+    2. ``meta_live`` — what Meta's API returns right now with the exact
+       same campaign whitelist (archived/deleted excluded), one API call
+       at level=account.
+    3. ``campaigns`` — the campaign list with their effective_status so
+       you can see which ones Meta's UI is hiding by default.
+
+    Use this when dashboard totals drift from Meta Ads Manager to see
+    whether the gap is in (a) the pipeline ingesting extra campaigns,
+    (b) stale rows that weren't re-deleted, or (c) the Meta API itself.
+    """
+    import asyncio
+    from facebook_business.api import FacebookAdsApi
+    from facebook_business.adobjects.adaccount import AdAccount
+    from facebook_business.exceptions import FacebookRequestError
+
+    # 1. Stored totals — mirror the contractor-breakdown aggregation
+    acct_for_db = account_id
+    stored_q = await db.execute(
+        select(
+            func.sum(MetaAdMetric.spend).label("spend"),
+            func.sum(MetaAdMetric.impressions).label("impressions"),
+            func.sum(MetaAdMetric.reach).label("reach_sum"),
+            func.sum(MetaAdMetric.clicks).label("clicks"),
+            func.count(MetaAdMetric.id).label("row_count"),
+            func.min(MetaAdMetric.fetched_at).label("earliest_fetched"),
+            func.max(MetaAdMetric.fetched_at).label("latest_fetched"),
+        ).where(and_(
+            MetaAdMetric.account_id == acct_for_db,
+            MetaAdMetric.date >= date_from,
+            MetaAdMetric.date <= date_to,
+        ))
+    )
+    stored_row = stored_q.first()
+
+    # Per-campaign breakdown of what's in the DB for this window
+    stored_campaigns_q = await db.execute(
+        select(
+            MetaAdMetric.campaign_id,
+            MetaAdMetric.campaign_name,
+            func.sum(MetaAdMetric.spend).label("spend"),
+            func.sum(MetaAdMetric.impressions).label("impressions"),
+        ).where(and_(
+            MetaAdMetric.account_id == acct_for_db,
+            MetaAdMetric.date >= date_from,
+            MetaAdMetric.date <= date_to,
+        )).group_by(MetaAdMetric.campaign_id, MetaAdMetric.campaign_name)
+        .order_by(func.sum(MetaAdMetric.spend).desc())
+    )
+    stored_campaigns = [
+        {
+            "campaign_id": r.campaign_id,
+            "campaign_name": r.campaign_name,
+            "spend": round(float(r.spend or 0), 2),
+            "impressions": int(r.impressions or 0),
+        }
+        for r in stored_campaigns_q.all()
+    ]
+
+    # 2/3. Live Meta call
+    FacebookAdsApi.init(access_token=settings.META_ACCESS_TOKEN)
+    acct_id_api = account_id if account_id.startswith("act_") else f"act_{account_id}"
+    ad_account = AdAccount(acct_id_api)
+    HIDDEN_STATUSES = {"ARCHIVED", "DELETED"}
+
+    def _blocking_live() -> dict:
+        # List all campaigns + statuses
+        campaigns_live = []
+        visible_ids: list[str] = []
+        try:
+            campaigns = ad_account.get_campaigns(
+                fields=["id", "name", "effective_status"],
+                params={"limit": 500},
+            )
+            for c in campaigns:
+                cid = str(c.get("id") or "")
+                cname = c.get("name") or ""
+                cstatus = c.get("effective_status") or ""
+                campaigns_live.append({
+                    "campaign_id": cid,
+                    "campaign_name": cname,
+                    "effective_status": cstatus,
+                    "visible_by_default": cstatus not in HIDDEN_STATUSES,
+                })
+                if cstatus not in HIDDEN_STATUSES and cid:
+                    visible_ids.append(cid)
+        except FacebookRequestError as e:
+            return {
+                "error": f"get_campaigns failed: code={e.api_error_code()} msg={e.api_error_message()}",
+                "campaigns_live": [],
+                "visible_ids": [],
+                "totals_all": None,
+                "totals_visible": None,
+            }
+
+        # Unfiltered totals (all campaigns including archived)
+        totals_all = None
+        try:
+            rows = ad_account.get_insights(
+                fields=["spend", "impressions", "reach", "clicks"],
+                params={
+                    "time_range": {
+                        "since": date_from.isoformat(),
+                        "until": date_to.isoformat(),
+                    },
+                    "level": "account",
+                    "limit": 1,
+                },
+            )
+            for row in rows:
+                totals_all = {
+                    "spend": round(float(row.get("spend", 0) or 0), 2),
+                    "impressions": int(row.get("impressions", 0) or 0),
+                    "reach": int(row.get("reach", 0) or 0),
+                    "clicks": int(row.get("clicks", 0) or 0),
+                }
+                break
+        except FacebookRequestError as e:
+            totals_all = {"error": f"{e.api_error_code()}: {e.api_error_message()}"}
+
+        # Filtered totals (visible-only, matches Meta UI default)
+        totals_visible = None
+        if visible_ids:
+            try:
+                rows = ad_account.get_insights(
+                    fields=["spend", "impressions", "reach", "clicks"],
+                    params={
+                        "time_range": {
+                            "since": date_from.isoformat(),
+                            "until": date_to.isoformat(),
+                        },
+                        "level": "account",
+                        "limit": 1,
+                        "filtering": [{
+                            "field": "campaign.id",
+                            "operator": "IN",
+                            "value": visible_ids,
+                        }],
+                    },
+                )
+                for row in rows:
+                    totals_visible = {
+                        "spend": round(float(row.get("spend", 0) or 0), 2),
+                        "impressions": int(row.get("impressions", 0) or 0),
+                        "reach": int(row.get("reach", 0) or 0),
+                        "clicks": int(row.get("clicks", 0) or 0),
+                    }
+                    break
+            except FacebookRequestError as e:
+                totals_visible = {"error": f"{e.api_error_code()}: {e.api_error_message()}"}
+
+        return {
+            "campaigns_live": campaigns_live,
+            "visible_ids": visible_ids,
+            "hidden_count": sum(1 for c in campaigns_live if not c["visible_by_default"]),
+            "totals_all": totals_all,
+            "totals_visible": totals_visible,
+        }
+
+    live = await asyncio.wait_for(asyncio.to_thread(_blocking_live), timeout=60)
+
+    return {
+        "account_id": account_id,
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "stored": {
+            "spend": round(float(stored_row.spend or 0), 2) if stored_row else 0,
+            "impressions": int(stored_row.impressions or 0) if stored_row else 0,
+            "reach_sum_of_campaigns": int(stored_row.reach_sum or 0) if stored_row else 0,
+            "clicks": int(stored_row.clicks or 0) if stored_row else 0,
+            "row_count": int(stored_row.row_count or 0) if stored_row else 0,
+            "earliest_fetched": stored_row.earliest_fetched.isoformat() if stored_row and stored_row.earliest_fetched else None,
+            "latest_fetched": stored_row.latest_fetched.isoformat() if stored_row and stored_row.latest_fetched else None,
+        },
+        "stored_campaigns": stored_campaigns,
+        "meta_live": live,
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # All Contractors Revenue — QuickBooks-wide view (active + inactive)
 # ────────────────────────────────────────────────────────────────────────────
 
