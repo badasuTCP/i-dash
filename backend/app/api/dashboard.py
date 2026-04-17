@@ -2165,6 +2165,10 @@ async def get_contractor_breakdown(
         ibos_meta_accounts = {r[0]: r[1] for r in ba_rows.fetchall()}
 
         if ibos_meta_accounts:
+            # Sum across campaigns is correct for spend/impressions/clicks
+            # (additive). For reach it is NOT — summing campaign reach
+            # double-counts anyone who saw >1 campaign in the same account.
+            # We separately sum the deduped per-day account_reach below.
             meta_agg = await db.execute(
                 select(
                     MetaAdMetric.account_id,
@@ -2172,7 +2176,7 @@ async def get_contractor_breakdown(
                     func.sum(MetaAdMetric.conversions).label("leads"),
                     func.sum(MetaAdMetric.conversion_value).label("revenue"),
                     func.sum(MetaAdMetric.impressions).label("impressions"),
-                    func.sum(MetaAdMetric.reach).label("reach"),
+                    func.sum(MetaAdMetric.reach).label("campaign_reach_sum"),
                     func.sum(MetaAdMetric.clicks).label("clicks"),
                 ).where(and_(
                     MetaAdMetric.date >= start_date,
@@ -2181,9 +2185,42 @@ async def get_contractor_breakdown(
                     MetaAdMetric.account_id != CP_TRAINING_META_ID,
                 )).group_by(MetaAdMetric.account_id)
             )
-            for r in meta_agg.all():
+            agg_rows = meta_agg.all()
+
+            # Deduped reach per account — take MAX(account_reach) per
+            # (account_id, date) to collapse duplicate campaign rows, then
+            # SUM across days. This matches Meta Ads Manager's daily reach
+            # summed over the period (still overstates true period-unique
+            # reach across days, but within-day is correct).
+            daily_reach_sub = (
+                select(
+                    MetaAdMetric.account_id.label("aid"),
+                    MetaAdMetric.date.label("d"),
+                    func.max(MetaAdMetric.account_reach).label("day_reach"),
+                )
+                .where(and_(
+                    MetaAdMetric.date >= start_date,
+                    MetaAdMetric.date <= end_date,
+                    MetaAdMetric.account_id.in_(ibos_meta_accounts.keys()),
+                    MetaAdMetric.account_id != CP_TRAINING_META_ID,
+                ))
+                .group_by(MetaAdMetric.account_id, MetaAdMetric.date)
+                .subquery()
+            )
+            reach_agg = await db.execute(
+                select(
+                    daily_reach_sub.c.aid,
+                    func.sum(daily_reach_sub.c.day_reach).label("reach"),
+                ).group_by(daily_reach_sub.c.aid)
+            )
+            reach_by_account = {r.aid: int(r.reach or 0) for r in reach_agg.all()}
+
+            for r in agg_rows:
                 impressions = int(r.impressions or 0)
-                reach = int(r.reach or 0)
+                # Prefer deduped account-level reach; fall back to summed
+                # campaign reach when the account-level insight was missing
+                # (old rows ingested before the account_reach column existed).
+                reach = reach_by_account.get(r.account_id, 0) or int(r.campaign_reach_sum or 0)
                 clicks = int(r.clicks or 0)
                 spend = float(r.spend or 0)
                 meta_spend_by_account[r.account_id] = {

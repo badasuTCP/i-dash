@@ -206,6 +206,9 @@ class MetaAdsPipeline(BasePipeline):
             )
 
             all_campaigns: List[Dict[str, Any]] = []
+            # account_reach_map[(account_id, date_iso)] = dedup'd daily reach
+            # (account-level insight — one row per account per day).
+            account_reach_map: Dict[tuple, int] = {}
             for acct in accounts:
                 try:
                     data = await self._get_account_insights(acct["id"])
@@ -222,13 +225,35 @@ class MetaAdsPipeline(BasePipeline):
                         self.logger.debug(
                             f"  {acct['name']} ({acct['id']}): 0 rows (no spend in range)"
                         )
+                    # Second API call: account-level daily reach (deduped across
+                    # campaigns). Failure here is non-fatal — campaign reach is
+                    # still stored and used as the fallback.
+                    try:
+                        acct_rows = await self._get_account_daily_reach(acct["id"])
+                        for row in acct_rows:
+                            d = row.get("date_start")
+                            r = int(row.get("reach", 0) or 0)
+                            if d:
+                                account_reach_map[(acct["id"], d)] = r
+                    except Exception as e:
+                        self.logger.debug(
+                            f"  {acct['name']} ({acct['id']}): account reach fetch failed — {e}"
+                        )
                 except Exception as e:
                     self.logger.warning(
                         f"  {acct['name']} ({acct['id']}): error — {e}"
                     )
 
+            # Stamp the deduped account reach onto every campaign row for the
+            # same (account_id, date). The transform() step reads this field.
+            for row in all_campaigns:
+                key = (row.get("_account_id"), row.get("date_start"))
+                if key in account_reach_map:
+                    row["_account_reach"] = account_reach_map[key]
+
             self.logger.info(
                 f"Meta Ads total: {len(all_campaigns)} insight rows across {len(accounts)} accounts"
+                f" · account-reach map covers {len(account_reach_map)} account-days"
             )
             return {"campaigns": all_campaigns}
 
@@ -274,6 +299,14 @@ class MetaAdsPipeline(BasePipeline):
                     "level": "campaign",
                     "time_increment": 1,
                     "limit": 500,
+                    # Match Meta Ads Manager's default "All ads" view, which
+                    # excludes archived/deleted campaigns. Without this we
+                    # over-count spend/impressions vs what the UI shows.
+                    "filtering": [{
+                        "field": "campaign.effective_status",
+                        "operator": "IN",
+                        "value": ["ACTIVE", "PAUSED", "IN_PROCESS", "WITH_ISSUES"],
+                    }],
                 },
             )
             out: List[Dict[str, Any]] = []
@@ -291,6 +324,43 @@ class MetaAdsPipeline(BasePipeline):
             self.logger.warning(
                 f"Meta API error for {account_id}: code={e.api_error_code()} "
                 f"msg={e.api_error_message()}"
+            )
+            return []
+
+    async def _get_account_daily_reach(self, account_id: str) -> List[Dict[str, Any]]:
+        """Fetch account-level daily reach (deduplicated across campaigns).
+
+        The per-campaign insights call overcounts reach because a person who
+        saw 3 campaigns is counted 3 times. Meta Ads Manager shows the
+        account-level deduped number. We fetch that here and stamp it onto
+        each campaign row before the transform step.
+        """
+        if not account_id.startswith("act_"):
+            account_id = f"act_{account_id}"
+
+        ad_account = AdAccount(account_id)
+
+        def _blocking_fetch() -> List[Dict[str, Any]]:
+            insights = ad_account.get_insights(
+                fields=["date_start", "reach", "impressions"],
+                params={
+                    "time_range": {
+                        "since": self.start_date.isoformat(),
+                        "until": self.end_date.isoformat(),
+                    },
+                    "level": "account",
+                    "time_increment": 1,
+                    "limit": 500,
+                },
+            )
+            return [dict(i) for i in insights]
+
+        try:
+            return await asyncio.to_thread(_blocking_fetch)
+        except FacebookRequestError as e:
+            self.logger.debug(
+                f"Meta account-reach API error for {account_id}: "
+                f"code={e.api_error_code()} msg={e.api_error_message()}"
             )
             return []
 
@@ -398,6 +468,9 @@ class MetaAdsPipeline(BasePipeline):
 
                     # Create record
                     _acct_id_raw = campaign_insight.get("_account_id", "") or ""
+                    account_reach = int(
+                        campaign_insight.get("_account_reach", 0) or 0
+                    )
                     record = MetaAdMetric(
                         account_id=_acct_id_raw,
                         account_name=_with_meta_prefix(
@@ -421,6 +494,7 @@ class MetaAdsPipeline(BasePipeline):
                         cpm=round(cpm, 2),
                         roas=round(roas, 2),
                         reach=reach,
+                        account_reach=account_reach,
                         frequency=round(frequency, 2),
                     )
                     records.append(record)

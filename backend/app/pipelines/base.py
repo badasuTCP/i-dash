@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any, List, TypeVar
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_maker
@@ -114,18 +114,41 @@ class BasePipeline(ABC):
                 # Get the model class from the first record
                 model_class = type(records[0])
 
-                # For date-based tables, delete existing records for those dates
+                # For date-based tables, delete existing records scoped by
+                # (date, account_id, campaign_id) when those columns exist.
+                # A plain date-only delete would wipe rows from other
+                # accounts' pipeline runs that share the same date.
                 if hasattr(records[0], "date"):
-                    dates_to_delete = set(record.date for record in records)
-                    self.logger.debug(
-                        f"Deleting existing records for {len(dates_to_delete)} dates"
-                    )
+                    first = records[0]
+                    has_acct = hasattr(first, "account_id")
+                    has_campaign = hasattr(first, "campaign_id")
 
-                    for date_val in dates_to_delete:
-                        stmt = delete(model_class).where(
-                            model_class.date == date_val
+                    if has_acct and has_campaign:
+                        # Scope by (date, account_id) — safest for per-account
+                        # pipeline runs. Collapses repeated campaign_ids too.
+                        acct_dates = set(
+                            (r.date, r.account_id) for r in records
                         )
-                        await session.execute(stmt)
+                        self.logger.debug(
+                            f"Deleting existing records for "
+                            f"{len(acct_dates)} (date, account) pairs"
+                        )
+                        for d, aid in acct_dates:
+                            stmt = delete(model_class).where(and_(
+                                model_class.date == d,
+                                model_class.account_id == aid,
+                            ))
+                            await session.execute(stmt)
+                    else:
+                        dates_to_delete = set(r.date for r in records)
+                        self.logger.debug(
+                            f"Deleting existing records for {len(dates_to_delete)} dates"
+                        )
+                        for date_val in dates_to_delete:
+                            stmt = delete(model_class).where(
+                                model_class.date == date_val
+                            )
+                            await session.execute(stmt)
 
                 # Add all new records
                 session.add_all(records)

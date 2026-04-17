@@ -26,15 +26,6 @@ const IBOSContractors = () => {
   const [sortBy, setSortBy] = useState('visits'); // visits | spend | leads | revenue
   const [sortDir, setSortDir] = useState('desc'); // desc | asc
 
-  // Human-readable label for the active date window (helps reconcile with Meta Ads Manager)
-  const periodLabel = useMemo(() => {
-    const f = dateFrom, t = dateTo;
-    if (!f || !t) return '';
-    const ff = typeof f === 'string' ? f : f.toISOString().slice(0, 10);
-    const tt = typeof t === 'string' ? t : t.toISOString().slice(0, 10);
-    return `${ff} \u2192 ${tt}`;
-  }, [dateFrom, dateTo]);
-
   // Normalize dates to strings for stable dependency comparison
   const _fmt = (d) => {
     if (!d) return null;
@@ -159,12 +150,6 @@ const IBOSContractors = () => {
           <div>
             <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Contractor Breakdown</h1>
             <p className={textSec}>I-BOS Division — {contractors.length} contractors · {data?.period || 'Loading...'}</p>
-            {periodLabel && (
-              <p className={`text-xs mt-1 ${textSec}`}>
-                Showing <span className="font-semibold text-amber-500">{periodLabel}</span>
-                <span className="ml-2 opacity-70">(use the Header date picker · pick "Last Month" to match Meta Ads Manager's Mar 1–31 view)</span>
-              </p>
-            )}
           </div>
           <div className={`inline-flex rounded-lg overflow-hidden border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
             <button onClick={() => setView('traffic')} className={`px-4 py-2 text-xs font-semibold transition-all ${view === 'traffic' ? 'bg-amber-500 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600'}`}>

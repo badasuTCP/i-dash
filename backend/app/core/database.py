@@ -126,6 +126,7 @@ async def _ensure_meta_ad_metrics_schema(conn) -> None:
         ("cpm",              "DOUBLE PRECISION NOT NULL DEFAULT 0"),
         ("roas",             "DOUBLE PRECISION NOT NULL DEFAULT 0"),
         ("reach",            "INTEGER NOT NULL DEFAULT 0"),
+        ("account_reach",    "INTEGER NOT NULL DEFAULT 0"),
         ("frequency",        "DOUBLE PRECISION NOT NULL DEFAULT 0"),
     ]
 

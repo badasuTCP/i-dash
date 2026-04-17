@@ -144,6 +144,12 @@ class MetaAdMetric(Base):
     cpm: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     roas: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     reach: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Deduplicated account-level daily reach. Same value replicated across every
+    # campaign row for the same (account_id, date). Lets the dashboard report
+    # reach without summing campaign-level reach (which double-counts people
+    # who saw multiple campaigns). Falls back to 0 when the account-level
+    # insights call failed; callers should treat 0 as "use campaign reach".
+    account_reach: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     frequency: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
