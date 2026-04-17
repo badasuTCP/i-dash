@@ -516,7 +516,7 @@ const IBOSContractors = () => {
                                   {exactReachLoading[c.id || i] && (
                                     <RefreshCw size={10} className="animate-spin opacity-60" />
                                   )}
-                                  {exactReach[c.id || i] != null && (
+                                  {(exactReach[c.id || i] != null || c.reach_source === 'meta_live') && (
                                     <span className="text-[9px] text-emerald-400 normal-case font-normal">(live)</span>
                                   )}
                                 </p>

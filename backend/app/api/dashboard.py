@@ -2569,6 +2569,40 @@ async def get_contractor_breakdown(
 
     total_revenue = sum(c.get("revenue", 0) for c in contractors)
 
+    # Enrich with live Meta period reach for every contractor with a linked
+    # ad account. Runs in parallel with a concurrency cap so the first page
+    # load stays snappy; subsequent loads hit the 1-hour cache and are
+    # instant. Failures fall back silently to the stored approximation so
+    # a flaky Meta API can never brick the page.
+    import asyncio as _aio
+    _reach_sem = _aio.Semaphore(6)
+
+    async def _enrich(c: dict) -> None:
+        aid = c.get("meta_account_id")
+        if not aid:
+            return
+        async with _reach_sem:
+            live = await _fetch_meta_period_reach(
+                aid, start_date, end_date, timeout_s=20
+            )
+        if live is None or live <= 0:
+            return
+        c["reach"] = int(live)
+        c["reach_source"] = "meta_live"
+        imps = int(c.get("impressions") or 0)
+        spend = float(c.get("spend") or 0)
+        if imps > 0:
+            c["frequency"] = round(imps / live, 2)
+            c["cpm"] = round(spend / imps * 1000, 2) if imps > 0 else c.get("cpm", 0)
+
+    try:
+        await _aio.wait_for(
+            _aio.gather(*[_enrich(c) for c in contractors], return_exceptions=True),
+            timeout=30,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("live-reach enrichment timed out or failed: %s", e)
+
     return {
         "period": f"{start_date} to {end_date}",
         "hasLiveData": len(contractors) > 0,
@@ -2590,6 +2624,96 @@ _PERIOD_REACH_CACHE: dict[tuple, tuple[float, int]] = {}
 _PERIOD_REACH_TTL_SECONDS = 3600  # 1 hour
 
 
+async def _fetch_meta_period_reach(
+    account_id: str,
+    date_from: date,
+    date_to: date,
+    timeout_s: float = 30.0,
+) -> Optional[int]:
+    """Shared helper: exact deduplicated period reach for a Meta account.
+
+    - Pulls the campaign list and filters out ARCHIVED/DELETED so the number
+      matches Meta Ads Manager's default "All ads" view.
+    - Calls insights at level=account, no time_increment, with a
+      campaign.id IN filter so the dedup is scoped to visible campaigns.
+    - Cached in-process for 1 hour per (account_id, date_from, date_to).
+    - Returns None on failure so callers can fall back to stored reach
+      instead of blocking the whole response.
+    """
+    import time
+    import asyncio as _asyncio
+    from facebook_business.api import FacebookAdsApi
+    from facebook_business.adobjects.adaccount import AdAccount
+    from facebook_business.exceptions import FacebookRequestError
+
+    now_ts = time.time()
+    key = (account_id, date_from.isoformat(), date_to.isoformat())
+    cached = _PERIOD_REACH_CACHE.get(key)
+    if cached and (now_ts - cached[0]) < _PERIOD_REACH_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        FacebookAdsApi.init(access_token=settings.META_ACCESS_TOKEN)
+        acct_id_api = account_id if account_id.startswith("act_") else f"act_{account_id}"
+        ad_account = AdAccount(acct_id_api)
+        HIDDEN_STATUSES = {"ARCHIVED", "DELETED"}
+
+        def _blocking_fetch() -> int:
+            visible_ids: list[str] = []
+            try:
+                campaigns = ad_account.get_campaigns(
+                    fields=["id", "effective_status"],
+                    params={"limit": 500},
+                )
+                for c in campaigns:
+                    status_val = c.get("effective_status") or ""
+                    if status_val in HIDDEN_STATUSES:
+                        continue
+                    cid = c.get("id")
+                    if cid:
+                        visible_ids.append(str(cid))
+            except Exception:  # noqa: BLE001
+                visible_ids = []
+
+            params: dict = {
+                "time_range": {
+                    "since": date_from.isoformat(),
+                    "until": date_to.isoformat(),
+                },
+                "level": "account",
+                "limit": 1,
+            }
+            if visible_ids:
+                params["filtering"] = [{
+                    "field": "campaign.id",
+                    "operator": "IN",
+                    "value": visible_ids,
+                }]
+
+            rows = ad_account.get_insights(fields=["reach"], params=params)
+            for row in rows:
+                return int(row.get("reach", 0) or 0)
+            return 0
+
+        reach = await _asyncio.wait_for(
+            _asyncio.to_thread(_blocking_fetch), timeout=timeout_s
+        )
+    except (FacebookRequestError, Exception) as e:  # noqa: BLE001
+        logger.warning(
+            "meta period-reach failed for %s %s..%s: %s",
+            account_id, date_from, date_to, e,
+        )
+        return None
+
+    _PERIOD_REACH_CACHE[key] = (now_ts, reach)
+    if len(_PERIOD_REACH_CACHE) > 500:
+        cutoff = now_ts - _PERIOD_REACH_TTL_SECONDS
+        for k, (ts, _) in list(_PERIOD_REACH_CACHE.items()):
+            if ts < cutoff:
+                _PERIOD_REACH_CACHE.pop(k, None)
+    return reach
+
+
 @router.get(
     "/meta-period-reach",
     summary="Exact period-unique reach for a Meta account (on-demand)",
@@ -2608,99 +2732,22 @@ async def get_meta_period_reach(
     import time
     now_ts = time.time()
     key = (account_id, date_from.isoformat(), date_to.isoformat())
-    cached = _PERIOD_REACH_CACHE.get(key)
-    if cached and (now_ts - cached[0]) < _PERIOD_REACH_TTL_SECONDS:
-        return {
-            "account_id": account_id,
-            "date_from": date_from.isoformat(),
-            "date_to": date_to.isoformat(),
-            "reach": cached[1],
-            "cached": True,
-        }
+    was_cached = key in _PERIOD_REACH_CACHE and (
+        now_ts - _PERIOD_REACH_CACHE[key][0]
+    ) < _PERIOD_REACH_TTL_SECONDS
 
-    try:
-        from facebook_business.api import FacebookAdsApi
-        from facebook_business.adobjects.adaccount import AdAccount
-        from facebook_business.exceptions import FacebookRequestError
-        import asyncio
-
-        FacebookAdsApi.init(access_token=settings.META_ACCESS_TOKEN)
-
-        acct_id_api = account_id if account_id.startswith("act_") else f"act_{account_id}"
-        ad_account = AdAccount(acct_id_api)
-
-        HIDDEN_STATUSES = {"ARCHIVED", "DELETED"}
-
-        def _blocking_fetch() -> int:
-            # Resolve the visible-campaign whitelist first so the reach
-            # number matches Meta Ads Manager's default "All ads" view.
-            visible_ids: list[str] = []
-            try:
-                campaigns = ad_account.get_campaigns(
-                    fields=["id", "effective_status"],
-                    params={"limit": 500},
-                )
-                for c in campaigns:
-                    status = c.get("effective_status") or ""
-                    if status in HIDDEN_STATUSES:
-                        continue
-                    cid = c.get("id")
-                    if cid:
-                        visible_ids.append(str(cid))
-            except Exception:  # noqa: BLE001
-                visible_ids = []  # fall back to no filter
-
-            params: dict = {
-                "time_range": {
-                    "since": date_from.isoformat(),
-                    "until": date_to.isoformat(),
-                },
-                "level": "account",
-                # No time_increment → single row with period-unique reach
-                "limit": 1,
-            }
-            if visible_ids:
-                params["filtering"] = [{
-                    "field": "campaign.id",
-                    "operator": "IN",
-                    "value": visible_ids,
-                }]
-
-            insights = ad_account.get_insights(
-                fields=["reach"],
-                params=params,
-            )
-            for row in insights:
-                return int(row.get("reach", 0) or 0)
-            return 0
-
-        reach = await asyncio.wait_for(
-            asyncio.to_thread(_blocking_fetch), timeout=45
-        )
-    except (FacebookRequestError, Exception) as e:  # noqa: BLE001
-        logger.warning(
-            "meta-period-reach failed for %s %s..%s: %s",
-            account_id, date_from, date_to, e,
-        )
+    reach = await _fetch_meta_period_reach(account_id, date_from, date_to, timeout_s=45)
+    if reach is None:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Meta API call failed: {e}",
+            detail="Meta API call failed — see server logs",
         )
-
-    _PERIOD_REACH_CACHE[key] = (now_ts, reach)
-    # Trim cache opportunistically to keep memory bounded
-    if len(_PERIOD_REACH_CACHE) > 500:
-        cutoff = now_ts - _PERIOD_REACH_TTL_SECONDS
-        for k, (ts, _) in list(_PERIOD_REACH_CACHE.items()):
-            if ts < cutoff:
-                _PERIOD_REACH_CACHE.pop(k, None)
-
     return {
         "account_id": account_id,
         "date_from": date_from.isoformat(),
         "date_to": date_to.isoformat(),
         "reach": reach,
-        "cached": False,
+        "cached": was_cached,
     }
 
 
