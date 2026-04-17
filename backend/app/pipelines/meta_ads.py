@@ -209,11 +209,31 @@ class MetaAdsPipeline(BasePipeline):
             # account_reach_map[(account_id, date_iso)] = dedup'd daily reach
             # (account-level insight — one row per account per day).
             account_reach_map: Dict[tuple, int] = {}
-            for acct in accounts:
+
+            # Per-account work runs in parallel — fire campaign-insights and
+            # account-reach for every account concurrently so the two calls
+            # per account don't serialize and the slowest account doesn't
+            # block the others.
+            async def _fetch_one(acct: Dict[str, Any]) -> None:
                 try:
-                    data = await self._get_account_insights(acct["id"])
-                    if data:
-                        # Tag each row with the account for traceability
+                    # Both API calls for this account run in parallel; a 90s
+                    # timeout per call prevents a single slow/throttled
+                    # account from hanging the whole pipeline.
+                    insights_task = asyncio.wait_for(
+                        self._get_account_insights(acct["id"]), timeout=90
+                    )
+                    reach_task = asyncio.wait_for(
+                        self._get_account_daily_reach(acct["id"]), timeout=90
+                    )
+                    data, acct_rows = await asyncio.gather(
+                        insights_task, reach_task, return_exceptions=True
+                    )
+
+                    if isinstance(data, Exception):
+                        self.logger.warning(
+                            f"  {acct['name']} ({acct['id']}): insights error — {data}"
+                        )
+                    elif data:
                         for row in data:
                             row["_account_id"] = acct["id"]
                             row["_account_name"] = acct["name"]
@@ -225,24 +245,30 @@ class MetaAdsPipeline(BasePipeline):
                         self.logger.debug(
                             f"  {acct['name']} ({acct['id']}): 0 rows (no spend in range)"
                         )
-                    # Second API call: account-level daily reach (deduped across
-                    # campaigns). Failure here is non-fatal — campaign reach is
-                    # still stored and used as the fallback.
-                    try:
-                        acct_rows = await self._get_account_daily_reach(acct["id"])
+
+                    if isinstance(acct_rows, Exception):
+                        self.logger.debug(
+                            f"  {acct['name']} ({acct['id']}): account reach fetch failed — {acct_rows}"
+                        )
+                    elif acct_rows:
                         for row in acct_rows:
                             d = row.get("date_start")
                             r = int(row.get("reach", 0) or 0)
                             if d:
                                 account_reach_map[(acct["id"], d)] = r
-                    except Exception as e:
-                        self.logger.debug(
-                            f"  {acct['name']} ({acct['id']}): account reach fetch failed — {e}"
-                        )
                 except Exception as e:
                     self.logger.warning(
                         f"  {acct['name']} ({acct['id']}): error — {e}"
                     )
+
+            # Cap concurrency so we don't slam the Meta API and get throttled.
+            sem = asyncio.Semaphore(5)
+
+            async def _bounded(acct: Dict[str, Any]) -> None:
+                async with sem:
+                    await _fetch_one(acct)
+
+            await asyncio.gather(*[_bounded(a) for a in accounts])
 
             # Stamp the deduped account reach onto every campaign row for the
             # same (account_id, date). The transform() step reads this field.
