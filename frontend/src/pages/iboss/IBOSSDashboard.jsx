@@ -9,6 +9,7 @@ import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
+import PageInsight from '../../components/common/PageInsight';
 
 const IBOSSDashboard = () => {
   const { isDark } = useTheme();
@@ -44,7 +45,7 @@ const IBOSSDashboard = () => {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>I-BOS Overview</h1>
           <p className={textSec}>I-BOS Contractor Division — YTD contractor performance, training & marketing</p>
@@ -59,6 +60,21 @@ const IBOSSDashboard = () => {
             <AlertCircle size={14} /> Awaiting pipeline sync
           </div>
         )}
+
+        <PageInsight insights={(() => {
+          const out = [];
+          const sc = data?.scorecards || [];
+          const visits = sc.find(s => /visit/i.test(s.label))?.value || 0;
+          const leads = sc.find(s => /lead/i.test(s.label))?.value || 0;
+          const spend = data?.ads?.spend || 0;
+          const deals = data?.crm?.deals || 0;
+          if (visits) out.push(`I-BOS traffic: ${Number(visits).toLocaleString()} visits across contractor sites.`);
+          if (spend) out.push(`Contractor marketing spend: $${Number(spend).toLocaleString()} · ${Number(leads).toLocaleString()} leads.`);
+          const top = (data?.top_websites || [])[0];
+          if (top) out.push(`Top site: ${top.name} with ${Number(top.users || 0).toLocaleString()} users.`);
+          if (deals) out.push(`${deals} HubSpot deals in CRM pipeline.`);
+          return out;
+        })()} />
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {(data?.scorecards || []).map((kpi, i) => (

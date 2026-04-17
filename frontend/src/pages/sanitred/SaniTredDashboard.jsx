@@ -9,6 +9,7 @@ import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
+import PageInsight from '../../components/common/PageInsight';
 
 const SaniTredDashboard = () => {
   const { isDark } = useTheme();
@@ -44,7 +45,7 @@ const SaniTredDashboard = () => {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Sani-Tred Overview</h1>
           <p className={textSec}>Sani-Tred Retail — YTD revenue, web performance & marketing pulse</p>
@@ -59,6 +60,20 @@ const SaniTredDashboard = () => {
             <AlertCircle size={14} /> Awaiting pipeline sync
           </div>
         )}
+
+        <PageInsight insights={(() => {
+          const out = [];
+          const sc = data?.scorecards || [];
+          const visits = sc.find(s => /visit/i.test(s.label))?.value || 0;
+          const revenue = sc.find(s => /revenue|sales/i.test(s.label))?.value || 0;
+          const spend = data?.ads?.spend || 0;
+          const orders = data?.ecom?.orders || 0;
+          if (revenue) out.push(`Sani-Tred retail revenue: $${Number(revenue).toLocaleString()} YTD.`);
+          if (orders) out.push(`${orders} WooCommerce orders processed.`);
+          if (visits) out.push(`Retail traffic: ${Number(visits).toLocaleString()} visits.`);
+          if (spend) out.push(`Ad spend: $${Number(spend).toLocaleString()}.`);
+          return out;
+        })()} />
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {(data?.scorecards || []).map((kpi, i) => (

@@ -2262,26 +2262,30 @@ async def get_contractor_breakdown(
 
     # Build reverse lookup: contractor_id → clean name from contractors table
     active_id_to_name = {r[0]: r[1] for r in active_rows}
+    # Reverse: meta_account_id → contractor_id (for direct lookup)
+    meta_id_to_cid = {r[2]: r[0] for r in active_rows if r[2]}
 
     for acct_id, metrics in meta_spend_by_account.items():
         if acct_id in matched_meta_accounts:
             continue
-        # Only fold in if this Meta account is linked to an active contractor
+        # Resolve this Meta account to a contractor_id (the slug in the
+        # contractors table) — NOT the Meta account ID. This keeps c["id"]
+        # consistent across the whole breakdown flow.
         acct_norm = _norm(metrics["account_name"])
-        linked_id = None
-        if acct_id in active_meta_ids:
-            linked_id = acct_id
+        linked_cid: Optional[str] = None
+        if acct_id in meta_id_to_cid:
+            linked_cid = meta_id_to_cid[acct_id]  # direct: contractor has this meta_account_id
         else:
             for norm_name, cid in active_names_norm.items():
                 if acct_norm == norm_name or acct_norm in norm_name or norm_name in acct_norm:
-                    linked_id = cid
+                    linked_cid = cid
                     break
-        if linked_id is None:
-            continue  # skip — not an active contractor
-        # Use the CLEAN name from the contractors table, not the Meta account name
-        display_name = active_id_to_name.get(linked_id, metrics["account_name"])
+        if linked_cid is None:
+            continue  # skip — not linked to any active contractor
+        # Use the CLEAN name from the contractors table
+        display_name = active_id_to_name.get(linked_cid, metrics["account_name"])
         contractors.append({
-            "id": linked_id if linked_id in active_ids else acct_id,
+            "id": linked_cid,
             "name": display_name,
             "property_id": None,
             "visits": 0, "users": 0, "bounce_rate": 0.0,
@@ -2294,6 +2298,7 @@ async def get_contractor_breakdown(
             "revenue": round(metrics["revenue"], 2),
             "cpl": round(metrics["spend"] / max(metrics["leads"], 1), 2) if metrics["leads"] > 0 else 0,
         })
+        matched_meta_accounts.add(acct_id)
 
     # Final gate: only keep contractors that are active in the contractors table.
     # Also exclude entries whose name starts with [META]/[GA4] or whose id is

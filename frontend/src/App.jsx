@@ -43,6 +43,7 @@ import LoginPage from './components/auth/LoginPage';
 // Context
 import { DashboardConfigProvider } from './context/DashboardConfigContext';
 import { GlobalDateProvider } from './context/GlobalDateContext';
+import { SidebarProvider } from './context/SidebarContext';
 
 // Protected route wrapper
 const ProtectedPageRoute = ({ children, requiredRole }) => {
@@ -126,6 +127,7 @@ const App = () => {
         <AuthProvider>
           <GlobalDateProvider>
           <DashboardConfigProvider>
+          <SidebarProvider>
           <AppContent />
           <Toaster
             position="top-right"
@@ -150,6 +152,7 @@ const App = () => {
               },
             }}
           />
+        </SidebarProvider>
         </DashboardConfigProvider>
         </GlobalDateProvider>
         </AuthProvider>

@@ -40,6 +40,8 @@ const ScoreCard = ({
   lastSynced = null,    // ISO string or Date — when source data was last refreshed
   source = null,        // e.g. "Google Sheets", "Meta Ads"
   forecast = null,      // forecast value for this metric — shows vs-forecast indicator
+  pending = false,      // if true, shows an asterisk + "pending" footnote
+  pendingNote = null,   // custom footnote text (default: "* Pending definition")
 }) => {
   const [displayValue, setDisplayValue] = useState(0);
   const [showTooltip, setShowTooltip] = useState(false);
@@ -278,8 +280,15 @@ const ScoreCard = ({
 
       {/* ── Value ──────────────────────────────────────────────────────── */}
       <p className="text-3xl font-bold text-white mb-1">
-        {formatValue(displayValue)}
+        {formatValue(displayValue)}{pending && <span className="text-amber-200">*</span>}
       </p>
+
+      {/* ── Pending footnote ─────────────────────────────────────────── */}
+      {pending && (
+        <p className="text-[10px] font-medium mb-2 text-amber-200/90 italic">
+          {pendingNote || '* Pending final definition'}
+        </p>
+      )}
 
       {/* ── Forecast comparison line (if forecast provided) ─────────── */}
       {forecastDelta && (

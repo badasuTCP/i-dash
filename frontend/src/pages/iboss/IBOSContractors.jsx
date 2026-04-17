@@ -9,6 +9,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { dashboardAPI } from '../../services/api';
 import ScoreCard from '../../components/scorecards/ScoreCard';
+import PageInsight from '../../components/common/PageInsight';
 
 const IBOSContractors = () => {
   const { isDark } = useTheme();
@@ -19,6 +20,8 @@ const IBOSContractors = () => {
   const [expandedId, setExpandedId] = useState(null);
   const [tab, setTab] = useState('all'); // all, paid, organic
   const [view, setView] = useState('traffic'); // traffic | revenue
+  const [sortBy, setSortBy] = useState('visits'); // visits | spend | leads | revenue
+  const [sortDir, setSortDir] = useState('desc'); // desc | asc
 
   // Normalize dates to strings for stable dependency comparison
   const _fmt = (d) => {
@@ -48,10 +51,18 @@ const IBOSContractors = () => {
 
   const contractors = data?.contractors || [];
   const filtered = useMemo(() => {
-    if (tab === 'paid') return contractors.filter(c => c.spend > 100);
-    if (tab === 'organic') return contractors.filter(c => c.spend <= 100);
-    return contractors;
-  }, [contractors, tab]);
+    let base = contractors;
+    if (tab === 'paid') base = contractors.filter(c => c.spend > 100);
+    else if (tab === 'organic') base = contractors.filter(c => c.spend <= 100);
+    // Apply sort
+    const arr = [...base];
+    arr.sort((a, b) => {
+      const av = a[sortBy] || 0;
+      const bv = b[sortBy] || 0;
+      return sortDir === 'desc' ? bv - av : av - bv;
+    });
+    return arr;
+  }, [contractors, tab, sortBy, sortDir]);
 
   const textPri = isDark ? 'text-white' : 'text-slate-900';
   const textSec = isDark ? 'text-slate-400' : 'text-slate-600';
@@ -64,9 +75,39 @@ const IBOSContractors = () => {
   const _clrs = ['#3B82F6','#10B981','#F59E0B','#8B5CF6','#EF4444','#06B6D4','#EC4899','#F97316','#14B8A6','#6366F1'];
   const totalVisits = data?.total_visits || 0;
 
+  // AI Insights — computed from real live data (no hardcoded numbers)
+  const insights = useMemo(() => {
+    const out = [];
+    if (view === 'traffic' && contractors.length) {
+      const top = [...contractors].sort((a, b) => b.visits - a.visits)[0];
+      if (top && top.visits > 0) {
+        const share = totalVisits > 0 ? ((top.visits / totalVisits) * 100).toFixed(1) : '0';
+        out.push(`${top.name} drives ${share}% of total traffic (${top.visits.toLocaleString()} visits).`);
+      }
+      const topSpender = [...contractors].sort((a, b) => b.spend - a.spend)[0];
+      if (topSpender && topSpender.spend > 0) {
+        const cpl = topSpender.leads > 0 ? (topSpender.spend / topSpender.leads).toFixed(2) : '—';
+        out.push(`${topSpender.name} leads ad spend at $${topSpender.spend.toLocaleString()} · CPL $${cpl}.`);
+      }
+      const noTraffic = contractors.filter(c => c.visits === 0).length;
+      if (noTraffic > 0) {
+        out.push(`${noTraffic} active contractor${noTraffic > 1 ? 's have' : ' has'} no GA4 traffic this period.`);
+      }
+    }
+    if (view === 'revenue' && revenueData) {
+      const rd = revenueData;
+      out.push(`QB revenue: $${(rd.grand_total || 0).toLocaleString()} across ${(rd.active_count || 0) + (rd.inactive_count || 0)} customers.`);
+      out.push(`Active contractors contribute ${rd.active_pct || 0}% · In-active / past: ${rd.inactive_pct || 0}%.`);
+      if (rd.top_active?.[0]) {
+        out.push(`Top active: ${rd.top_active[0].name} at $${(rd.top_active[0].revenue || 0).toLocaleString()}.`);
+      }
+    }
+    return out;
+  }, [view, contractors, revenueData, totalVisits]);
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 flex items-end justify-between flex-wrap gap-4">
           <div>
             <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Contractor Breakdown</h1>
@@ -89,13 +130,15 @@ const IBOSContractors = () => {
           </div>
         )}
 
+        <PageInsight insights={insights} />
+
         {/* ─── REVENUE VIEW ─── */}
         {view === 'revenue' && revenueData && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               <ScoreCard label="Total QB Revenue" value={revenueData.grand_total || 0} change={0} color="emerald" format="currency" sparkData={[]} />
               <ScoreCard label="Active Contractors Revenue" value={revenueData.active_total || 0} change={revenueData.active_pct} color="blue" format="currency" sparkData={[]} />
-              <ScoreCard label="Past Contractors Revenue" value={revenueData.inactive_total || 0} change={revenueData.inactive_pct} color="amber" format="currency" sparkData={[]} />
+              <ScoreCard label="In-Active Contractors Revenue" value={revenueData.inactive_total || 0} change={revenueData.inactive_pct} color="amber" format="currency" sparkData={[]} />
               <ScoreCard label="Total QB Customers" value={(revenueData.active_count || 0) + (revenueData.inactive_count || 0)} change={0} color="violet" format="number" sparkData={[]} />
             </div>
 
@@ -127,7 +170,7 @@ const IBOSContractors = () => {
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className={`rounded-xl p-6 ${cardBg}`}>
                 <div className="flex items-center gap-2 mb-4">
                   <TrendingUp size={16} className="text-amber-400" />
-                  <h3 className={`text-base font-semibold ${textPri}`}>Top Non-Active / Past Contractors</h3>
+                  <h3 className={`text-base font-semibold ${textPri}`}>Top In-Active Contractors</h3>
                   <span className={`ml-auto text-xs ${textSec}`}>{revenueData.inactive_count} total</span>
                 </div>
                 {revenueData.top_inactive?.length > 0 ? (
@@ -155,12 +198,12 @@ const IBOSContractors = () => {
                   {revenueData.active_pct >= 10 && `Active ${revenueData.active_pct}%`}
                 </div>
                 <div className="bg-amber-500 h-full flex items-center justify-center text-white text-xs font-bold transition-all" style={{ width: `${revenueData.inactive_pct || 0}%` }}>
-                  {revenueData.inactive_pct >= 10 && `Inactive ${revenueData.inactive_pct}%`}
+                  {revenueData.inactive_pct >= 10 && `In-Active ${revenueData.inactive_pct}%`}
                 </div>
               </div>
               <div className="flex justify-between mt-2 text-xs">
                 <span className={textSec}>Active: ${(revenueData.active_total || 0).toLocaleString()}</span>
-                <span className={textSec}>Inactive: ${(revenueData.inactive_total || 0).toLocaleString()}</span>
+                <span className={textSec}>In-Active: ${(revenueData.inactive_total || 0).toLocaleString()}</span>
               </div>
             </div>
           </>
@@ -237,24 +280,45 @@ const IBOSContractors = () => {
           </motion.div>
         </div>
 
-        {/* Tab filter */}
-        <div className="flex items-center gap-2 mb-4">
+        {/* Tab filter + Sort controls */}
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
           <HardHat size={16} className="text-amber-400" />
           <h3 className={`text-lg font-semibold ${textPri}`}>All Contractors ({filtered.length})</h3>
-          <div className="ml-auto flex gap-1">
-            {[
-              { id: 'all', label: `All (${contractors.length})` },
-              { id: 'paid', label: `Paid (${contractors.filter(c => c.spend > 100).length})` },
-              { id: 'organic', label: `Organic (${contractors.filter(c => c.spend <= 100).length})` },
-            ].map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  tab === t.id
-                    ? 'bg-amber-500 text-white'
-                    : isDark ? 'bg-slate-700/50 text-slate-300 hover:bg-slate-600/50' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >{t.label}</button>
-            ))}
+          {/* Sort dropdown */}
+          <div className="ml-auto flex items-center gap-2">
+            <label className={`text-xs ${textSec}`}>Sort:</label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className={`px-2 py-1 rounded-lg text-xs font-medium ${isDark ? 'bg-slate-800 text-slate-200 border border-slate-700' : 'bg-white text-slate-700 border border-slate-200'}`}
+            >
+              <option value="visits">Visits</option>
+              <option value="spend">Ad Spend</option>
+              <option value="leads">Leads</option>
+              <option value="revenue">Revenue</option>
+            </select>
+            <button
+              onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}
+              className={`px-2 py-1 rounded-lg text-xs font-medium ${isDark ? 'bg-slate-800 text-slate-200 border border-slate-700' : 'bg-white text-slate-700 border border-slate-200'}`}
+              title={sortDir === 'desc' ? 'High \u2192 Low' : 'Low \u2192 High'}
+            >
+              {sortDir === 'desc' ? '\u2193' : '\u2191'}
+            </button>
+            <div className="flex gap-1 ml-2">
+              {[
+                { id: 'all', label: `All (${contractors.length})` },
+                { id: 'paid', label: `Paid (${contractors.filter(c => c.spend > 100).length})` },
+                { id: 'organic', label: `Organic (${contractors.filter(c => c.spend <= 100).length})` },
+              ].map(t => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    tab === t.id
+                      ? 'bg-amber-500 text-white'
+                      : isDark ? 'bg-slate-700/50 text-slate-300 hover:bg-slate-600/50' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >{t.label}</button>
+              ))}
+            </div>
           </div>
         </div>
 

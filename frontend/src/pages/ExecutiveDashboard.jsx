@@ -170,6 +170,12 @@ const ExecutiveSummary = () => {
         color: palette[idx % palette.length],
         format: s.format || 'currency',
         source: s.source,
+        // Flag Combined Total Revenue as pending until the Head of Sales
+        // confirms how this KPI should be composed.
+        pending: s.label === 'Combined Total Revenue',
+        pendingNote: s.label === 'Combined Total Revenue'
+          ? '* KPI definition pending Head of Sales review'
+          : null,
       }));
     }
     // Fallback: derive from per-brand marketing data when TCP MAIN isn't up yet.
@@ -289,7 +295,7 @@ const ExecutiveSummary = () => {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
@@ -357,7 +363,7 @@ const ExecutiveSummary = () => {
             value={summary?.qb_revenue?.active_total || 0}
             change={summary?.qb_revenue?.active_pct}
             color="blue" format="currency" />
-          <ScoreCard label="Past Contractors Revenue"
+          <ScoreCard label="In-Active Contractors Revenue"
             value={summary?.qb_revenue?.inactive_total || 0}
             change={summary?.qb_revenue?.inactive_pct}
             color="amber" format="currency" />

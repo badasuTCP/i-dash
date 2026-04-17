@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useSidebar } from '../../context/SidebarContext';
 import {
   brands,
   brandPages,
@@ -97,7 +98,7 @@ const Sidebar = () => {
   const userRole = user?.role || 'executive';
 
   const [activeBrand, setActiveBrand] = useState('cp');
-  const [collapsed, setCollapsed] = useState(false);
+  const { collapsed, setCollapsed } = useSidebar();
 
   // Auto-select the brand whose route the user is on
   useEffect(() => {
