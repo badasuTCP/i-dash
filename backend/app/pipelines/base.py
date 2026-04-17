@@ -124,21 +124,44 @@ class BasePipeline(ABC):
                     has_campaign = hasattr(first, "campaign_id")
 
                     if has_acct and has_campaign:
-                        # Scope by (date, account_id) — safest for per-account
-                        # pipeline runs. Collapses repeated campaign_ids too.
-                        acct_dates = set(
-                            (r.date, r.account_id) for r in records
-                        )
-                        self.logger.debug(
-                            f"Deleting existing records for "
-                            f"{len(acct_dates)} (date, account) pairs"
-                        )
-                        for d, aid in acct_dates:
-                            stmt = delete(model_class).where(and_(
-                                model_class.date == d,
-                                model_class.account_id == aid,
-                            ))
-                            await session.execute(stmt)
+                        # For per-account date-based models, wipe the FULL
+                        # pipeline window for each account being refreshed,
+                        # not just the dates that happen to appear in the
+                        # new records. Deleted-campaign rows often linger on
+                        # dates where no currently-active campaign ran,
+                        # which a records-only delete would miss.
+                        accts = set(r.account_id for r in records)
+                        p_start = getattr(self, "start_date", None)
+                        p_end = getattr(self, "end_date", None)
+
+                        if p_start and p_end:
+                            self.logger.debug(
+                                f"Deleting {model_class.__name__} rows for "
+                                f"{len(accts)} account(s) across {p_start}..{p_end}"
+                            )
+                            for aid in accts:
+                                stmt = delete(model_class).where(and_(
+                                    model_class.account_id == aid,
+                                    model_class.date >= p_start,
+                                    model_class.date <= p_end,
+                                ))
+                                await session.execute(stmt)
+                        else:
+                            # No pipeline date window set — fall back to
+                            # per-(date, account_id) delete.
+                            acct_dates = set(
+                                (r.date, r.account_id) for r in records
+                            )
+                            self.logger.debug(
+                                f"Deleting existing records for "
+                                f"{len(acct_dates)} (date, account) pairs"
+                            )
+                            for d, aid in acct_dates:
+                                stmt = delete(model_class).where(and_(
+                                    model_class.date == d,
+                                    model_class.account_id == aid,
+                                ))
+                                await session.execute(stmt)
                     else:
                         dates_to_delete = set(r.date for r in records)
                         self.logger.debug(
