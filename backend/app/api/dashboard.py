@@ -2957,6 +2957,11 @@ async def get_executive_summary(
         (quarterly_table.get("Total Revenue", {}).get(q, 0) or 0)
         for q in quarter_order
     )
+    # Equipment Sold = sum of all units sold across quarters (YTD)
+    equipment_sold_total = sum(
+        (quarterly_table.get("Equipment Sold", {}).get(q, 0) or 0)
+        for q in quarter_order
+    )
 
     scorecards = [
         {
@@ -2982,7 +2987,7 @@ async def get_executive_summary(
         },
         {
             "label": "Equipment Sold",
-            "value": int(equipment_sold_cur or 0),
+            "value": int(equipment_sold_total or 0),
             "change": _pct_change(equipment_sold_cur, equipment_sold_prev),
             "format": "number",
             "source": "Google Sheets · TCP MAIN",
