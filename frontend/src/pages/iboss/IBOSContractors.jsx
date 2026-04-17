@@ -26,6 +26,15 @@ const IBOSContractors = () => {
   const [sortBy, setSortBy] = useState('visits'); // visits | spend | leads | revenue
   const [sortDir, setSortDir] = useState('desc'); // desc | asc
 
+  // Human-readable label for the active date window (helps reconcile with Meta Ads Manager)
+  const periodLabel = useMemo(() => {
+    const f = dateFrom, t = dateTo;
+    if (!f || !t) return '';
+    const ff = typeof f === 'string' ? f : f.toISOString().slice(0, 10);
+    const tt = typeof t === 'string' ? t : t.toISOString().slice(0, 10);
+    return `${ff} \u2192 ${tt}`;
+  }, [dateFrom, dateTo]);
+
   // Normalize dates to strings for stable dependency comparison
   const _fmt = (d) => {
     if (!d) return null;
@@ -150,6 +159,12 @@ const IBOSContractors = () => {
           <div>
             <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Contractor Breakdown</h1>
             <p className={textSec}>I-BOS Division — {contractors.length} contractors · {data?.period || 'Loading...'}</p>
+            {periodLabel && (
+              <p className={`text-xs mt-1 ${textSec}`}>
+                Showing <span className="font-semibold text-amber-500">{periodLabel}</span>
+                <span className="ml-2 opacity-70">(use the Header date picker · pick "Last Month" to match Meta Ads Manager's Mar 1–31 view)</span>
+              </p>
+            )}
           </div>
           <div className={`inline-flex rounded-lg overflow-hidden border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
             <button onClick={() => setView('traffic')} className={`px-4 py-2 text-xs font-semibold transition-all ${view === 'traffic' ? 'bg-amber-500 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600'}`}>
@@ -386,7 +401,9 @@ const IBOSContractors = () => {
                       className="overflow-hidden"
                     >
                       <div className={`px-5 py-4 border-t ${isDark ? 'border-slate-700/30 bg-slate-800/20' : 'border-slate-200 bg-slate-50/50'}`}>
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                        {/* GA4 row */}
+                        <p className={`text-[10px] uppercase tracking-wider mb-2 ${textSec}`}>Website (GA4)</p>
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
                           <div>
                             <p className={`text-[10px] uppercase ${textSec}`}>Sessions</p>
                             <p className={`text-lg font-bold ${textPri}`}>{c.visits.toLocaleString()}</p>
@@ -400,10 +417,6 @@ const IBOSContractors = () => {
                             <p className={`text-lg font-bold ${textPri}`}>{c.bounce_rate}%</p>
                           </div>
                           <div>
-                            <p className={`text-[10px] uppercase ${textSec}`}>Ad Spend</p>
-                            <p className={`text-lg font-bold ${textPri}`}>${c.spend > 0 ? c.spend.toLocaleString() : '0'}</p>
-                          </div>
-                          <div>
                             <p className={`text-[10px] uppercase ${textSec}`}>Leads</p>
                             <p className={`text-lg font-bold ${textPri}`}>{c.leads || 0}</p>
                           </div>
@@ -415,10 +428,48 @@ const IBOSContractors = () => {
                               ${c.revenue > 0 ? c.revenue.toLocaleString() : '0'}
                             </p>
                           </div>
+                          <div>
+                            <p className={`text-[10px] uppercase ${textSec}`}>CPL</p>
+                            <p className={`text-lg font-bold ${textPri}`}>${c.cpl > 0 ? c.cpl.toFixed(2) : '—'}</p>
+                          </div>
                         </div>
-                        <div className="mt-3 flex items-center gap-4 text-[10px]">
-                          <span className={textSec}>CPL: ${c.cpl > 0 ? c.cpl.toFixed(2) : '—'}</span>
-                          <span className={textSec}>Property: {c.property_id}</span>
+
+                        {/* Meta Ads row (only if we have a Meta account linked) */}
+                        {c.meta_account_id && (
+                          <>
+                            <p className={`text-[10px] uppercase tracking-wider mb-2 ${textSec}`}>Meta Ads</p>
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                              <div>
+                                <p className={`text-[10px] uppercase ${textSec}`}>Ad Spend</p>
+                                <p className={`text-lg font-bold ${textPri}`}>${c.spend > 0 ? c.spend.toLocaleString() : '0'}</p>
+                              </div>
+                              <div>
+                                <p className={`text-[10px] uppercase ${textSec}`}>Impressions</p>
+                                <p className={`text-lg font-bold ${textPri}`}>{(c.impressions || 0).toLocaleString()}</p>
+                              </div>
+                              <div>
+                                <p className={`text-[10px] uppercase ${textSec}`}>Reach</p>
+                                <p className={`text-lg font-bold ${textPri}`}>{(c.reach || 0).toLocaleString()}</p>
+                              </div>
+                              <div>
+                                <p className={`text-[10px] uppercase ${textSec}`}>CPM</p>
+                                <p className={`text-lg font-bold ${textPri}`}>${(c.cpm || 0).toFixed(2)}</p>
+                              </div>
+                              <div>
+                                <p className={`text-[10px] uppercase ${textSec}`}>Frequency</p>
+                                <p className={`text-lg font-bold ${textPri}`}>{(c.frequency || 0).toFixed(2)}</p>
+                              </div>
+                              <div>
+                                <p className={`text-[10px] uppercase ${textSec}`}>CTR</p>
+                                <p className={`text-lg font-bold ${textPri}`}>{(c.ctr || 0).toFixed(2)}%</p>
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        <div className="mt-3 flex items-center gap-4 text-[10px] flex-wrap">
+                          <span className={textSec}>Property: {c.property_id || '—'}</span>
+                          {c.meta_account_id && <span className={textSec}>Meta Account: {c.meta_account_id}</span>}
                           <span className={textSec}>Traffic Share: {pct}%</span>
                         </div>
                       </div>

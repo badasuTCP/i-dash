@@ -2145,6 +2145,7 @@ async def get_contractor_breakdown(
                 "meta_account_name": None,
                 "sources": ["GA4"],
                 "spend": 0.0, "leads": 0, "revenue": 0.0, "cpl": 0.0,
+                "impressions": 0, "reach": 0, "cpm": 0.0, "frequency": 0.0, "ctr": 0.0,
             })
     except Exception as e:
         logger.warning("Contractor breakdown GA4 query failed: %s", e)
@@ -2170,6 +2171,9 @@ async def get_contractor_breakdown(
                     func.sum(MetaAdMetric.spend).label("spend"),
                     func.sum(MetaAdMetric.conversions).label("leads"),
                     func.sum(MetaAdMetric.conversion_value).label("revenue"),
+                    func.sum(MetaAdMetric.impressions).label("impressions"),
+                    func.sum(MetaAdMetric.reach).label("reach"),
+                    func.sum(MetaAdMetric.clicks).label("clicks"),
                 ).where(and_(
                     MetaAdMetric.date >= start_date,
                     MetaAdMetric.date <= end_date,
@@ -2178,10 +2182,20 @@ async def get_contractor_breakdown(
                 )).group_by(MetaAdMetric.account_id)
             )
             for r in meta_agg.all():
+                impressions = int(r.impressions or 0)
+                reach = int(r.reach or 0)
+                clicks = int(r.clicks or 0)
+                spend = float(r.spend or 0)
                 meta_spend_by_account[r.account_id] = {
-                    "spend": float(r.spend or 0),
+                    "spend": spend,
                     "leads": int(r.leads or 0),
                     "revenue": float(r.revenue or 0),
+                    "impressions": impressions,
+                    "reach": reach,
+                    "clicks": clicks,
+                    "cpm": round((spend / impressions * 1000), 2) if impressions > 0 else 0.0,
+                    "frequency": round((impressions / reach), 2) if reach > 0 else 0.0,
+                    "ctr": round((clicks / impressions * 100), 2) if impressions > 0 else 0.0,
                     "account_name": ibos_meta_accounts.get(r.account_id) or r.account_id,
                 }
     except Exception as e:
@@ -2225,6 +2239,11 @@ async def get_contractor_breakdown(
             c["spend"] = round(metrics["spend"], 2)
             c["leads"] = metrics["leads"]
             c["revenue"] = round(metrics["revenue"], 2)
+            c["impressions"] = metrics["impressions"]
+            c["reach"] = metrics["reach"]
+            c["cpm"] = metrics["cpm"]
+            c["frequency"] = metrics["frequency"]
+            c["ctr"] = metrics["ctr"]
             c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
             if "META" not in c["sources"]:
                 c["sources"].append("META")
@@ -2241,6 +2260,11 @@ async def get_contractor_breakdown(
                 c["spend"] = round(metrics["spend"], 2)
                 c["leads"] = metrics["leads"]
                 c["revenue"] = round(metrics["revenue"], 2)
+                c["impressions"] = metrics["impressions"]
+                c["reach"] = metrics["reach"]
+                c["cpm"] = metrics["cpm"]
+                c["frequency"] = metrics["frequency"]
+                c["ctr"] = metrics["ctr"]
                 c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
                 if "META" not in c["sources"]:
                     c["sources"].append("META")
@@ -2296,6 +2320,11 @@ async def get_contractor_breakdown(
             "spend": round(metrics["spend"], 2),
             "leads": metrics["leads"],
             "revenue": round(metrics["revenue"], 2),
+            "impressions": metrics["impressions"],
+            "reach": metrics["reach"],
+            "cpm": metrics["cpm"],
+            "frequency": metrics["frequency"],
+            "ctr": metrics["ctr"],
             "cpl": round(metrics["spend"] / max(metrics["leads"], 1), 2) if metrics["leads"] > 0 else 0,
         })
         matched_meta_accounts.add(acct_id)
@@ -2348,6 +2377,7 @@ async def get_contractor_breakdown(
             "meta_account_name": None,
             "sources": [],
             "spend": 0.0, "leads": 0, "revenue": 0.0, "cpl": 0.0,
+            "impressions": 0, "reach": 0, "cpm": 0.0, "frequency": 0.0, "ctr": 0.0,
         })
 
     # Sort by visits desc then spend desc, and cap to 30
