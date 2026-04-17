@@ -89,6 +89,16 @@ class BasePipeline(ABC):
         """
         pass
 
+    async def post_load(self) -> None:
+        """Optional post-load hook.
+
+        Subclasses can override to compute derived tables, warm caches,
+        or call external APIs *after* the main records have been loaded.
+        Default is a no-op. Failures raised here are logged but do not
+        mark the pipeline run as failed — the main data already landed.
+        """
+        return None
+
     async def load(self, records: List[T]) -> int:
         """
         Load records into the database with upsert semantics.
@@ -340,6 +350,16 @@ class BasePipeline(ABC):
                 operation_name=f"{self.name} - load",
             )
             self.logger.debug(f"Load phase completed: {loaded_count} records loaded")
+
+            # Post-load hook — subclasses can override to precompute derived
+            # tables or warm caches. Must be non-fatal: a failure here should
+            # not mark the pipeline as failed (main data already loaded).
+            try:
+                await self.post_load()
+            except Exception as e:  # noqa: BLE001
+                self.logger.warning(
+                    f"post_load hook failed for {self.name}: {e}"
+                )
 
             # Log success
             await self._log_pipeline_execution(

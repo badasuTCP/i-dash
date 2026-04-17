@@ -13,7 +13,7 @@ review.
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 
 from facebook_business.api import FacebookAdsApi
@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import async_session_maker
 from app.models.contractor import Contractor
-from app.models.metrics import MetaAdMetric
+from app.models.metrics import MetaAdMetric, MetaPeriodReach
 from app.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
@@ -612,6 +612,191 @@ class MetaAdsPipeline(BasePipeline):
         except Exception as e:
             self.logger.error(f"Error transforming Meta Ads data: {str(e)}")
             raise
+
+    # ── Post-load: pre-compute period-unique reach for common windows ──
+    #
+    # The dashboard needs "Accounts Center accounts" (period-unique reach)
+    # — the number of distinct humans who saw any non-archived ad in the
+    # period. This cannot be derived from daily campaign rows (summing
+    # overcounts by cross-day and cross-campaign overlap), so we query
+    # Meta at level=account with no time_increment for each common user
+    # window and materialize the result into meta_period_reach. The
+    # dashboard reads from that table — no live API calls at request
+    # time, no sync button, no lazy-fetch.
+    #
+    # Presets are recomputed every scheduled run. The user-visible data is
+    # stale by at most DATA_REFRESH_INTERVAL_HOURS (default: 4h).
+
+    PERIOD_PRESETS = ("this_month", "last_month", "last_7", "last_30", "ytd")
+
+    @staticmethod
+    def _preset_window(preset: str, today: Optional[date] = None) -> tuple[date, date]:
+        """Resolve a preset key to a (date_from, date_to) pair anchored at today."""
+        if today is None:
+            today = date.today()
+        from calendar import monthrange
+
+        if preset == "this_month":
+            return date(today.year, today.month, 1), today
+        if preset == "last_month":
+            first_this = date(today.year, today.month, 1)
+            last_month_end = first_this - timedelta(days=1)
+            last_month_start = date(last_month_end.year, last_month_end.month, 1)
+            return last_month_start, last_month_end
+        if preset == "last_7":
+            return today - timedelta(days=6), today
+        if preset == "last_30":
+            return today - timedelta(days=29), today
+        if preset == "ytd":
+            return date(today.year, 1, 1), today
+        raise ValueError(f"unknown preset: {preset}")
+
+    async def _fetch_period_reach(
+        self,
+        account_id: str,
+        date_from: date,
+        date_to: date,
+        visible_ids: Optional[set],
+    ) -> int:
+        """Single Meta API call for period-unique reach (no time_increment).
+        Scoped to visible campaigns to match Meta UI's default view.
+        """
+        if not account_id.startswith("act_"):
+            account_id = f"act_{account_id}"
+        ad_account = AdAccount(account_id)
+
+        params: Dict[str, Any] = {
+            "time_range": {"since": date_from.isoformat(), "until": date_to.isoformat()},
+            "level": "account",
+            "limit": 1,
+        }
+        if visible_ids:
+            params["filtering"] = [{
+                "field": "campaign.id",
+                "operator": "IN",
+                "value": list(visible_ids),
+            }]
+
+        def _blocking() -> int:
+            rows = ad_account.get_insights(fields=["reach"], params=params)
+            for row in rows:
+                return int(row.get("reach", 0) or 0)
+            return 0
+
+        try:
+            return await asyncio.to_thread(_blocking)
+        except FacebookRequestError as e:
+            self.logger.debug(
+                f"period-reach failed for {account_id} {date_from}..{date_to}: "
+                f"code={e.api_error_code()} msg={e.api_error_message()}"
+            )
+            return 0
+
+    async def post_load(self) -> None:
+        """Pre-compute + upsert period-unique reach for every tracked Meta
+        account, across the common dashboard windows. Dashboard queries
+        only this table — no live Meta calls at request time.
+        """
+        from sqlalchemy import delete as _delete, select as _select
+        from app.models.brand_asset import BrandAsset
+
+        # Discover the set of accounts we care about. Use brand_assets as the
+        # authoritative list (pipeline already populates it during extract).
+        async with async_session_maker() as session:
+            q = await session.execute(
+                _select(BrandAsset.account_id).where(
+                    BrandAsset.platform == "meta"
+                )
+            )
+            account_ids: List[str] = [r[0] for r in q.all() if r[0]]
+
+        if not account_ids:
+            self.logger.info("post_load: no Meta accounts tracked, skipping period-reach")
+            return
+
+        today = date.today()
+        windows = [(preset, *self._preset_window(preset, today))
+                   for preset in self.PERIOD_PRESETS]
+
+        self.logger.info(
+            f"post_load: computing period reach for {len(account_ids)} accounts "
+            f"× {len(windows)} windows = {len(account_ids) * len(windows)} Meta calls"
+        )
+
+        # Concurrency-limited fan-out. Semaphore(5) keeps us well inside
+        # Meta's rate limits even with 14+ accounts × 5 windows.
+        sem = asyncio.Semaphore(5)
+        results: List[tuple[str, str, date, date, int]] = []
+
+        async def _one(acct_id: str, preset: str, d_from: date, d_to: date) -> None:
+            async with sem:
+                # Resolve the visible-campaign whitelist per account once,
+                # cache it across windows for the same account so we only
+                # fetch the campaigns list once.
+                cache_key = f"_visible_cache_{acct_id}"
+                visible = getattr(self, cache_key, None)
+                if visible is None:
+                    visible = await self._get_visible_campaign_ids(acct_id)
+                    setattr(self, cache_key, visible or set())
+                try:
+                    reach = await asyncio.wait_for(
+                        self._fetch_period_reach(acct_id, d_from, d_to, visible),
+                        timeout=45,
+                    )
+                    results.append((acct_id, preset, d_from, d_to, reach))
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        f"period-reach timeout for {acct_id} {preset} {d_from}..{d_to}"
+                    )
+                except Exception as e:  # noqa: BLE001
+                    self.logger.warning(
+                        f"period-reach error for {acct_id} {preset}: {e}"
+                    )
+
+        tasks = [
+            _one(aid, preset, d_from, d_to)
+            for aid in account_ids
+            for (preset, d_from, d_to) in windows
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Clear per-account visible-campaigns caches so a future run doesn't
+        # reuse stale lists.
+        for aid in account_ids:
+            attr = f"_visible_cache_{aid}"
+            if hasattr(self, attr):
+                delattr(self, attr)
+
+        # Upsert into meta_period_reach. Delete this run's (account, preset)
+        # pairs first, then insert.
+        from datetime import datetime, timezone as _tz
+        now_utc = datetime.now(_tz.utc)
+        async with async_session_maker() as session:
+            try:
+                account_presets = set((r[0], r[1]) for r in results)
+                for (aid, preset) in account_presets:
+                    await session.execute(
+                        _delete(MetaPeriodReach).where(
+                            MetaPeriodReach.account_id == aid,
+                            MetaPeriodReach.preset_key == preset,
+                        )
+                    )
+                session.add_all([
+                    MetaPeriodReach(
+                        account_id=aid, preset_key=preset,
+                        date_from=d_from, date_to=d_to,
+                        reach=reach, fetched_at=now_utc,
+                    )
+                    for (aid, preset, d_from, d_to, reach) in results
+                ])
+                await session.commit()
+                self.logger.info(
+                    f"post_load: wrote {len(results)} period-reach rows "
+                    f"across {len(account_ids)} accounts"
+                )
+            except Exception as e:  # noqa: BLE001
+                await session.rollback()
+                self.logger.warning(f"post_load: failed to persist period-reach rows: {e}")
 
 
 # ── Meta Auto-Discovery: Reconciliation Service ────────────────────────

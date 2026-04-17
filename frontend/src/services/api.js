@@ -85,18 +85,6 @@ export const dashboardAPI = {
     apiClient.get('/dashboard/contractor-breakdown', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
     }),
-  getMetaPeriodReach: (accountId, startDate, endDate) =>
-    apiClient.get('/dashboard/meta-period-reach', {
-      params: {
-        account_id: accountId,
-        date_from: _fmtDate(startDate),
-        date_to: _fmtDate(endDate),
-      },
-    }),
-  runMetaPipeline: (startDate, endDate) =>
-    apiClient.post('/pipelines/meta_ads/run', null, {
-      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
-    }),
   getAllContractorsRevenue: (startDate, endDate, topN = 10) =>
     apiClient.get('/dashboard/all-contractors-revenue', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), top_n: topN },

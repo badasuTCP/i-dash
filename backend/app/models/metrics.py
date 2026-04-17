@@ -8,7 +8,7 @@ HubSpot, Meta (Facebook), Google Ads, Google Sheets, and aggregated dashboards.
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Float, Integer, String
+from sqlalchemy import Date, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -163,6 +163,42 @@ class MetaAdMetric(Base):
             f"<MetaAdMetric(date={self.date}, "
             f"campaign={self.campaign_name}, spend={self.spend})>"
         )
+
+
+class MetaPeriodReach(Base):
+    """Pre-computed period-unique reach per Meta ad account for common
+    dashboard date windows. Written by the Meta pipeline at the end of
+    every scheduled run — the dashboard reads from this table and never
+    calls Meta at request time.
+
+    Period-unique reach is the Meta "Accounts Center accounts" number:
+    the count of distinct humans who saw any non-archived ad from this
+    account during the window, deduplicated across campaigns AND days.
+    It cannot be computed from daily campaign rows (summing overcounts
+    by cross-day overlap), so we materialize it from a Meta insights
+    call at level=account with no time_increment.
+
+    One row per (account_id, preset_key). Pipeline upserts each run so
+    the numbers stay within the scheduler's refresh cadence.
+    """
+
+    __tablename__ = "meta_period_reach"
+    __table_args__ = (
+        UniqueConstraint("account_id", "preset_key", name="uq_period_reach_acct_preset"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    account_id: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+    # One of: "this_month", "last_month", "last_7", "last_30", "ytd"
+    preset_key: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    date_from: Mapped[datetime] = mapped_column(Date, nullable=False)
+    date_to: Mapped[datetime] = mapped_column(Date, nullable=False)
+    reach: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
 
 class GoogleAdMetric(Base):

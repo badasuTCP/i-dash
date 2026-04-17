@@ -101,6 +101,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_meta_ad_metrics_schema(conn)
+        await _ensure_meta_period_reach_schema(conn)
         await _ensure_google_ad_metrics_schema(conn)
         await _ensure_contractors_schema(conn)
         await _backfill_ad_metric_divisions(conn)
@@ -163,6 +164,21 @@ async def _ensure_meta_ad_metrics_schema(conn) -> None:
         logger.warning("ensure_schema: could not create division index: %s", exc)
 
     logger.info("ensure_schema: meta_ad_metrics reconciled (idempotent)")
+
+
+async def _ensure_meta_period_reach_schema(conn) -> None:
+    """Ensure meta_period_reach indexes exist.
+
+    The table itself is created by SQLAlchemy's create_all. This adds
+    a helpful composite index for the dashboard's lookup pattern.
+    """
+    try:
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_meta_period_reach_lookup "
+            "ON meta_period_reach (account_id, preset_key)"
+        ))
+    except Exception as exc:
+        logger.warning("ensure_schema: meta_period_reach index: %s", exc)
 
 
 async def _ensure_contractors_schema(conn) -> None:
