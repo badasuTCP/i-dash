@@ -2480,6 +2480,148 @@ async def get_contractor_breakdown(
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# All Contractors Revenue — QuickBooks-wide view (active + inactive)
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/all-contractors-revenue",
+    summary="Complete QB revenue view — active + inactive contractors, split and ranked",
+)
+async def get_all_contractors_revenue(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    top_n: int = Query(10, description="Top-N to return for each category"),
+) -> dict:
+    """
+    Surface every QuickBooks contractor revenue record — both active I-BOS
+    contractors and non-active/past buyers — for executive reporting.
+
+    Classification rule (per QB naming convention):
+      - Active contractors: match an entry in the contractors table (by name
+        or the QB_NAME_ALIASES map). Usually have company names.
+      - Non-active: personal-name-only entries in the QB sheet with no match.
+
+    Returns per-category totals, counts, and top-N lists. Use for the
+    "Revenue" tab on the Contractor Breakdown page and Executive Summary
+    scorecards.
+    """
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    # Pull QB revenue grouped by contractor name for the date range
+    qb_q = await db.execute(
+        select(
+            GoogleSheetMetric.metric_name,
+            func.sum(GoogleSheetMetric.metric_value).label("revenue"),
+        ).where(and_(
+            GoogleSheetMetric.sheet_name.like("qb_revenue::%"),
+            GoogleSheetMetric.date >= start_date,
+            GoogleSheetMetric.date <= end_date,
+        )).group_by(GoogleSheetMetric.metric_name)
+    )
+    qb_rows = qb_q.all()
+
+    # Load active contractor names + aliases
+    from app.models.contractor import Contractor as ContractorModel
+    active_q = await db.execute(
+        select(ContractorModel.id, ContractorModel.name)
+        .where(ContractorModel.active == True, ContractorModel.division != "cp")
+    )
+    active_rows = active_q.all()
+
+    def _nrm(s: str) -> str:
+        if not s:
+            return ""
+        s = s.lower()
+        for tok in ("llc", "inc.", "inc", ".com", ".co"):
+            s = s.replace(tok, "")
+        return "".join(ch for ch in s if ch.isalnum())
+
+    active_name_map = {_nrm(n): cid for cid, n in active_rows}
+    active_display_names = {cid: n for cid, n in active_rows}
+
+    # QB aliases for ad-account names that differ from QB names
+    QB_NAME_ALIASES = {
+        "schmidt custom flooring": "scf concrete promo",
+    }
+
+    def _classify(qb_name: str) -> tuple[str, Optional[str], Optional[str]]:
+        """Return (kind, matched_contractor_id, display_name). kind=active|inactive."""
+        raw = (qb_name or "").strip()
+        if not raw:
+            return "inactive", None, raw
+        n = _nrm(raw)
+        # Exact or substring match against active contractors
+        if n in active_name_map:
+            cid = active_name_map[n]
+            return "active", cid, active_display_names[cid]
+        for active_norm, cid in active_name_map.items():
+            if not active_norm:
+                continue
+            if (len(active_norm) >= 4 and active_norm in n) or (len(n) >= 4 and n in active_norm):
+                return "active", cid, active_display_names[cid]
+        # Check aliases (reverse lookup)
+        alias_target = QB_NAME_ALIASES.get(raw.lower())
+        if alias_target:
+            alias_norm = _nrm(alias_target)
+            if alias_norm in active_name_map:
+                cid = active_name_map[alias_norm]
+                return "active", cid, active_display_names[cid]
+        # Heuristic: if the name contains a comma (LastName, FirstName), it's a personal name = inactive
+        # If it looks like a company (has words like "concrete", "coatings", "flooring", "inc", "llc"), it's still inactive if not matched
+        return "inactive", None, raw.title()
+
+    # Aggregate: for each classified entry, accumulate revenue. Merge QB entries
+    # that map to the same active contractor (e.g. multiple rows for Tailored).
+    active_agg: Dict[str, Dict[str, Any]] = {}
+    inactive_agg: Dict[str, Dict[str, Any]] = {}
+    for qb_name, rev in qb_rows:
+        rev_f = float(rev or 0)
+        if rev_f <= 0:
+            continue
+        kind, cid, display = _classify(qb_name)
+        bucket = active_agg if kind == "active" else inactive_agg
+        key = cid or display
+        if key in bucket:
+            bucket[key]["revenue"] += rev_f
+        else:
+            bucket[key] = {
+                "id": cid or key,
+                "name": display,
+                "revenue": rev_f,
+                "kind": kind,
+            }
+
+    active_list = sorted(active_agg.values(), key=lambda r: r["revenue"], reverse=True)
+    inactive_list = sorted(inactive_agg.values(), key=lambda r: r["revenue"], reverse=True)
+
+    active_total = sum(r["revenue"] for r in active_list)
+    inactive_total = sum(r["revenue"] for r in inactive_list)
+    grand_total = active_total + inactive_total
+
+    # Round for display
+    for r in active_list + inactive_list:
+        r["revenue"] = round(r["revenue"], 2)
+
+    all_list = sorted(active_list + inactive_list, key=lambda r: r["revenue"], reverse=True)
+
+    return {
+        "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+        "grand_total": round(grand_total, 2),
+        "active_total": round(active_total, 2),
+        "inactive_total": round(inactive_total, 2),
+        "active_count": len(active_list),
+        "inactive_count": len(inactive_list),
+        "active_pct": round((active_total / grand_total * 100), 1) if grand_total else 0,
+        "inactive_pct": round((inactive_total / grand_total * 100), 1) if grand_total else 0,
+        "top_active": active_list[:top_n],
+        "top_inactive": inactive_list[:top_n],
+        "top_all": all_list[:top_n],
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Retail Breakdown — Google Sheets (Sani-Tred Order Export)
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -2889,7 +3031,17 @@ async def get_executive_summary(
             "records": log.records_fetched if log else 0,
         })
 
-    # ── 8. Final payload ──────────────────────────────────────────────
+    # ── 8. QB Revenue scorecards (active + inactive contractors) ─────
+    try:
+        qb_summary = await get_all_contractors_revenue(
+            db=db, current_user=current_user,
+            date_from=date_from, date_to=date_to, top_n=5,
+        )
+    except Exception as exc:
+        logger.warning("Executive summary: QB revenue fetch failed: %s", exc)
+        qb_summary = None
+
+    # ── 9. Final payload ──────────────────────────────────────────────
     return {
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
         "has_live_data": bool(quarter_order),
@@ -2902,11 +3054,13 @@ async def get_executive_summary(
         "division_revenue": division_revenue,
         "revenue_by_quarter": revenue_by_quarter,
         "yoy_sales": yoy_sales,
+        "qb_revenue": qb_summary,
         "pipeline_status": pipeline_status,
         "sources": {
             "quarterly_kpis": "google_sheets :: TCP MAIN",
             "marketing_spend": "meta_ad_metrics + google_ad_metrics",
             "marketing_leads": "meta_ad_metrics + google_ad_metrics (conversions)",
+            "qb_revenue": "google_sheets :: QB_Contractor_Revenue",
         },
     }
 

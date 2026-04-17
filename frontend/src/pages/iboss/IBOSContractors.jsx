@@ -14,9 +14,11 @@ const IBOSContractors = () => {
   const { isDark } = useTheme();
   const { dateFrom, dateTo } = useGlobalDate();
   const [data, setData] = useState(null);
+  const [revenueData, setRevenueData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
   const [tab, setTab] = useState('all'); // all, paid, organic
+  const [view, setView] = useState('traffic'); // traffic | revenue
 
   // Normalize dates to strings for stable dependency comparison
   const _fmt = (d) => {
@@ -32,8 +34,12 @@ const IBOSContractors = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: d } = await dashboardAPI.getContractorBreakdown(from, to);
-      setData(d);
+      const [bd, rev] = await Promise.all([
+        dashboardAPI.getContractorBreakdown(from, to),
+        dashboardAPI.getAllContractorsRevenue(from, to, 15).catch(() => ({ data: null })),
+      ]);
+      setData(bd.data);
+      setRevenueData(rev.data);
     } catch { setData(null); }
     finally { setLoading(false); }
   }, [from, to]);
@@ -61,18 +67,113 @@ const IBOSContractors = () => {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-          <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Contractor Breakdown</h1>
-          <p className={textSec}>I-BOS Division — {contractors.length} contractors · {data?.period || 'Loading...'}</p>
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 flex items-end justify-between flex-wrap gap-4">
+          <div>
+            <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Contractor Breakdown</h1>
+            <p className={textSec}>I-BOS Division — {contractors.length} contractors · {data?.period || 'Loading...'}</p>
+          </div>
+          <div className={`inline-flex rounded-lg overflow-hidden border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+            <button onClick={() => setView('traffic')} className={`px-4 py-2 text-xs font-semibold transition-all ${view === 'traffic' ? 'bg-amber-500 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600'}`}>
+              Traffic & Spend
+            </button>
+            <button onClick={() => setView('revenue')} className={`px-4 py-2 text-xs font-semibold transition-all ${view === 'revenue' ? 'bg-emerald-500 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600'}`}>
+              QB Revenue
+            </button>
+          </div>
         </motion.div>
 
-        {data?.hasLiveData && (
+        {data?.hasLiveData && view === 'traffic' && (
           <div className="mb-6 p-3 rounded-lg flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             Live Data · {contractors.length} contractor sites · ${(data?.total_spend || 0).toLocaleString()} total spend
           </div>
         )}
 
+        {/* ─── REVENUE VIEW ─── */}
+        {view === 'revenue' && revenueData && (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              <ScoreCard label="Total QB Revenue" value={revenueData.grand_total || 0} change={0} color="emerald" format="currency" sparkData={[]} />
+              <ScoreCard label="Active Contractors Revenue" value={revenueData.active_total || 0} change={revenueData.active_pct} color="blue" format="currency" sparkData={[]} />
+              <ScoreCard label="Inactive / Past Revenue" value={revenueData.inactive_total || 0} change={revenueData.inactive_pct} color="amber" format="currency" sparkData={[]} />
+              <ScoreCard label="Total QB Customers" value={(revenueData.active_count || 0) + (revenueData.inactive_count || 0)} change={0} color="violet" format="number" sparkData={[]} />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+              {/* Top Active Contractors */}
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className={`rounded-xl p-6 ${cardBg}`}>
+                <div className="flex items-center gap-2 mb-4">
+                  <Users size={16} className="text-blue-400" />
+                  <h3 className={`text-base font-semibold ${textPri}`}>Top Active Contractors</h3>
+                  <span className={`ml-auto text-xs ${textSec}`}>{revenueData.active_count} total</span>
+                </div>
+                {revenueData.top_active?.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={Math.min(revenueData.top_active.length * 35, 400)}>
+                    <BarChart data={revenueData.top_active} layout="vertical">
+                      <XAxis type="number" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
+                      <YAxis dataKey="name" type="category" width={160} stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${(v || 0).toLocaleString()}`]} />
+                      <Bar dataKey="revenue" radius={[0, 6, 6, 0]} animationDuration={500}>
+                        {revenueData.top_active.map((_, i) => <Cell key={i} fill={_clrs[i % _clrs.length]} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className={`text-sm text-center py-16 ${textSec}`}>No active contractor revenue</p>
+                )}
+              </motion.div>
+
+              {/* Top Inactive Contractors */}
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className={`rounded-xl p-6 ${cardBg}`}>
+                <div className="flex items-center gap-2 mb-4">
+                  <TrendingUp size={16} className="text-amber-400" />
+                  <h3 className={`text-base font-semibold ${textPri}`}>Top Non-Active / Past Contractors</h3>
+                  <span className={`ml-auto text-xs ${textSec}`}>{revenueData.inactive_count} total</span>
+                </div>
+                {revenueData.top_inactive?.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={Math.min(revenueData.top_inactive.length * 35, 400)}>
+                    <BarChart data={revenueData.top_inactive} layout="vertical">
+                      <XAxis type="number" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tickFormatter={v => `$${(v/1000).toFixed(0)}K`} />
+                      <YAxis dataKey="name" type="category" width={160} stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={v => [`$${(v || 0).toLocaleString()}`]} />
+                      <Bar dataKey="revenue" radius={[0, 6, 6, 0]} animationDuration={500}>
+                        {revenueData.top_inactive.map((_, i) => <Cell key={i} fill="#F59E0B" />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className={`text-sm text-center py-16 ${textSec}`}>No inactive contractor revenue</p>
+                )}
+              </motion.div>
+            </div>
+
+            {/* Split banner */}
+            <div className={`mb-8 p-4 rounded-xl ${cardBg}`}>
+              <p className={`text-xs ${textSec} mb-2 uppercase tracking-wide`}>Revenue Split</p>
+              <div className="flex items-center gap-1 h-8 rounded-lg overflow-hidden">
+                <div className="bg-blue-500 h-full flex items-center justify-center text-white text-xs font-bold transition-all" style={{ width: `${revenueData.active_pct || 0}%` }}>
+                  {revenueData.active_pct >= 10 && `Active ${revenueData.active_pct}%`}
+                </div>
+                <div className="bg-amber-500 h-full flex items-center justify-center text-white text-xs font-bold transition-all" style={{ width: `${revenueData.inactive_pct || 0}%` }}>
+                  {revenueData.inactive_pct >= 10 && `Inactive ${revenueData.inactive_pct}%`}
+                </div>
+              </div>
+              <div className="flex justify-between mt-2 text-xs">
+                <span className={textSec}>Active: ${(revenueData.active_total || 0).toLocaleString()}</span>
+                <span className={textSec}>Inactive: ${(revenueData.inactive_total || 0).toLocaleString()}</span>
+              </div>
+            </div>
+          </>
+        )}
+
+        {view === 'revenue' && !revenueData && (
+          <div className={`p-8 rounded-xl ${cardBg} text-center ${textSec}`}>
+            Loading QB revenue data...
+          </div>
+        )}
+
+        {view === 'traffic' && (
+        <>
         {/* KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <ScoreCard label="Total Visits" value={data?.total_visits || 0} change={0} color="amber" format="number" sparkData={[]} />
@@ -246,6 +347,8 @@ const IBOSContractors = () => {
             );
           })}
         </div>
+        </>
+        )}
       </div>
     </motion.div>
   );

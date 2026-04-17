@@ -347,21 +347,23 @@ const ExecutiveSummary = () => {
             color="amber" format="number" />
         </motion.div>
 
-        {/* ── ROW 3 SCORECARDS (revenue + future pipelines) ────────────── */}
+        {/* ── ROW 3 SCORECARDS — QB Revenue breakdown ─────────────────── */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.115 }}
           className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <ScoreCard label="Contractor Revenue (QB)"
-            value={contractorRev?.totalRevenue || 0}
-            color="amber" format="currency" />
-          <ScoreCard label="Active Contractors"
-            value={contractorRev?.contractorCount || 0}
-            color="blue" format="number" />
-          <ScoreCard label="Avg Revenue / Contractor"
-            value={contractorRev?.contractorCount > 0 ? (contractorRev.totalRevenue / contractorRev.contractorCount) : 0}
+          <ScoreCard label="Total QB Revenue"
+            value={summary?.qb_revenue?.grand_total || contractorRev?.totalRevenue || 0}
             color="emerald" format="currency" />
-          <ScoreCard label="CP Shopify Revenue"
-            value={0}
-            color="violet" format="currency" />
+          <ScoreCard label="Active Contractors Revenue"
+            value={summary?.qb_revenue?.active_total || 0}
+            change={summary?.qb_revenue?.active_pct}
+            color="blue" format="currency" />
+          <ScoreCard label="Past / Inactive Revenue"
+            value={summary?.qb_revenue?.inactive_total || 0}
+            change={summary?.qb_revenue?.inactive_pct}
+            color="amber" format="currency" />
+          <ScoreCard label="Total QB Customers"
+            value={(summary?.qb_revenue?.active_count || 0) + (summary?.qb_revenue?.inactive_count || 0)}
+            color="violet" format="number" />
         </motion.div>
 
         {/* ── LIVE SUMMARY (full width) ────────────────────────────────── */}
