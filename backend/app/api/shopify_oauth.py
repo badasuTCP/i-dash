@@ -24,6 +24,7 @@ vars, these endpoints become dormant.
 import hashlib
 import hmac
 import logging
+import os
 import secrets
 from typing import Optional
 from urllib.parse import urlencode
@@ -34,9 +35,28 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.config import settings
 
+
+def _cfg(key: str, default: str = "") -> str:
+    """Read a Shopify config value — prefer live os.environ over the cached
+    pydantic settings object so freshly-added Railway env vars take effect
+    without requiring a settings re-import."""
+    return os.getenv(key) or getattr(settings, key, "") or default
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/shopify", tags=["shopify-oauth"])
+
+
+@router.get("/debug", include_in_schema=False)
+async def shopify_debug() -> dict:
+    """Diagnostic — show which Shopify env vars are visible to the running
+    process. Returns booleans only, never values. Safe to expose."""
+    keys = ["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_SHOP_DOMAIN",
+            "SHOPIFY_ADMIN_TOKEN", "SHOPIFY_API_VERSION"]
+    return {
+        "env": {k: bool(os.getenv(k)) for k in keys},
+        "settings": {k: bool(getattr(settings, k, "")) for k in keys},
+    }
 
 # Scopes we request when installing on CP store.
 SHOPIFY_SCOPES = ",".join([
@@ -69,12 +89,18 @@ async def shopify_install(
     shop: Optional[str] = Query(None, description="Shop domain, e.g. mrvhcp-w0.myshopify.com"),
 ) -> HTMLResponse:
     """Kick off Shopify OAuth — redirects to the store's authorize URL."""
-    if not settings.SHOPIFY_API_KEY:
+    api_key = _cfg("SHOPIFY_API_KEY")
+    if not api_key:
+        logger.error(
+            "SHOPIFY_API_KEY missing — os.environ has %s, settings has %s",
+            bool(os.getenv("SHOPIFY_API_KEY")),
+            bool(getattr(settings, "SHOPIFY_API_KEY", "")),
+        )
         raise HTTPException(500, detail="SHOPIFY_API_KEY not configured")
 
     # Shop may come in as a query param (?shop=...) or we fall back to
     # the configured domain. Required either way.
-    target_shop = (shop or settings.SHOPIFY_SHOP_DOMAIN or "").strip().lower()
+    target_shop = (shop or _cfg("SHOPIFY_SHOP_DOMAIN") or "").strip().lower()
     if not target_shop:
         return HTMLResponse(
             "<h3>Shop missing</h3>"
@@ -89,7 +115,7 @@ async def shopify_install(
     redirect_uri = str(request.url_for("shopify_callback"))
 
     params = {
-        "client_id": settings.SHOPIFY_API_KEY,
+        "client_id": api_key,
         "scope": SHOPIFY_SCOPES,
         "redirect_uri": redirect_uri,
         "state": nonce,
@@ -116,17 +142,19 @@ async def shopify_callback(request: Request) -> HTMLResponse:
 
     if not code or not shop:
         raise HTTPException(400, detail="Missing code or shop in callback")
-    if not settings.SHOPIFY_API_KEY or not settings.SHOPIFY_API_SECRET:
+    api_key = _cfg("SHOPIFY_API_KEY")
+    api_secret = _cfg("SHOPIFY_API_SECRET")
+    if not api_key or not api_secret:
         raise HTTPException(500, detail="Shopify app credentials not configured")
 
-    if not _verify_hmac(qp, settings.SHOPIFY_API_SECRET):
+    if not _verify_hmac(qp, api_secret):
         logger.warning("Shopify callback HMAC failed for shop=%s", shop)
         raise HTTPException(400, detail="HMAC verification failed")
 
     token_url = f"https://{shop}/admin/oauth/access_token"
     payload = {
-        "client_id": settings.SHOPIFY_API_KEY,
-        "client_secret": settings.SHOPIFY_API_SECRET,
+        "client_id": api_key,
+        "client_secret": api_secret,
         "code": code,
     }
 
