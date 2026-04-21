@@ -2649,6 +2649,68 @@ async def get_contractor_breakdown(
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Meta account index — helper for figuring out the right account_id.
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/meta-accounts",
+    summary="List all Meta ad accounts known to the system with their contractor mapping",
+)
+async def list_meta_accounts(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Return every Meta account we've discovered via brand_assets or the
+    contractors table, with the linked contractor name where available.
+
+    Use this to find the correct account_id before calling /meta-validate.
+    """
+    from app.models.brand_asset import BrandAsset
+    from app.models.contractor import Contractor
+    from sqlalchemy import and_, select as _select
+
+    ba_q = await db.execute(
+        _select(BrandAsset.account_id, BrandAsset.account_name, BrandAsset.brand).where(
+            BrandAsset.platform == "meta"
+        ).order_by(BrandAsset.account_name)
+    )
+    accounts: dict[str, dict] = {}
+    for r in ba_q.all():
+        if not r.account_id:
+            continue
+        accounts[r.account_id] = {
+            "account_id": r.account_id,
+            "account_name": r.account_name,
+            "brand": r.brand,
+            "linked_contractor": None,
+        }
+
+    c_q = await db.execute(
+        _select(Contractor.id, Contractor.name, Contractor.meta_account_id).where(
+            Contractor.meta_account_id.isnot(None)
+        )
+    )
+    for r in c_q.all():
+        aid = r.meta_account_id
+        if aid in accounts:
+            accounts[aid]["linked_contractor"] = {"id": r.id, "name": r.name}
+        else:
+            accounts[aid] = {
+                "account_id": aid,
+                "account_name": None,
+                "brand": None,
+                "linked_contractor": {"id": r.id, "name": r.name},
+            }
+
+    return {
+        "count": len(accounts),
+        "accounts": sorted(accounts.values(), key=lambda a: (
+            (a.get("linked_contractor") or {}).get("name") or a.get("account_name") or "",
+        )),
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Meta data-integrity validation — direct Meta call vs DB + division audit.
 # Same logic as backend/scripts/validate_meta.py, exposed as HTTP so it can
 # be triggered from the browser without shell access.
@@ -2739,9 +2801,17 @@ async def meta_validate(
         except FacebookRequestError as e:
             return {"error": f"get_insights: {e.api_error_code()} {e.api_error_message()}"}
 
-    meta_res = await _aio.wait_for(_aio.to_thread(_meta_blocking), timeout=60)
-    if "error" in meta_res:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=meta_res["error"])
+    try:
+        meta_res = await _aio.wait_for(_aio.to_thread(_meta_blocking), timeout=60)
+    except _aio.TimeoutError:
+        meta_res = {"error": "Meta API call timed out after 60 seconds"}
+    except Exception as e:  # noqa: BLE001
+        meta_res = {"error": f"{type(e).__name__}: {e}"}
+
+    # Meta errors are NOT fatal to the endpoint — return them in the JSON
+    # body so the caller can see exactly what Meta said (e.g. permissions,
+    # bad account id) without a 502 swallowing the detail.
+    meta_failed = "error" in meta_res
 
     # ── DB sums ─
     q = await db.execute(
@@ -2816,7 +2886,50 @@ async def meta_validate(
         "clean": (leak_a.scalar() or 0) == 0 and (leak_b.scalar() or 0) == 0,
     }
 
-    # ── Side-by-side match ─
+    # ── Also look up what we think this account is (brand_assets + contractors) ─
+    from app.models.brand_asset import BrandAsset
+    from app.models.contractor import Contractor
+    ba_q = await db.execute(
+        _select(BrandAsset.account_name, BrandAsset.brand, BrandAsset.platform).where(
+            BrandAsset.account_id == account_id
+        )
+    )
+    ba_rows = [
+        {"account_name": r.account_name, "brand": r.brand, "platform": r.platform}
+        for r in ba_q.all()
+    ]
+    c_q = await db.execute(
+        _select(Contractor.id, Contractor.name).where(
+            Contractor.meta_account_id == account_id
+        )
+    )
+    linked_contractors = [
+        {"contractor_id": r.id, "name": r.name} for r in c_q.all()
+    ]
+
+    # ── Side-by-side match (only if Meta call succeeded) ─
+    if meta_failed:
+        return {
+            "account_id": account_id,
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "meta_live_source_of_truth": meta_res,
+            "i_dash_db": db_stored,
+            "brand_asset_lookup": ba_rows,
+            "linked_contractors": linked_contractors,
+            "division_audit": leakage,
+            "conclusion": (
+                f"❌ Meta direct call failed — cannot compare. "
+                f"Error: {meta_res.get('error')}"
+            ),
+            "hint": (
+                "Check that this account_id is correct and that "
+                "META_ACCESS_TOKEN has permission for it. Use "
+                "brand_asset_lookup + linked_contractors to see what "
+                "the DB thinks this account is."
+            ),
+        }
+
     m = meta_res["totals"]
     def _match(meta_v: float, db_v: float, tol: float = 0.01) -> dict:
         return {
@@ -2850,6 +2963,8 @@ async def meta_validate(
         "date_to": date_to.isoformat(),
         "meta_live_source_of_truth": meta_res,
         "i_dash_db": db_stored,
+        "brand_asset_lookup": ba_rows,
+        "linked_contractors": linked_contractors,
         "comparison": comparison,
         "spend_impressions_clicks_match": all_match,
         "division_audit": leakage,
