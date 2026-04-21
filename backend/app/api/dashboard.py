@@ -2960,11 +2960,13 @@ async def _meta_validate_impl(
             MetaAdMetric.account_id == CP_TRAINING_ID,
         ))
     )
+    leak_a_val = int(leak_a.scalar() or 0)
+    leak_b_val = int(leak_b.scalar() or 0)
     leakage = {
         "by_division": by_division,
-        "rows_tagged_cp_but_not_training": int(leak_a.scalar() or 0),
-        "rows_tagged_ibos_but_on_training": int(leak_b.scalar() or 0),
-        "clean": (leak_a.scalar() or 0) == 0 and (leak_b.scalar() or 0) == 0,
+        "rows_tagged_cp_but_not_training": leak_a_val,
+        "rows_tagged_ibos_but_on_training": leak_b_val,
+        "clean": leak_a_val == 0 and leak_b_val == 0,
     }
 
     # ── Also look up what we think this account is (brand_assets + contractors) ─
