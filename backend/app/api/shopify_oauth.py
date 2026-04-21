@@ -36,15 +36,46 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.core.config import settings
 
 
-def _cfg(key: str, default: str = "") -> str:
-    """Read a Shopify config value — prefer live os.environ over the cached
-    pydantic settings object so freshly-added Railway env vars take effect
-    without requiring a settings re-import."""
-    return os.getenv(key) or getattr(settings, key, "") or default
+# NOTE: _cfg is defined below after _runtime_creds is declared.
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/shopify", tags=["shopify-oauth"])
+
+# Runtime credential override — workaround for Railway variable-injection
+# issues where WC_* / SHOPIFY_* env vars show in the Variables UI but never
+# reach the container. POST creds to /api/shopify/prime to populate, then
+# run the OAuth flow normally. In-memory only; cleared on pod restart.
+_runtime_creds: dict = {}
+
+
+def _cfg(key: str, default: str = "") -> str:
+    """Read a Shopify config value — prefer runtime overrides, then live
+    os.environ, then cached pydantic settings."""
+    return _runtime_creds.get(key) or os.getenv(key) or getattr(settings, key, "") or default
+
+
+@router.post("/prime", include_in_schema=False)
+async def shopify_prime(payload: dict) -> dict:
+    """One-shot runtime credential injector. Payload must include an
+    `admin_secret` matching the service's SECRET_KEY (so random callers
+    can't set creds). Accepted keys: SHOPIFY_API_KEY, SHOPIFY_API_SECRET,
+    SHOPIFY_SHOP_DOMAIN, SHOPIFY_ADMIN_TOKEN.
+    """
+    admin_secret = payload.get("admin_secret", "")
+    expected = os.getenv("SECRET_KEY") or getattr(settings, "SECRET_KEY", "") or ""
+    if not expected or not hmac.compare_digest(str(admin_secret), str(expected)):
+        raise HTTPException(403, detail="Unauthorized")
+
+    accepted = {}
+    for k in ("SHOPIFY_API_KEY", "SHOPIFY_API_SECRET",
+              "SHOPIFY_SHOP_DOMAIN", "SHOPIFY_ADMIN_TOKEN"):
+        v = payload.get(k)
+        if v:
+            _runtime_creds[k] = str(v)
+            accepted[k] = True
+    logger.info("Shopify runtime creds primed: %s", list(accepted.keys()))
+    return {"primed": accepted, "known_keys": sorted(_runtime_creds.keys())}
 
 
 @router.get("/debug", include_in_schema=False)
