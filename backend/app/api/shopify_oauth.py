@@ -63,6 +63,7 @@ async def shopify_debug() -> dict:
         "env_keys_starting_with_SHOPIFY": shopify_keys,
         "env_keys_starting_with_WC_": wc_keys,
         "total_env_vars": len(os.environ),
+        "all_env_keys": sorted(os.environ.keys()),
     }
 
 # Scopes we request when installing on CP store.
