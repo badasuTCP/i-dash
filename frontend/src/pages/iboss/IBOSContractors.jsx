@@ -75,11 +75,12 @@ const ViewToggle = ({ view, setView, isDark, revenueTotal }) => {
 // Blue=Visits, Violet=Spend, Emerald=Leads, Amber=Sites.
 // ─────────────────────────────────────────────────────────────────────────
 const KPIAnchors = ({ isDark, textPri, textSec, stats, live }) => {
+  // Vivid, saturated gradients — each tile reads as a color-coded anchor.
   const palette = {
-    blue:    { bg: isDark ? 'from-blue-500/15 to-blue-500/5'       : 'from-blue-50 to-blue-100/60',        border: 'border-blue-500/40',    ring: 'bg-blue-500',    text: 'text-blue-400',    shadow: 'shadow-blue-500/10' },
-    violet:  { bg: isDark ? 'from-violet-500/15 to-violet-500/5'   : 'from-violet-50 to-violet-100/60',    border: 'border-violet-500/40',  ring: 'bg-violet-500',  text: 'text-violet-400',  shadow: 'shadow-violet-500/10' },
-    emerald: { bg: isDark ? 'from-emerald-500/15 to-emerald-500/5' : 'from-emerald-50 to-emerald-100/60',  border: 'border-emerald-500/40', ring: 'bg-emerald-500', text: 'text-emerald-400', shadow: 'shadow-emerald-500/10' },
-    amber:   { bg: isDark ? 'from-amber-500/15 to-amber-500/5'     : 'from-amber-50 to-amber-100/60',      border: 'border-amber-500/40',   ring: 'bg-amber-500',   text: 'text-amber-400',   shadow: 'shadow-amber-500/10' },
+    blue:    { grad: 'from-blue-500 via-blue-600 to-indigo-600',         glow: 'shadow-blue-500/40',    iconBg: 'bg-white/25',    ring: 'bg-white/80' },
+    violet:  { grad: 'from-violet-500 via-purple-600 to-fuchsia-600',    glow: 'shadow-violet-500/40',  iconBg: 'bg-white/25',    ring: 'bg-white/80' },
+    emerald: { grad: 'from-emerald-500 via-emerald-600 to-teal-600',     glow: 'shadow-emerald-500/40', iconBg: 'bg-white/25',    ring: 'bg-white/80' },
+    amber:   { grad: 'from-amber-500 via-orange-500 to-rose-500',        glow: 'shadow-amber-500/40',   iconBg: 'bg-white/25',    ring: 'bg-white/80' },
   };
   return (
     <motion.div
@@ -104,16 +105,19 @@ const KPIAnchors = ({ isDark, textPri, textSec, stats, live }) => {
               key={s.label}
               initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.04 * i }}
-              className={`relative rounded-xl px-4 py-3 bg-gradient-to-br ${p.bg} border ${p.border} backdrop-blur-md ${p.shadow} shadow-lg overflow-hidden`}
+              whileHover={{ y: -2, transition: { duration: 0.15 } }}
+              className={`relative rounded-xl px-4 py-4 bg-gradient-to-br ${p.grad} shadow-lg ${p.glow} overflow-hidden group`}
             >
-              <div className={`absolute top-0 left-0 right-0 h-0.5 ${p.ring}`} />
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isDark ? 'bg-slate-900/40' : 'bg-white/70'} ${p.text}`}>
-                  <Icon size={18} />
+              {/* Decorative glow blob */}
+              <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-white/15 blur-2xl" />
+              <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/40" />
+              <div className="relative flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${p.iconBg} backdrop-blur-md border border-white/20 text-white shadow-inner`}>
+                  <Icon size={19} />
                 </div>
                 <div className="leading-tight min-w-0">
-                  <p className={`text-[10px] uppercase tracking-wider font-semibold ${textSec}`}>{s.label}</p>
-                  <p className={`text-xl font-bold ${textPri} truncate`}>{s.value}</p>
+                  <p className="text-[10px] uppercase tracking-wider font-bold text-white/80">{s.label}</p>
+                  <p className="text-2xl font-extrabold text-white truncate drop-shadow-sm">{s.value}</p>
                 </div>
               </div>
             </motion.div>
