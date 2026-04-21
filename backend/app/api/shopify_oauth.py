@@ -50,12 +50,19 @@ router = APIRouter(prefix="/shopify", tags=["shopify-oauth"])
 @router.get("/debug", include_in_schema=False)
 async def shopify_debug() -> dict:
     """Diagnostic — show which Shopify env vars are visible to the running
-    process. Returns booleans only, never values. Safe to expose."""
+    process. Returns booleans + lengths only, never values. Safe to expose."""
     keys = ["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_SHOP_DOMAIN",
             "SHOPIFY_ADMIN_TOKEN", "SHOPIFY_API_VERSION"]
+    # Also list any env vars whose NAME starts with SHOPIFY or WC — lets us
+    # see if Railway injected anything at all under those prefixes.
+    shopify_keys = sorted(k for k in os.environ if k.startswith("SHOPIFY"))
+    wc_keys = sorted(k for k in os.environ if k.startswith("WC_"))
     return {
-        "env": {k: bool(os.getenv(k)) for k in keys},
-        "settings": {k: bool(getattr(settings, k, "")) for k in keys},
+        "env_lengths": {k: len(os.getenv(k, "")) for k in keys},
+        "settings_lengths": {k: len(getattr(settings, k, "") or "") for k in keys},
+        "env_keys_starting_with_SHOPIFY": shopify_keys,
+        "env_keys_starting_with_WC_": wc_keys,
+        "total_env_vars": len(os.environ),
     }
 
 # Scopes we request when installing on CP store.
