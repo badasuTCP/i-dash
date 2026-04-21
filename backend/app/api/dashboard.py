@@ -2649,6 +2649,219 @@ async def get_contractor_breakdown(
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Meta data-integrity validation — direct Meta call vs DB + division audit.
+# Same logic as backend/scripts/validate_meta.py, exposed as HTTP so it can
+# be triggered from the browser without shell access.
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/meta-validate",
+    summary="Validate that the DB matches Meta Ads Manager for one account",
+)
+async def meta_validate(
+    account_id: str = Query(..., description="Meta ad account id, act_ or bare"),
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """One-shot integrity check for a Meta ad account.
+
+    Runs the exact same two queries side-by-side:
+    - Meta direct /insights call at level=account, filtered to visible
+      (non-archived/deleted) campaigns — i.e. what Meta Ads Manager shows.
+    - Our DB sums for the same (account_id, date_range).
+
+    Returns per-metric match flags plus the division-leak audit counts.
+    """
+    import asyncio as _aio
+    import time as _time
+    from sqlalchemy import and_, func, select as _select, or_
+    from facebook_business.api import FacebookAdsApi
+    from facebook_business.adobjects.adaccount import AdAccount
+    from facebook_business.exceptions import FacebookRequestError
+
+    CP_TRAINING_ID = "act_144305066"
+    HIDDEN = {"ARCHIVED", "DELETED"}
+
+    # ── Meta direct call (source of truth) — runs in a worker thread ─
+    def _meta_blocking() -> dict:
+        FacebookAdsApi.init(access_token=settings.META_ACCESS_TOKEN)
+        acct_api = account_id if account_id.startswith("act_") else f"act_{account_id}"
+        ad_account = AdAccount(acct_api)
+        visible_ids: list[str] = []
+        hidden_ids: list[str] = []
+        try:
+            for c in ad_account.get_campaigns(
+                fields=["id", "name", "effective_status"],
+                params={"limit": 500},
+            ):
+                cid = c.get("id")
+                st = c.get("effective_status") or ""
+                if not cid:
+                    continue
+                (hidden_ids if st in HIDDEN else visible_ids).append(str(cid))
+        except FacebookRequestError as e:
+            return {"error": f"get_campaigns: {e.api_error_code()} {e.api_error_message()}"}
+
+        params: dict = {
+            "time_range": {"since": date_from.isoformat(), "until": date_to.isoformat()},
+            "level": "account",
+            "limit": 1,
+        }
+        if visible_ids:
+            params["filtering"] = [{
+                "field": "campaign.id",
+                "operator": "IN",
+                "value": visible_ids,
+            }]
+        try:
+            rows = ad_account.get_insights(
+                fields=["spend", "impressions", "clicks", "reach"],
+                params=params,
+            )
+            for row in rows:
+                return {
+                    "totals": {
+                        "spend": float(row.get("spend", 0) or 0),
+                        "impressions": int(row.get("impressions", 0) or 0),
+                        "clicks": int(row.get("clicks", 0) or 0),
+                        "reach": int(row.get("reach", 0) or 0),
+                    },
+                    "visible_campaigns": len(visible_ids),
+                    "hidden_campaigns": len(hidden_ids),
+                }
+            return {
+                "totals": {"spend": 0.0, "impressions": 0, "clicks": 0, "reach": 0},
+                "visible_campaigns": len(visible_ids),
+                "hidden_campaigns": len(hidden_ids),
+            }
+        except FacebookRequestError as e:
+            return {"error": f"get_insights: {e.api_error_code()} {e.api_error_message()}"}
+
+    meta_res = await _aio.wait_for(_aio.to_thread(_meta_blocking), timeout=60)
+    if "error" in meta_res:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=meta_res["error"])
+
+    # ── DB sums ─
+    q = await db.execute(
+        _select(
+            func.sum(MetaAdMetric.spend).label("spend"),
+            func.sum(MetaAdMetric.impressions).label("impressions"),
+            func.sum(MetaAdMetric.clicks).label("clicks"),
+            func.count(MetaAdMetric.id).label("row_count"),
+            func.min(MetaAdMetric.fetched_at).label("earliest"),
+            func.max(MetaAdMetric.fetched_at).label("latest"),
+        ).where(and_(
+            MetaAdMetric.account_id == account_id,
+            MetaAdMetric.date >= date_from,
+            MetaAdMetric.date <= date_to,
+        ))
+    )
+    row = q.first()
+    db_stored = {
+        "spend": float(row.spend or 0) if row else 0.0,
+        "impressions": int(row.impressions or 0) if row else 0,
+        "clicks": int(row.clicks or 0) if row else 0,
+        "row_count": int(row.row_count or 0) if row else 0,
+        "earliest_fetched": row.earliest.isoformat() if row and row.earliest else None,
+        "latest_fetched": row.latest.isoformat() if row and row.latest else None,
+    }
+
+    # ── Period reach (from meta_period_reach when the window is a preset) ─
+    from app.models.metrics import MetaPeriodReach as _MPR
+    preset = _match_preset_window(date_from, date_to)
+    pr_reach: Optional[int] = None
+    pr_fetched = None
+    if preset:
+        pr_q = await db.execute(
+            _select(_MPR.reach, _MPR.fetched_at).where(and_(
+                _MPR.account_id == account_id,
+                _MPR.preset_key == preset,
+            ))
+        )
+        pr_row = pr_q.first()
+        if pr_row:
+            pr_reach = int(pr_row.reach or 0)
+            pr_fetched = pr_row.fetched_at
+
+    # ── Division-leak audit ─
+    div_q = await db.execute(
+        _select(
+            MetaAdMetric.division,
+            func.count(MetaAdMetric.id).label("n"),
+            func.sum(MetaAdMetric.spend).label("spend"),
+        ).group_by(MetaAdMetric.division)
+    )
+    by_division = [
+        {"division": r.division, "rows": int(r.n or 0), "spend": round(float(r.spend or 0), 2)}
+        for r in div_q.all()
+    ]
+    leak_a = await db.execute(
+        _select(func.count(MetaAdMetric.id)).where(and_(
+            MetaAdMetric.division == "cp",
+            MetaAdMetric.account_id != CP_TRAINING_ID,
+        ))
+    )
+    leak_b = await db.execute(
+        _select(func.count(MetaAdMetric.id)).where(and_(
+            MetaAdMetric.division == "ibos",
+            MetaAdMetric.account_id == CP_TRAINING_ID,
+        ))
+    )
+    leakage = {
+        "by_division": by_division,
+        "rows_tagged_cp_but_not_training": int(leak_a.scalar() or 0),
+        "rows_tagged_ibos_but_on_training": int(leak_b.scalar() or 0),
+        "clean": (leak_a.scalar() or 0) == 0 and (leak_b.scalar() or 0) == 0,
+    }
+
+    # ── Side-by-side match ─
+    m = meta_res["totals"]
+    def _match(meta_v: float, db_v: float, tol: float = 0.01) -> dict:
+        return {
+            "meta": meta_v,
+            "db": db_v,
+            "delta": round(db_v - meta_v, 2),
+            "match": abs(db_v - meta_v) < tol,
+        }
+
+    comparison = {
+        "spend": _match(m["spend"], db_stored["spend"]),
+        "impressions": _match(m["impressions"], float(db_stored["impressions"]), tol=1),
+        "clicks": _match(m["clicks"], float(db_stored["clicks"]), tol=1),
+    }
+    if pr_reach is not None:
+        comparison["reach"] = _match(m["reach"], float(pr_reach), tol=2)
+        comparison["reach"]["source"] = f"meta_period_reach preset={preset}"
+        comparison["reach"]["fetched_at"] = pr_fetched.isoformat() if pr_fetched else None
+    else:
+        comparison["reach"] = {
+            "meta": m["reach"],
+            "db": None,
+            "match": None,
+            "note": "no preset matches this window — period reach not pre-computed",
+        }
+
+    all_match = all(c.get("match") is True for k, c in comparison.items() if k != "reach")
+    return {
+        "account_id": account_id,
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "meta_live_source_of_truth": meta_res,
+        "i_dash_db": db_stored,
+        "comparison": comparison,
+        "spend_impressions_clicks_match": all_match,
+        "division_audit": leakage,
+        "conclusion": (
+            "✅ DB matches Meta Ads Manager for this account+range."
+            if all_match and leakage["clean"] else
+            "❌ Mismatch — see comparison and division_audit."
+        ),
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Meta reconciliation debug — what's in the DB vs what Meta's API returns
 # ────────────────────────────────────────────────────────────────────────────
 
