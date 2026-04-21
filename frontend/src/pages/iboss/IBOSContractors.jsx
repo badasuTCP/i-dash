@@ -355,7 +355,24 @@ const IBOSContractors = () => {
                   onClick={() => setExpandedId(isExpanded ? null : (c.id || i))}>
                   <div className="w-3 h-3 rounded-full mr-3 flex-shrink-0" style={{ backgroundColor: c.color || _clrs[i % _clrs.length] }} />
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-semibold ${textPri} truncate`}>{c.name}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`text-sm font-semibold ${textPri} truncate`}>{c.name}</p>
+                      {(() => {
+                        const spendSources = (c.sources || []).filter(s => s === 'META' || s === 'G-ADS');
+                        if (spendSources.length < 2) return null;
+                        const pill = (label, cls) => (
+                          <span key={label} className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide ${cls}`}>{label}</span>
+                        );
+                        return (
+                          <span className="flex items-center gap-1" title="Ad spend combined from multiple sources">
+                            {spendSources.map(s => s === 'META'
+                              ? pill('Meta', isDark ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-blue-100 text-blue-700 border border-blue-200')
+                              : pill('Google Ads', isDark ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-100 text-emerald-700 border border-emerald-200')
+                            )}
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </div>
                   <div className="flex items-center gap-6 text-xs">
                     <div className="text-center w-20">
