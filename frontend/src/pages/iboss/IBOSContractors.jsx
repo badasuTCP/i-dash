@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, AreaChart, Area,
+  Tooltip, ResponsiveContainer, AreaChart, Area,
 } from 'recharts';
 import { HardHat, Globe, TrendingUp, ChevronDown, ChevronUp, DollarSign, Users, Target, Zap } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
@@ -13,6 +11,115 @@ import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
 import SortableBarChart from '../../components/common/SortableBarChart';
 import { useExport } from '../../context/ExportContext';
+
+// ─────────────────────────────────────────────────────────────────────────
+// High-signal pill toggle — Traffic & Spend vs QB Revenue, with a live
+// revenue teaser under the Revenue side so execs know what's behind the click.
+// ─────────────────────────────────────────────────────────────────────────
+const ViewToggle = ({ view, setView, isDark, revenueTotal }) => {
+  const isRevenue = view === 'revenue';
+  const formatRev = (v) => {
+    const n = Number(v) || 0;
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}K`;
+    return `$${n.toFixed(0)}`;
+  };
+  const shellBg = isDark ? 'bg-slate-900/70 border border-slate-700/60' : 'bg-slate-100 border border-slate-200';
+  return (
+    <div className={`relative inline-flex items-center rounded-full p-1 ${shellBg} backdrop-blur-md shadow-sm`}
+         style={{ minWidth: '360px' }}>
+      {/* Animated slider */}
+      <motion.div
+        className={`absolute top-1 bottom-1 rounded-full ${
+          isRevenue
+            ? 'bg-gradient-to-r from-emerald-500 to-amber-500 shadow-lg shadow-emerald-500/30'
+            : 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-lg shadow-amber-500/30'
+        }`}
+        initial={false}
+        animate={{ left: isRevenue ? '50%' : '0.25rem', right: isRevenue ? '0.25rem' : '50%' }}
+        transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+      />
+      {/* Traffic & Spend */}
+      <button
+        onClick={() => setView('traffic')}
+        className={`relative z-10 flex-1 px-5 py-2.5 rounded-full text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+          !isRevenue ? 'text-white' : isDark ? 'text-slate-300' : 'text-slate-600'
+        }`}
+      >
+        <Globe size={14} />
+        <span>Traffic &amp; Spend</span>
+      </button>
+      {/* QB Revenue */}
+      <button
+        onClick={() => setView('revenue')}
+        className={`relative z-10 flex-1 px-5 py-2.5 rounded-full text-sm font-semibold transition-colors flex flex-col items-center justify-center leading-tight ${
+          isRevenue ? 'text-white' : isDark ? 'text-emerald-300' : 'text-emerald-700'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <DollarSign size={14} />
+          <span>QB Revenue</span>
+        </div>
+        {revenueTotal > 0 && (
+          <span className={`text-[10px] font-bold tracking-wide mt-0.5 ${isRevenue ? 'text-white/90' : isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+            {formatRev(revenueTotal)}
+          </span>
+        )}
+      </button>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Condensed horizontal KPI strip — replaces the 4-tile grid to save
+// vertical space and pull the matrix cards higher into the viewport.
+// ─────────────────────────────────────────────────────────────────────────
+const KPIStrip = ({ isDark, textPri, textSec, stats, live }) => {
+  const surface = isDark
+    ? 'bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-slate-700/40'
+    : 'bg-gradient-to-br from-white to-slate-50 border border-slate-200 shadow-sm';
+  const accent = {
+    amber:   'text-amber-400',
+    violet:  'text-violet-400',
+    emerald: 'text-emerald-400',
+    blue:    'text-blue-400',
+  };
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+      className={`rounded-2xl px-5 py-3 mb-5 backdrop-blur-md ${surface}`}
+    >
+      <div className="flex items-center gap-3 flex-wrap">
+        {live && (
+          <div className="flex items-center gap-1.5 pr-3 mr-1 border-r border-slate-500/20">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+            </span>
+            <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-400">Live</span>
+          </div>
+        )}
+        {stats.map((s, i) => {
+          const Icon = s.icon;
+          return (
+            <div key={s.label} className="flex items-center gap-2.5 flex-1 min-w-[140px]">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDark ? 'bg-slate-800/80' : 'bg-slate-100'} ${accent[s.color]}`}>
+                <Icon size={15} />
+              </div>
+              <div className="leading-tight">
+                <p className={`text-[9px] uppercase tracking-wider ${textSec}`}>{s.label}</p>
+                <p className={`text-lg font-bold ${textPri}`}>{s.value}</p>
+              </div>
+              {i < stats.length - 1 && (
+                <div className={`hidden md:block h-8 w-px ml-auto ${isDark ? 'bg-slate-700/40' : 'bg-slate-200'}`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+};
 
 // ─────────────────────────────────────────────────────────────────────────
 // Performance Matrix card — glassmorphism, sparkline, status pulse, hover
@@ -349,27 +456,18 @@ const IBOSContractors = () => {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 flex items-end justify-between flex-wrap gap-4">
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-4 flex items-end justify-between flex-wrap gap-4">
           <div>
             <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Contractor Breakdown</h1>
             <p className={textSec}>I-BOS Division — {contractors.length} contractors · {data?.period || 'Loading...'}</p>
           </div>
-          <div className={`inline-flex rounded-lg overflow-hidden border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-            <button onClick={() => setView('traffic')} className={`px-4 py-2 text-xs font-semibold transition-all ${view === 'traffic' ? 'bg-amber-500 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600'}`}>
-              Traffic & Spend
-            </button>
-            <button onClick={() => setView('revenue')} className={`px-4 py-2 text-xs font-semibold transition-all ${view === 'revenue' ? 'bg-emerald-500 text-white' : isDark ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600'}`}>
-              QB Revenue
-            </button>
-          </div>
+          <ViewToggle
+            view={view}
+            setView={setView}
+            isDark={isDark}
+            revenueTotal={revenueData?.grand_total || 0}
+          />
         </motion.div>
-
-        {data?.hasLiveData && view === 'traffic' && (
-          <div className="mb-6 p-3 rounded-lg flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Live Data · {contractors.length} contractor sites · ${(data?.total_spend || 0).toLocaleString()} total spend
-          </div>
-        )}
 
         <PageInsight insights={insights} />
 
@@ -442,64 +540,19 @@ const IBOSContractors = () => {
 
         {view === 'traffic' && (
         <>
-        {/* KPIs */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <ScoreCard label="Total Visits" value={data?.total_visits || 0} change={0} color="amber" format="number" sparkData={[]} />
-          <ScoreCard label="Total Ad Spend" value={data?.total_spend || 0} change={0} color="violet" format="currency" sparkData={[]} />
-          <ScoreCard label="Total Leads" value={data?.total_leads || 0} change={0} color="emerald" format="number" sparkData={[]} />
-          <ScoreCard label="Active Sites" value={contractors.length} change={0} color="blue" format="number" sparkData={[]} />
-        </div>
-
-        {/* Charts row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 items-start">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className={`rounded-xl p-6 ${cardBg}`}>
-            <div className="flex items-center gap-2 mb-4">
-              <Globe size={16} className="text-amber-400" />
-              <h3 className={`text-base font-semibold ${textPri}`}>Traffic Share</h3>
-            </div>
-            {contractors.length > 0 && (
-              <>
-                <ResponsiveContainer width="100%" height={250}>
-                  <PieChart>
-                    <Pie data={contractors.slice(0, 10)} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={2} dataKey="visits" animationDuration={500}>
-                      {contractors.slice(0, 10).map((c, i) => <Cell key={i} fill={c.color || _clrs[i % _clrs.length]} />)}
-                    </Pie>
-                    <Tooltip contentStyle={tooltipStyle} formatter={v => [(v || 0).toLocaleString() + ' visits']} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="space-y-1.5 mt-2 max-h-[200px] overflow-y-auto">
-                  {contractors.slice(0, 10).map((c, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: c.color || _clrs[i % _clrs.length] }} />
-                        <span className={`${textSec} truncate`}>{c.name}</span>
-                      </div>
-                      <span className={`font-medium ${textPri} ml-2`}>{c.visits.toLocaleString()}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
-            <div className="flex items-center gap-2 mb-4">
-              <DollarSign size={16} className="text-emerald-400" />
-              <h3 className={`text-base font-semibold ${textPri}`}>Top Contractors by Spend</h3>
-            </div>
-            <SortableBarChart
-              data={contractors.filter(c => c.spend > 50)}
-              nameKey="name"
-              metrics={[
-                { key: 'spend',   label: 'Ad Spend', color: '#10B981', format: 'currency' },
-                { key: 'leads',   label: 'Leads',    color: '#8B5CF6', format: 'number' },
-                { key: 'visits',  label: 'Visits',   color: '#3B82F6', format: 'number' },
-              ]}
-              emptyMessage="No spend data for this period"
-            />
-          </motion.div>
-        </div>
+        {/* Condensed KPI strip — single horizontal row */}
+        <KPIStrip
+          isDark={isDark}
+          textPri={textPri}
+          textSec={textSec}
+          live={!!data?.hasLiveData}
+          stats={[
+            { icon: Globe,       label: 'Visits',     value: (data?.total_visits || 0).toLocaleString(),                           color: 'amber'   },
+            { icon: DollarSign,  label: 'Ad Spend',   value: `$${(data?.total_spend || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, color: 'violet'  },
+            { icon: Target,      label: 'Leads',      value: (data?.total_leads || 0).toLocaleString(),                            color: 'emerald' },
+            { icon: HardHat,     label: 'Active Sites', value: contractors.length,                                                   color: 'blue'    },
+          ]}
+        />
 
         {/* Tab filter + Sort controls */}
         <div className="flex items-center gap-2 mb-4 flex-wrap">

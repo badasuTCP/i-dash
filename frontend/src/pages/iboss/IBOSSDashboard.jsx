@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Cell,
+  Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
 } from 'recharts';
-import { CheckCircle2, AlertCircle, HardHat, Megaphone, Globe, Award, TrendingUp } from 'lucide-react';
+import { CheckCircle2, AlertCircle, HardHat, Megaphone, Globe, Award, TrendingUp, DollarSign } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -17,6 +17,7 @@ const IBOSSDashboard = () => {
   const { dateFrom, dateTo } = useGlobalDate();
   const [data, setData] = useState(null);
   const [revenueData, setRevenueData] = useState(null);
+  const [breakdown, setBreakdown] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const ytdStart = `${new Date().getFullYear()}-01-01`;
@@ -27,12 +28,14 @@ const IBOSSDashboard = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [sumRes, revRes] = await Promise.all([
+      const [sumRes, revRes, bdRes] = await Promise.all([
         dashboardAPI.getBrandSummary('ibos', from, to),
         dashboardAPI.getAllContractorsRevenue(from, to, 10).catch(() => ({ data: null })),
+        dashboardAPI.getContractorBreakdown(from, to).catch(() => ({ data: null })),
       ]);
       setData(sumRes.data);
       setRevenueData(revRes.data);
+      setBreakdown(bdRes.data);
     } catch { setData(null); }
     finally { setLoading(false); }
   }, [from, to]);
@@ -170,7 +173,7 @@ const IBOSSDashboard = () => {
         {/* Top Contractor Sites */}
         {(data?.top_websites || []).length > 0 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
+            className={`rounded-xl p-6 mb-8 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">
               <HardHat size={16} className="text-amber-400" />
               <h3 className={`text-base font-semibold ${textPri}`}>Top Contractor Websites</h3>
@@ -185,6 +188,56 @@ const IBOSSDashboard = () => {
               yAxisWidth={200}
             />
           </motion.div>
+        )}
+
+        {/* ── Contractor aggregate charts — moved from Breakdown page ── */}
+        {breakdown?.contractors?.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+              className={`rounded-xl p-6 ${cardBg}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <Globe size={16} className="text-amber-400" />
+                <h3 className={`text-base font-semibold ${textPri}`}>Traffic Share</h3>
+              </div>
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie data={breakdown.contractors.slice(0, 10)} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={2} dataKey="visits" animationDuration={500}>
+                    {breakdown.contractors.slice(0, 10).map((c, i) => <Cell key={i} fill={c.color || _clrs[i % _clrs.length]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={tooltipStyle} formatter={v => [(v || 0).toLocaleString() + ' visits']} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="space-y-1.5 mt-2 max-h-[200px] overflow-y-auto">
+                {breakdown.contractors.slice(0, 10).map((c, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: c.color || _clrs[i % _clrs.length] }} />
+                      <span className={`${textSec} truncate`}>{c.name}</span>
+                    </div>
+                    <span className={`font-medium ${textPri} ml-2`}>{(c.visits || 0).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+              className={`rounded-xl p-6 ${cardBg}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <DollarSign size={16} className="text-emerald-400" />
+                <h3 className={`text-base font-semibold ${textPri}`}>Top Contractors by Spend</h3>
+              </div>
+              <SortableBarChart
+                data={breakdown.contractors.filter(c => c.spend > 50)}
+                nameKey="name"
+                metrics={[
+                  { key: 'spend',   label: 'Ad Spend', color: '#10B981', format: 'currency' },
+                  { key: 'leads',   label: 'Leads',    color: '#8B5CF6', format: 'number' },
+                  { key: 'visits',  label: 'Visits',   color: '#3B82F6', format: 'number' },
+                ]}
+                emptyMessage="No spend data for this period"
+              />
+            </motion.div>
+          </div>
         )}
       </div>
     </motion.div>
