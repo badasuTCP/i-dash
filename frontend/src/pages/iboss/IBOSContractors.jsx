@@ -135,8 +135,10 @@ const CompareBar = ({ count, isDark, onClear, onOpen }) => (
   <AnimatePresence>
     {count >= 1 && (
       <motion.div
-        initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
-        transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+        initial={{ opacity: 0, y: 80, scale: 0.9 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 80, scale: 0.9 }}
+        transition={{ type: 'spring', stiffness: 420, damping: 22, mass: 0.8 }}
         className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50"
       >
         <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl backdrop-blur-xl ${
@@ -150,9 +152,15 @@ const CompareBar = ({ count, isDark, onClear, onOpen }) => (
             </div>
             <div className="leading-tight">
               <p className={`text-[10px] uppercase tracking-wider font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Selected</p>
-              <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <motion.p
+                key={count}
+                initial={{ scale: 1.25, color: '#F59E0B' }}
+                animate={{ scale: 1, color: isDark ? '#ffffff' : '#0f172a' }}
+                transition={{ type: 'spring', stiffness: 500, damping: 18 }}
+                className="text-sm font-bold"
+              >
                 {count} Contractor{count !== 1 ? 's' : ''}
-              </p>
+              </motion.p>
             </div>
           </div>
           <button
@@ -322,7 +330,7 @@ const CompareModal = ({ open, onClose, isDark, textPri, textSec, cardBg, selecte
 // Performance Matrix card — glassmorphism, sparkline, status pulse, hover
 // overlay with Meta / Google Ads spend split.
 // ─────────────────────────────────────────────────────────────────────────
-const MatrixCard = ({ c, i, isDark, textPri, textSec, _clrs, efficiency, isExpanded, onToggle, isSelected, onCompareToggle }) => {
+const MatrixCard = ({ c, i, isDark, textPri, textSec, _clrs, efficiency, isExpanded, onToggle, isSelected, onCompareToggle, showCompareTip, onDismissTip }) => {
   const [hover, setHover] = useState(false);
   const accent = c.color || _clrs[i % _clrs.length];
   const daily = Array.isArray(c.daily) ? c.daily : [];
@@ -353,29 +361,80 @@ const MatrixCard = ({ c, i, isDark, textPri, textSec, _clrs, efficiency, isExpan
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onClick={onToggle}
-      className={`relative rounded-2xl p-5 cursor-pointer overflow-hidden group ${glass} hover:shadow-lg transition-all ${isSelected ? 'ring-2 ring-amber-400/70 ring-offset-2 ring-offset-transparent' : ''}`}
-      style={{ boxShadow: hover ? `0 10px 40px -10px ${accent}40` : undefined }}
+      className={`relative rounded-2xl p-5 cursor-pointer overflow-hidden group ${glass} transition-shadow`}
+      style={{
+        boxShadow: isSelected
+          ? `0 0 0 2px ${accent}, 0 0 24px -4px ${accent}aa, 0 10px 40px -10px ${accent}60`
+          : hover
+            ? `0 10px 40px -10px ${accent}40`
+            : undefined,
+      }}
     >
       {/* Accent strip */}
       <div className="absolute top-0 left-0 right-0 h-1" style={{ background: `linear-gradient(90deg, ${accent}, ${accent}80)` }} />
 
-      {/* Compare checkbox — top-right, stopPropagation so it doesn't toggle expand */}
-      <button
+      {/* Compare checkbox — top-right, stopPropagation so it doesn't toggle expand.
+          On card hover (not selected), box gently pulses in the accent color to
+          draw the eye. When selected, filled with accent color. */}
+      <motion.button
         type="button"
         onClick={(e) => { e.stopPropagation(); onCompareToggle(); }}
         title={isSelected ? 'Remove from comparison' : 'Add to comparison'}
-        className={`absolute top-2.5 right-2.5 z-10 w-5 h-5 rounded-md flex items-center justify-center transition-all ${
-          isSelected
-            ? 'bg-amber-500 border-2 border-amber-500 text-white shadow-md shadow-amber-500/40'
-            : isDark
-              ? 'bg-slate-900/60 border-2 border-slate-600 hover:border-amber-400 text-transparent hover:text-amber-400'
-              : 'bg-white/80 border-2 border-slate-300 hover:border-amber-500 text-transparent hover:text-amber-500'
-        }`}
+        animate={hover && !isSelected ? { scale: [1, 1.12, 1] } : { scale: 1 }}
+        transition={{ duration: 1.2, repeat: hover && !isSelected ? Infinity : 0, ease: 'easeInOut' }}
+        className="absolute top-2.5 right-2.5 z-10 w-6 h-6 rounded-md flex items-center justify-center transition-colors"
+        style={{
+          backgroundColor: isSelected ? accent : isDark ? 'rgba(15,23,42,0.65)' : 'rgba(255,255,255,0.85)',
+          borderWidth: '2px',
+          borderStyle: 'solid',
+          borderColor: isSelected ? accent : hover ? accent : (isDark ? 'rgb(71,85,105)' : 'rgb(203,213,225)'),
+          color: isSelected ? '#fff' : hover ? accent : 'transparent',
+          boxShadow: isSelected
+            ? `0 0 12px -2px ${accent}aa`
+            : hover
+              ? `0 0 10px -2px ${accent}80`
+              : undefined,
+        }}
       >
-        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M2 6L5 9L10 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M2 6L5 9L10 3" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-      </button>
+      </motion.button>
+
+      {/* One-time discovery tooltip — appears on the first card until user
+          clicks any compare checkbox. Dismissal persists in localStorage. */}
+      <AnimatePresence>
+        {showCompareTip && !isSelected && (
+          <motion.div
+            initial={{ opacity: 0, y: -8, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.92 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+            className="absolute top-10 right-2 z-20 pointer-events-auto"
+          >
+            <div className={`relative px-3 py-2 rounded-lg shadow-xl text-xs font-medium flex items-center gap-2 max-w-[220px] ${
+              isDark
+                ? 'bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-amber-500/40'
+                : 'bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-amber-500/40'
+            }`}>
+              {/* Tail pointing up-right toward the checkbox */}
+              <div
+                className="absolute -top-1.5 right-3 w-3 h-3 rotate-45"
+                style={{ background: 'linear-gradient(135deg, #F59E0B, #F97316)' }}
+              />
+              <span className="leading-tight">Select two or more to compare performance.</span>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onDismissTip && onDismissTip(); }}
+                className="flex-shrink-0 w-4 h-4 rounded hover:bg-white/20 flex items-center justify-center"
+                title="Got it"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Header: status pulse + name + source pills */}
       <div className="flex items-center gap-2 mb-4 pr-6">
@@ -542,15 +601,25 @@ const IBOSContractors = () => {
   const [sortDir, setSortDir] = useState('desc'); // desc | asc
   const [compareIds, setCompareIds] = useState(() => new Set());
   const [showCompare, setShowCompare] = useState(false);
+  const [showCompareTip, setShowCompareTip] = useState(() => {
+    try { return !localStorage.getItem('idash_compare_tip_seen'); }
+    catch { return true; }
+  });
+
+  const dismissCompareTip = useCallback(() => {
+    try { localStorage.setItem('idash_compare_tip_seen', '1'); } catch {}
+    setShowCompareTip(false);
+  }, []);
 
   const toggleCompare = useCallback((id) => {
+    dismissCompareTip();
     setCompareIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
+  }, [dismissCompareTip]);
   const clearCompare = useCallback(() => setCompareIds(new Set()), []);
 
   // Normalize dates to strings for stable dependency comparison
@@ -858,6 +927,8 @@ const IBOSContractors = () => {
               onToggle={() => setExpandedId(expandedId === (c.id || i) ? null : (c.id || i))}
               isSelected={compareIds.has(c.id || String(i))}
               onCompareToggle={() => toggleCompare(c.id || String(i))}
+              showCompareTip={showCompareTip && i === 0 && compareIds.size === 0}
+              onDismissTip={dismissCompareTip}
             />
           ))}
         </div>
