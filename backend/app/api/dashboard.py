@@ -2711,6 +2711,250 @@ async def list_meta_accounts(
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Bulk validation — every I-BOS Meta account in one call.
+# Loops through every contractor with a linked Meta account (excluding the
+# CP training account act_144305066) and runs the same direct-Meta vs DB
+# comparison for the given date range. Returns a summary table.
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/meta-validate-all",
+    summary="Validate EVERY I-BOS Meta account against Meta Ads Manager in one call",
+)
+async def meta_validate_all(
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Bulk data-integrity check. For every contractor with a linked Meta
+    ad account (excluding the CP training account), runs the same
+    comparison /meta-validate does: Meta direct /insights call vs our DB
+    sums, plus period reach lookup.
+
+    Returns a per-account summary row with match flags and a top-line
+    count of pass/fail. Use this as the "proof for the presentation":
+    one JSON showing every contractor matches Meta Ads Manager.
+    """
+    import asyncio as _aio
+    import traceback as _tb
+    from sqlalchemy import and_, func, select as _select
+    from facebook_business.api import FacebookAdsApi
+    from facebook_business.adobjects.adaccount import AdAccount
+    from facebook_business.exceptions import FacebookRequestError
+    from app.models.contractor import Contractor as _Ctr
+
+    CP_TRAINING_ID = "act_144305066"
+    HIDDEN = {"ARCHIVED", "DELETED"}
+
+    # Every contractor with a Meta account, except CP training.
+    c_q = await db.execute(
+        _select(_Ctr.id, _Ctr.name, _Ctr.meta_account_id).where(and_(
+            _Ctr.meta_account_id.isnot(None),
+            _Ctr.meta_account_id != CP_TRAINING_ID,
+        ))
+    )
+    targets = [
+        {"contractor_id": r.id, "name": r.name, "account_id": r.meta_account_id}
+        for r in c_q.all()
+    ]
+
+    if not targets:
+        return {"error": "No contractors with linked Meta accounts found."}
+
+    FacebookAdsApi.init(access_token=settings.META_ACCESS_TOKEN)
+
+    def _meta_totals_blocking(acct_id: str) -> dict:
+        acct_api = acct_id if acct_id.startswith("act_") else f"act_{acct_id}"
+        ad_account = AdAccount(acct_api)
+        visible_ids: list[str] = []
+        try:
+            for c in ad_account.get_campaigns(
+                fields=["id", "effective_status"],
+                params={"limit": 500},
+            ):
+                cid = c.get("id")
+                st = c.get("effective_status") or ""
+                if cid and st not in HIDDEN:
+                    visible_ids.append(str(cid))
+        except FacebookRequestError as e:
+            return {"error": f"get_campaigns: {e.api_error_code()} {e.api_error_message()}"}
+
+        params: dict = {
+            "time_range": {"since": date_from.isoformat(), "until": date_to.isoformat()},
+            "level": "account",
+            "limit": 1,
+        }
+        if visible_ids:
+            params["filtering"] = [{
+                "field": "campaign.id",
+                "operator": "IN",
+                "value": visible_ids,
+            }]
+        try:
+            rows = ad_account.get_insights(
+                fields=["spend", "impressions", "clicks", "reach"],
+                params=params,
+            )
+            for row in rows:
+                return {
+                    "spend": float(row.get("spend", 0) or 0),
+                    "impressions": int(row.get("impressions", 0) or 0),
+                    "clicks": int(row.get("clicks", 0) or 0),
+                    "reach": int(row.get("reach", 0) or 0),
+                }
+            return {"spend": 0.0, "impressions": 0, "clicks": 0, "reach": 0}
+        except FacebookRequestError as e:
+            return {"error": f"get_insights: {e.api_error_code()} {e.api_error_message()}"}
+
+    sem = _aio.Semaphore(5)
+
+    async def _one(t: dict) -> dict:
+        async with sem:
+            aid = t["account_id"]
+            # Meta direct
+            try:
+                meta_totals = await _aio.wait_for(
+                    _aio.to_thread(_meta_totals_blocking, aid),
+                    timeout=60,
+                )
+            except Exception as e:  # noqa: BLE001
+                return {
+                    **t,
+                    "status": "meta_error",
+                    "error": f"{type(e).__name__}: {e}",
+                }
+            if "error" in meta_totals:
+                return {**t, "status": "meta_error", "error": meta_totals["error"]}
+
+            # DB sums
+            q = await db.execute(
+                _select(
+                    func.sum(MetaAdMetric.spend).label("spend"),
+                    func.sum(MetaAdMetric.impressions).label("impressions"),
+                    func.sum(MetaAdMetric.clicks).label("clicks"),
+                    func.count(MetaAdMetric.id).label("n"),
+                ).where(and_(
+                    MetaAdMetric.account_id == aid,
+                    MetaAdMetric.date >= date_from,
+                    MetaAdMetric.date <= date_to,
+                ))
+            )
+            r = q.first()
+            db_sums = {
+                "spend": float(r.spend or 0) if r else 0.0,
+                "impressions": int(r.impressions or 0) if r else 0,
+                "clicks": int(r.clicks or 0) if r else 0,
+                "row_count": int(r.n or 0) if r else 0,
+            }
+
+            # Period reach (preset windows only)
+            from app.models.metrics import MetaPeriodReach as _MPR
+            preset = _match_preset_window(date_from, date_to)
+            pr_val = None
+            if preset:
+                pr_q = await db.execute(
+                    _select(_MPR.reach).where(and_(
+                        _MPR.account_id == aid,
+                        _MPR.preset_key == preset,
+                    ))
+                )
+                row = pr_q.first()
+                if row:
+                    pr_val = int(row.reach or 0)
+
+            def _m(a: float, b: float, tol: float = 0.01) -> bool:
+                return abs(a - b) < tol
+
+            matches = {
+                "spend": _m(meta_totals["spend"], db_sums["spend"]),
+                "impressions": _m(meta_totals["impressions"], db_sums["impressions"], tol=1),
+                "clicks": _m(meta_totals["clicks"], db_sums["clicks"], tol=1),
+                "reach": (_m(meta_totals["reach"], pr_val, tol=2) if pr_val is not None else None),
+            }
+            all_core_match = all(v is True for k, v in matches.items() if k != "reach")
+            return {
+                **t,
+                "status": "ok",
+                "meta": meta_totals,
+                "db": db_sums,
+                "period_reach": pr_val,
+                "preset": preset,
+                "match": matches,
+                "all_core_match": all_core_match,
+                "deltas": {
+                    "spend": round(db_sums["spend"] - meta_totals["spend"], 2),
+                    "impressions": db_sums["impressions"] - meta_totals["impressions"],
+                    "clicks": db_sums["clicks"] - meta_totals["clicks"],
+                    "reach": (pr_val - meta_totals["reach"]) if pr_val is not None else None,
+                },
+            }
+
+    results = await _aio.gather(*[_one(t) for t in targets], return_exceptions=False)
+
+    # Summary
+    ok = [r for r in results if r.get("status") == "ok"]
+    meta_errors = [r for r in results if r.get("status") == "meta_error"]
+    passed = [r for r in ok if r.get("all_core_match")]
+    failed = [r for r in ok if not r.get("all_core_match")]
+
+    # Division audit (snapshot across full DB, not just this window)
+    div_q = await db.execute(
+        _select(
+            MetaAdMetric.division,
+            func.count(MetaAdMetric.id).label("n"),
+            func.sum(MetaAdMetric.spend).label("spend"),
+        ).group_by(MetaAdMetric.division)
+    )
+    by_division = [
+        {"division": r.division, "rows": int(r.n or 0), "spend": round(float(r.spend or 0), 2)}
+        for r in div_q.all()
+    ]
+    leak_a = await db.execute(
+        _select(func.count(MetaAdMetric.id)).where(and_(
+            MetaAdMetric.division == "cp",
+            MetaAdMetric.account_id != CP_TRAINING_ID,
+        ))
+    )
+    leak_b = await db.execute(
+        _select(func.count(MetaAdMetric.id)).where(and_(
+            MetaAdMetric.division == "ibos",
+            MetaAdMetric.account_id == CP_TRAINING_ID,
+        ))
+    )
+    la = int(leak_a.scalar() or 0)
+    lb = int(leak_b.scalar() or 0)
+
+    return {
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "contractors_checked": len(targets),
+        "passed_count": len(passed),
+        "failed_count": len(failed),
+        "meta_error_count": len(meta_errors),
+        "all_clean": len(failed) == 0 and len(meta_errors) == 0 and la == 0 and lb == 0,
+        "division_audit": {
+            "by_division": by_division,
+            "rows_tagged_cp_but_not_training": la,
+            "rows_tagged_ibos_but_on_training": lb,
+            "clean": la == 0 and lb == 0,
+        },
+        "results": sorted(results, key=lambda r: (
+            0 if r.get("status") == "ok" and r.get("all_core_match") else
+            1 if r.get("status") == "ok" else 2,
+            r.get("name") or "",
+        )),
+        "conclusion": (
+            f"✅ All {len(passed)}/{len(targets)} I-BOS contractors match Meta Ads Manager. "
+            f"Zero CP/I-BOS leakage."
+            if len(failed) == 0 and len(meta_errors) == 0 and la == 0 and lb == 0 else
+            f"❌ {len(failed)} mismatched / {len(meta_errors)} Meta-error out of {len(targets)}. "
+            f"See `results` for details."
+        ),
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Meta data-integrity validation — direct Meta call vs DB + division audit.
 # Same logic as backend/scripts/validate_meta.py, exposed as HTTP so it can
 # be triggered from the browser without shell access.
