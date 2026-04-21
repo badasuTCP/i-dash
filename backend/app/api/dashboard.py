@@ -2721,7 +2721,8 @@ async def list_meta_accounts(
     summary="Validate that the DB matches Meta Ads Manager for one account",
 )
 async def meta_validate(
-    account_id: str = Query(..., description="Meta ad account id, act_ or bare"),
+    account_id: Optional[str] = Query(None, description="Meta ad account id (act_ or bare). Optional if ?contractor= is given."),
+    contractor: Optional[str] = Query(None, description="Contractor name or slug (e.g. 'floor warriors'). Resolved to account_id via contractors table."),
     date_from: date = Query(...),
     date_to: date = Query(...),
     db: AsyncSession = Depends(get_db),
@@ -2745,6 +2746,53 @@ async def meta_validate(
 
     CP_TRAINING_ID = "act_144305066"
     HIDDEN = {"ARCHIVED", "DELETED"}
+
+    # ── Resolve account_id from contractor name/slug if provided ─────────
+    # Fuzzy match on contractors.name (case-insensitive substring) and on
+    # contractors.id. Picks the first row whose meta_account_id is set.
+    resolved_from_contractor: Optional[str] = None
+    if not account_id and contractor:
+        from app.models.contractor import Contractor as _Ctr
+        needle = contractor.strip().lower()
+        # Normalize by stripping non-alphanumerics for looser matching
+        needle_norm = "".join(ch for ch in needle if ch.isalnum())
+        c_q = await db.execute(
+            _select(_Ctr.id, _Ctr.name, _Ctr.meta_account_id).where(
+                _Ctr.meta_account_id.isnot(None)
+            )
+        )
+        candidates = []
+        for r in c_q.all():
+            hay = (r.name or "").lower()
+            hay_norm = "".join(ch for ch in hay if ch.isalnum())
+            id_norm = "".join(ch for ch in (r.id or "").lower() if ch.isalnum())
+            if needle in hay or needle_norm in hay_norm or needle_norm in id_norm:
+                candidates.append((r.id, r.name, r.meta_account_id))
+        if not candidates:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"No contractor matching '{contractor}' with a linked Meta "
+                    f"account. Hit /api/dashboard/meta-accounts to see the list."
+                ),
+            )
+        if len(candidates) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Multiple contractors matched '{contractor}': "
+                    + ", ".join(f"{n} ({cid})" for cid, n, _ in candidates)
+                    + ". Narrow the search string or pass account_id directly."
+                ),
+            )
+        _, _, account_id = candidates[0]
+        resolved_from_contractor = contractor
+
+    if not account_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide either ?account_id=act_... or ?contractor=<name>",
+        )
 
     # ── Meta direct call (source of truth) — runs in a worker thread ─
     def _meta_blocking() -> dict:
@@ -2959,6 +3007,7 @@ async def meta_validate(
     all_match = all(c.get("match") is True for k, c in comparison.items() if k != "reach")
     return {
         "account_id": account_id,
+        "resolved_from_contractor": resolved_from_contractor,
         "date_from": date_from.isoformat(),
         "date_to": date_to.isoformat(),
         "meta_live_source_of_truth": meta_res,
