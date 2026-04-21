@@ -2179,6 +2179,7 @@ async def get_contractor_breakdown(
                 "sources": ["GA4"],
                 "spend": 0.0, "leads": 0, "revenue": 0.0, "cpl": 0.0,
                 "impressions": 0, "reach": 0, "cpm": 0.0, "frequency": 0.0, "ctr": 0.0,
+                "meta_spend": 0.0, "google_spend": 0.0, "daily": [],
             })
     except Exception as e:
         logger.warning("Contractor breakdown GA4 query failed: %s", e)
@@ -2312,6 +2313,7 @@ async def get_contractor_breakdown(
             c["meta_account_id"] = stored_meta_id
             c["meta_account_name"] = metrics["account_name"]
             c["spend"] = round(metrics["spend"], 2)
+            c["meta_spend"] = round(metrics["spend"], 2)
             c["leads"] = metrics["leads"]
             c["revenue"] = round(metrics["revenue"], 2)
             c["impressions"] = metrics["impressions"]
@@ -2333,6 +2335,7 @@ async def get_contractor_breakdown(
                 c["meta_account_id"] = acct_id
                 c["meta_account_name"] = metrics["account_name"]
                 c["spend"] = round(metrics["spend"], 2)
+                c["meta_spend"] = round(metrics["spend"], 2)
                 c["leads"] = metrics["leads"]
                 c["revenue"] = round(metrics["revenue"], 2)
                 c["impressions"] = metrics["impressions"]
@@ -2401,6 +2404,9 @@ async def get_contractor_breakdown(
             "frequency": metrics["frequency"],
             "ctr": metrics["ctr"],
             "cpl": round(metrics["spend"] / max(metrics["leads"], 1), 2) if metrics["leads"] > 0 else 0,
+            "meta_spend": round(metrics["spend"], 2),
+            "google_spend": 0.0,
+            "daily": [],
         })
         matched_meta_accounts.add(acct_id)
 
@@ -2453,11 +2459,108 @@ async def get_contractor_breakdown(
             "sources": [],
             "spend": 0.0, "leads": 0, "revenue": 0.0, "cpl": 0.0,
             "impressions": 0, "reach": 0, "cpm": 0.0, "frequency": 0.0, "ctr": 0.0,
+            "meta_spend": 0.0, "google_spend": 0.0, "daily": [],
         })
 
     # Sort by visits desc then spend desc, and cap to 30
     contractors.sort(key=lambda c: (c["visits"], c["spend"]), reverse=True)
     contractors = contractors[:30]
+
+    # Google Ads CID → contractor slug map (hoisted so the daily-series
+    # block below and the Google Ads fold-in section #5 both use it).
+    GADS_CONTRACTOR_MAP = {
+        "6754610688": "tailored",   # Tailored Concrete Coatings
+        "2957400868": "slg",        # SLG Contracting Inc.
+    }
+
+    # ── 4b. Daily spend/leads series per contractor (for sparklines) ────
+    # Queries Meta + Google Ads daily rows ONCE, then folds into each
+    # contractor's `daily` array. Purely additive — no existing totals
+    # are recomputed here.
+    try:
+        from datetime import timedelta as _td
+        # Build the date skeleton so contractors with sparse data still
+        # render a continuous sparkline (zero-filled days).
+        _day_skel: list[str] = []
+        _d = start_date
+        while _d <= end_date:
+            _day_skel.append(_d.isoformat())
+            _d += _td(days=1)
+
+        # Map meta_account_id → contractor reference
+        meta_to_c = {c["meta_account_id"]: c for c in contractors if c.get("meta_account_id")}
+        # Map google customer_id → contractor reference (direct-mapped only)
+        google_to_c: dict[str, dict] = {}
+        for cid_key, target_slug in GADS_CONTRACTOR_MAP.items():
+            for c in contractors:
+                cid_lower = (c["id"] or "").lower()
+                name_lower = (c["name"] or "").lower()
+                if target_slug in cid_lower or target_slug in name_lower:
+                    google_to_c[cid_key] = c
+                    break
+
+        # Per-contractor daily accumulator keyed by date string
+        per_c: dict[str, dict[str, dict]] = {
+            c["id"]: {d: {"date": d, "spend": 0.0, "leads": 0} for d in _day_skel}
+            for c in contractors
+        }
+
+        # Daily Meta rows
+        if meta_to_c:
+            meta_daily_q = await db.execute(
+                select(
+                    MetaAdMetric.account_id,
+                    MetaAdMetric.date,
+                    func.sum(MetaAdMetric.spend).label("spend"),
+                    func.sum(MetaAdMetric.conversions).label("leads"),
+                ).where(and_(
+                    MetaAdMetric.date >= start_date,
+                    MetaAdMetric.date <= end_date,
+                    MetaAdMetric.account_id.in_(list(meta_to_c.keys())),
+                    MetaAdMetric.account_id != CP_TRAINING_META_ID,
+                )).group_by(MetaAdMetric.account_id, MetaAdMetric.date)
+            )
+            for r in meta_daily_q.all():
+                c = meta_to_c.get(r.account_id)
+                if not c:
+                    continue
+                dkey = r.date.isoformat()
+                bucket = per_c[c["id"]].get(dkey)
+                if bucket is None:
+                    continue
+                bucket["spend"] = round(bucket["spend"] + float(r.spend or 0), 2)
+                bucket["leads"] = bucket["leads"] + int(r.leads or 0)
+
+        # Daily Google Ads rows (direct-mapped CIDs only)
+        if google_to_c:
+            gads_daily_q = await db.execute(
+                select(
+                    GoogleAdMetric.customer_id,
+                    GoogleAdMetric.date,
+                    func.sum(GoogleAdMetric.spend).label("spend"),
+                    func.sum(GoogleAdMetric.conversions).label("leads"),
+                ).where(and_(
+                    GoogleAdMetric.date >= start_date,
+                    GoogleAdMetric.date <= end_date,
+                    GoogleAdMetric.customer_id.in_(list(google_to_c.keys())),
+                )).group_by(GoogleAdMetric.customer_id, GoogleAdMetric.date)
+            )
+            for r in gads_daily_q.all():
+                c = google_to_c.get(r.customer_id)
+                if not c:
+                    continue
+                dkey = r.date.isoformat()
+                bucket = per_c[c["id"]].get(dkey)
+                if bucket is None:
+                    continue
+                bucket["spend"] = round(bucket["spend"] + float(r.spend or 0), 2)
+                bucket["leads"] = bucket["leads"] + int(r.leads or 0)
+
+        # Attach as ordered array
+        for c in contractors:
+            c["daily"] = [per_c[c["id"]][d] for d in _day_skel]
+    except Exception as e:
+        logger.warning("Contractor breakdown daily series failed: %s", e)
 
     # ── 5. Portfolio totals (I-BOS only — CP already excluded) ──────────
     total_visits = sum(c["visits"] for c in contractors)
@@ -2465,14 +2568,8 @@ async def get_contractor_breakdown(
     total_spend = sum(c["spend"] for c in contractors)
     total_leads = sum(c["leads"] for c in contractors)
 
-    # Google Ads spend: map CIDs to specific contractors by name match
-    # against brand_assets.account_name, then attribute directly.
-    # 6754610688 → Tailored Concrete Coatings
-    # 2957400868 → SLG Contracting Inc.
-    GADS_CONTRACTOR_MAP = {
-        "6754610688": "tailored",   # Tailored Concrete Coatings
-        "2957400868": "slg",        # SLG Contracting Inc.
-    }
+    # Google Ads spend: map CIDs to specific contractors using the hoisted
+    # GADS_CONTRACTOR_MAP (see above — also consumed by the daily-series block).
     try:
         from app.models.brand_asset import BrandAsset
         ba_g = await db.execute(
@@ -2509,6 +2606,7 @@ async def get_contractor_breakdown(
                         name_lower = (c["name"] or "").lower()
                         if target_slug in cid_lower or target_slug in name_lower:
                             c["spend"] = round(c["spend"] + gspend, 2)
+                            c["google_spend"] = round(c.get("google_spend", 0.0) + gspend, 2)
                             c["leads"] = c["leads"] + gleads
                             c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
                             if "G-ADS" not in c["sources"]:
@@ -2524,6 +2622,7 @@ async def get_contractor_breakdown(
                             continue
                         share = c["visits"] / visits_total
                         c["spend"] = round(c["spend"] + gspend * share, 2)
+                        c["google_spend"] = round(c.get("google_spend", 0.0) + gspend * share, 2)
                         c["leads"] = int(round(c["leads"] + gleads * share))
                         c["cpl"] = round(c["spend"] / max(c["leads"], 1), 2) if c["leads"] > 0 else 0
     except Exception as e:
