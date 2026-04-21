@@ -2737,6 +2737,39 @@ async def meta_validate(
 
     Returns per-metric match flags plus the division-leak audit counts.
     """
+    # Outer catch so any unhandled exception lands in the JSON body with a
+    # real stack trace instead of a generic 500 HTML page.
+    import traceback as _tb
+    try:
+        return await _meta_validate_impl(
+            account_id=account_id,
+            contractor=contractor,
+            date_from=date_from,
+            date_to=date_to,
+            db=db,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.exception("meta-validate unhandled error")
+        return {
+            "error": True,
+            "exception_type": type(e).__name__,
+            "message": str(e),
+            "traceback": _tb.format_exc(),
+            "hint": "This is an unhandled server error — see traceback. "
+                    "Paste the traceback back to Claude so it can diagnose.",
+        }
+
+
+async def _meta_validate_impl(
+    *,
+    account_id: Optional[str],
+    contractor: Optional[str],
+    date_from: date,
+    date_to: date,
+    db: AsyncSession,
+) -> dict:
     import asyncio as _aio
     import time as _time
     from sqlalchemy import and_, func, select as _select, or_
