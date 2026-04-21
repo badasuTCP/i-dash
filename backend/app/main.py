@@ -40,6 +40,7 @@ from app.api import (
     contractors_router,
     dashboard_router,
     pipelines_router,
+    shopify_oauth_router,
     users_router,
 )
 from app.core.config import settings
@@ -348,6 +349,11 @@ app.include_router(
 
 app.include_router(
     contractors_router,
+    prefix="/api",
+)
+
+app.include_router(
+    shopify_oauth_router,
     prefix="/api",
 )
 
