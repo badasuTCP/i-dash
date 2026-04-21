@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Tooltip, ResponsiveContainer, AreaChart, Area,
 } from 'recharts';
-import { HardHat, Globe, TrendingUp, ChevronDown, ChevronUp, DollarSign, Users, Target, Zap } from 'lucide-react';
+import { HardHat, Globe, TrendingUp, ChevronDown, ChevronUp, DollarSign, Users, Target, Zap, X, GitCompareArrows } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { dashboardAPI } from '../../services/api';
@@ -71,49 +71,52 @@ const ViewToggle = ({ view, setView, isDark, revenueTotal }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
-// Condensed horizontal KPI strip — replaces the 4-tile grid to save
-// vertical space and pull the matrix cards higher into the viewport.
+// KPI Anchors — four colored tiles acting as the page's visual header.
+// Blue=Visits, Violet=Spend, Emerald=Leads, Amber=Sites.
 // ─────────────────────────────────────────────────────────────────────────
-const KPIStrip = ({ isDark, textPri, textSec, stats, live }) => {
-  const surface = isDark
-    ? 'bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-slate-700/40'
-    : 'bg-gradient-to-br from-white to-slate-50 border border-slate-200 shadow-sm';
-  const accent = {
-    amber:   'text-amber-400',
-    violet:  'text-violet-400',
-    emerald: 'text-emerald-400',
-    blue:    'text-blue-400',
+const KPIAnchors = ({ isDark, textPri, textSec, stats, live }) => {
+  const palette = {
+    blue:    { bg: isDark ? 'from-blue-500/15 to-blue-500/5'       : 'from-blue-50 to-blue-100/60',        border: 'border-blue-500/40',    ring: 'bg-blue-500',    text: 'text-blue-400',    shadow: 'shadow-blue-500/10' },
+    violet:  { bg: isDark ? 'from-violet-500/15 to-violet-500/5'   : 'from-violet-50 to-violet-100/60',    border: 'border-violet-500/40',  ring: 'bg-violet-500',  text: 'text-violet-400',  shadow: 'shadow-violet-500/10' },
+    emerald: { bg: isDark ? 'from-emerald-500/15 to-emerald-500/5' : 'from-emerald-50 to-emerald-100/60',  border: 'border-emerald-500/40', ring: 'bg-emerald-500', text: 'text-emerald-400', shadow: 'shadow-emerald-500/10' },
+    amber:   { bg: isDark ? 'from-amber-500/15 to-amber-500/5'     : 'from-amber-50 to-amber-100/60',      border: 'border-amber-500/40',   ring: 'bg-amber-500',   text: 'text-amber-400',   shadow: 'shadow-amber-500/10' },
   };
   return (
     <motion.div
-      initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
-      className={`rounded-2xl px-5 py-3 mb-5 backdrop-blur-md ${surface}`}
+      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+      className="mb-5"
     >
-      <div className="flex items-center gap-3 flex-wrap">
-        {live && (
-          <div className="flex items-center gap-1.5 pr-3 mr-1 border-r border-slate-500/20">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
-            </span>
-            <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-400">Live</span>
-          </div>
-        )}
+      {live && (
+        <div className="flex items-center gap-1.5 mb-2 pl-1">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+          </span>
+          <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-400">Live Data</span>
+        </div>
+      )}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {stats.map((s, i) => {
           const Icon = s.icon;
+          const p = palette[s.color] || palette.blue;
           return (
-            <div key={s.label} className="flex items-center gap-2.5 flex-1 min-w-[140px]">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isDark ? 'bg-slate-800/80' : 'bg-slate-100'} ${accent[s.color]}`}>
-                <Icon size={15} />
+            <motion.div
+              key={s.label}
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.04 * i }}
+              className={`relative rounded-xl px-4 py-3 bg-gradient-to-br ${p.bg} border ${p.border} backdrop-blur-md ${p.shadow} shadow-lg overflow-hidden`}
+            >
+              <div className={`absolute top-0 left-0 right-0 h-0.5 ${p.ring}`} />
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isDark ? 'bg-slate-900/40' : 'bg-white/70'} ${p.text}`}>
+                  <Icon size={18} />
+                </div>
+                <div className="leading-tight min-w-0">
+                  <p className={`text-[10px] uppercase tracking-wider font-semibold ${textSec}`}>{s.label}</p>
+                  <p className={`text-xl font-bold ${textPri} truncate`}>{s.value}</p>
+                </div>
               </div>
-              <div className="leading-tight">
-                <p className={`text-[9px] uppercase tracking-wider ${textSec}`}>{s.label}</p>
-                <p className={`text-lg font-bold ${textPri}`}>{s.value}</p>
-              </div>
-              {i < stats.length - 1 && (
-                <div className={`hidden md:block h-8 w-px ml-auto ${isDark ? 'bg-slate-700/40' : 'bg-slate-200'}`} />
-              )}
-            </div>
+            </motion.div>
           );
         })}
       </div>
@@ -122,10 +125,200 @@ const KPIStrip = ({ isDark, textPri, textSec, stats, live }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
+// Floating Compare action bar — appears when 2+ contractors are selected.
+// ─────────────────────────────────────────────────────────────────────────
+const CompareBar = ({ count, isDark, onClear, onOpen }) => (
+  <AnimatePresence>
+    {count >= 1 && (
+      <motion.div
+        initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+        transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50"
+      >
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl backdrop-blur-xl ${
+          isDark
+            ? 'bg-slate-900/95 border border-slate-700/60 shadow-black/40'
+            : 'bg-white/95 border border-slate-200 shadow-slate-400/30'
+        }`}>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white">
+              <GitCompareArrows size={16} />
+            </div>
+            <div className="leading-tight">
+              <p className={`text-[10px] uppercase tracking-wider font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Selected</p>
+              <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {count} Contractor{count !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onOpen}
+            disabled={count < 2}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+              count >= 2
+                ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-lg shadow-amber-500/30 hover:shadow-amber-500/50 hover:brightness-110'
+                : isDark ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+            }`}
+          >
+            {count >= 2 ? `Compare ${count}` : 'Pick one more'}
+          </button>
+          <button
+            onClick={onClear}
+            title="Clear selection"
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+              isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-900'
+            }`}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Compare modal — side-by-side comparison of selected contractors across
+// Spend, Leads, CPL, Revenue, Efficiency, Meta/Google split, visits.
+// Each metric row highlights the winning contractor.
+// ─────────────────────────────────────────────────────────────────────────
+const CompareModal = ({ open, onClose, isDark, textPri, textSec, cardBg, selected, efficiencyOf }) => {
+  if (!selected || selected.length < 2) return null;
+
+  const fmtMoney = (v) => `$${(v || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  const fmtNum   = (v) => (v || 0).toLocaleString();
+  const fmtRatio = (v) => (v >= 1 ? `${v.toFixed(2)}x` : v > 0 ? v.toFixed(1) : '—');
+
+  const rows = [
+    { key: 'spend',       label: 'Ad Spend',         fmt: fmtMoney, winBy: 'min',        get: c => c.spend || 0 },
+    { key: 'leads',       label: 'Leads',            fmt: fmtNum,   winBy: 'max',        get: c => c.leads || 0 },
+    { key: 'cpl',         label: 'Cost per Lead',    fmt: fmtMoney, winBy: 'min-nonzero',get: c => c.cpl || 0 },
+    { key: 'revenue',     label: 'Revenue (QB/est)', fmt: fmtMoney, winBy: 'max',        get: c => c.revenue || 0 },
+    { key: 'efficiency',  label: 'Efficiency (ROI)', fmt: fmtRatio, winBy: 'max',        get: c => efficiencyOf(c) },
+    { key: 'meta_spend',  label: 'Meta Spend',       fmt: fmtMoney, winBy: 'none',       get: c => c.meta_spend || 0 },
+    { key: 'google_spend',label: 'Google Ads Spend', fmt: fmtMoney, winBy: 'none',       get: c => c.google_spend || 0 },
+    { key: 'visits',      label: 'Website Visits',   fmt: fmtNum,   winBy: 'max',        get: c => c.visits || 0 },
+  ];
+
+  const winnerFor = (row) => {
+    const vals = selected.map(c => row.get(c));
+    if (row.winBy === 'none') return -1;
+    if (row.winBy === 'max') {
+      const m = Math.max(...vals);
+      return m > 0 ? vals.indexOf(m) : -1;
+    }
+    if (row.winBy === 'min') {
+      const m = Math.min(...vals);
+      return m > 0 ? vals.indexOf(m) : -1;
+    }
+    if (row.winBy === 'min-nonzero') {
+      const nonZero = vals.filter(v => v > 0);
+      if (nonZero.length === 0) return -1;
+      const m = Math.min(...nonZero);
+      return vals.indexOf(m);
+    }
+    return -1;
+  };
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 20 }}
+            transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+            className={`relative w-full max-w-5xl max-h-[90vh] overflow-hidden rounded-2xl ${cardBg}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className={`flex items-center justify-between px-6 py-4 border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white">
+                  <GitCompareArrows size={18} />
+                </div>
+                <div>
+                  <h3 className={`text-lg font-bold ${textPri}`}>Contractor Comparison</h3>
+                  <p className={`text-xs ${textSec}`}>{selected.length} contractors · highlighted = winner per metric</p>
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${
+                  isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Comparison table */}
+            <div className="overflow-auto max-h-[calc(90vh-80px)]">
+              <table className="w-full">
+                <thead className={`sticky top-0 ${isDark ? 'bg-[#1e2235]' : 'bg-white'}`}>
+                  <tr className={`border-b ${isDark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+                    <th className={`text-left px-6 py-3 text-[10px] uppercase tracking-wider font-semibold ${textSec}`}>Metric</th>
+                    {selected.map((c, i) => (
+                      <th key={i} className="px-4 py-3 text-left">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: c.color || '#64748B' }} />
+                          <span className={`text-xs font-semibold ${textPri} truncate`}>{c.name}</span>
+                        </div>
+                        <div className="flex gap-1 mt-1 ml-4">
+                          {(c.sources || []).filter(s => s === 'META' || s === 'G-ADS').map(s => (
+                            <span key={s} className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase ${
+                              s === 'META'
+                                ? isDark ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700'
+                                : isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
+                            }`}>{s === 'META' ? 'Meta' : 'Google'}</span>
+                          ))}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, ri) => {
+                    const winnerIdx = winnerFor(row);
+                    return (
+                      <tr key={row.key} className={`border-b ${isDark ? 'border-slate-800/50' : 'border-slate-100'} ${ri % 2 === 0 ? '' : isDark ? 'bg-slate-900/20' : 'bg-slate-50/50'}`}>
+                        <td className={`px-6 py-3 text-sm ${textSec}`}>{row.label}</td>
+                        {selected.map((c, ci) => {
+                          const v = row.get(c);
+                          const isWinner = ci === winnerIdx;
+                          return (
+                            <td key={ci} className="px-4 py-3">
+                              <span className={`text-sm font-semibold ${
+                                isWinner
+                                  ? 'text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md'
+                                  : textPri
+                              }`}>
+                                {v > 0 || row.key === 'google_spend' || row.key === 'meta_spend' ? row.fmt(v) : '—'}
+                              </span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────
 // Performance Matrix card — glassmorphism, sparkline, status pulse, hover
 // overlay with Meta / Google Ads spend split.
 // ─────────────────────────────────────────────────────────────────────────
-const MatrixCard = ({ c, i, isDark, textPri, textSec, _clrs, efficiency, isExpanded, onToggle }) => {
+const MatrixCard = ({ c, i, isDark, textPri, textSec, _clrs, efficiency, isExpanded, onToggle, isSelected, onCompareToggle }) => {
   const [hover, setHover] = useState(false);
   const accent = c.color || _clrs[i % _clrs.length];
   const daily = Array.isArray(c.daily) ? c.daily : [];
@@ -156,14 +349,32 @@ const MatrixCard = ({ c, i, isDark, textPri, textSec, _clrs, efficiency, isExpan
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onClick={onToggle}
-      className={`relative rounded-2xl p-5 cursor-pointer overflow-hidden group ${glass} hover:shadow-lg transition-all`}
+      className={`relative rounded-2xl p-5 cursor-pointer overflow-hidden group ${glass} hover:shadow-lg transition-all ${isSelected ? 'ring-2 ring-amber-400/70 ring-offset-2 ring-offset-transparent' : ''}`}
       style={{ boxShadow: hover ? `0 10px 40px -10px ${accent}40` : undefined }}
     >
       {/* Accent strip */}
       <div className="absolute top-0 left-0 right-0 h-1" style={{ background: `linear-gradient(90deg, ${accent}, ${accent}80)` }} />
 
+      {/* Compare checkbox — top-right, stopPropagation so it doesn't toggle expand */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onCompareToggle(); }}
+        title={isSelected ? 'Remove from comparison' : 'Add to comparison'}
+        className={`absolute top-2.5 right-2.5 z-10 w-5 h-5 rounded-md flex items-center justify-center transition-all ${
+          isSelected
+            ? 'bg-amber-500 border-2 border-amber-500 text-white shadow-md shadow-amber-500/40'
+            : isDark
+              ? 'bg-slate-900/60 border-2 border-slate-600 hover:border-amber-400 text-transparent hover:text-amber-400'
+              : 'bg-white/80 border-2 border-slate-300 hover:border-amber-500 text-transparent hover:text-amber-500'
+        }`}
+      >
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M2 6L5 9L10 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
       {/* Header: status pulse + name + source pills */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-4 pr-6">
         <span className="relative flex items-center justify-center w-3 h-3 flex-shrink-0" title={pulse.label}>
           {pulse.pulse && (
             <span className="absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping" style={{ backgroundColor: pulse.color }} />
@@ -325,6 +536,18 @@ const IBOSContractors = () => {
   const [view, setView] = useState('traffic'); // traffic | revenue
   const [sortBy, setSortBy] = useState('visits'); // visits | spend | leads | revenue
   const [sortDir, setSortDir] = useState('desc'); // desc | asc
+  const [compareIds, setCompareIds] = useState(() => new Set());
+  const [showCompare, setShowCompare] = useState(false);
+
+  const toggleCompare = useCallback((id) => {
+    setCompareIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const clearCompare = useCallback(() => setCompareIds(new Set()), []);
 
   // Normalize dates to strings for stable dependency comparison
   const _fmt = (d) => {
@@ -471,9 +694,17 @@ const IBOSContractors = () => {
 
         <PageInsight insights={insights} />
 
+        {/* View transition — smooth cross-fade/slide between Traffic and Revenue */}
+        <AnimatePresence mode="wait">
         {/* ─── REVENUE VIEW ─── */}
         {view === 'revenue' && revenueData && (
-          <>
+          <motion.div
+            key="revenue"
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -24 }}
+            transition={{ duration: 0.28, ease: 'easeOut' }}
+          >
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               <ScoreCard label="Total QB Revenue" value={revenueData.grand_total || 0} change={0} color="emerald" format="currency" sparkData={[]} />
               <ScoreCard label="Active Contractors Revenue" value={revenueData.active_total || 0} change={revenueData.active_pct} color="blue" format="currency" sparkData={[]} />
@@ -529,28 +760,38 @@ const IBOSContractors = () => {
                 <span className={textSec}>In-Active: ${(revenueData.inactive_total || 0).toLocaleString()}</span>
               </div>
             </div>
-          </>
+          </motion.div>
         )}
 
         {view === 'revenue' && !revenueData && (
-          <div className={`p-8 rounded-xl ${cardBg} text-center ${textSec}`}>
+          <motion.div
+            key="revenue-loading"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className={`p-8 rounded-xl ${cardBg} text-center ${textSec}`}
+          >
             Loading QB revenue data...
-          </div>
+          </motion.div>
         )}
 
         {view === 'traffic' && (
-        <>
-        {/* Condensed KPI strip — single horizontal row */}
-        <KPIStrip
+        <motion.div
+          key="traffic"
+          initial={{ opacity: 0, x: -24 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 24 }}
+          transition={{ duration: 0.28, ease: 'easeOut' }}
+        >
+        {/* KPI color anchors — visual page header */}
+        <KPIAnchors
           isDark={isDark}
           textPri={textPri}
           textSec={textSec}
           live={!!data?.hasLiveData}
           stats={[
-            { icon: Globe,       label: 'Visits',     value: (data?.total_visits || 0).toLocaleString(),                           color: 'amber'   },
-            { icon: DollarSign,  label: 'Ad Spend',   value: `$${(data?.total_spend || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, color: 'violet'  },
-            { icon: Target,      label: 'Leads',      value: (data?.total_leads || 0).toLocaleString(),                            color: 'emerald' },
-            { icon: HardHat,     label: 'Active Sites', value: contractors.length,                                                   color: 'blue'    },
+            { icon: Globe,      label: 'Visits',       value: (data?.total_visits || 0).toLocaleString(),                                                      color: 'blue'    },
+            { icon: DollarSign, label: 'Ad Spend',     value: `$${(data?.total_spend || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,           color: 'violet'  },
+            { icon: Target,     label: 'Leads',        value: (data?.total_leads || 0).toLocaleString(),                                                       color: 'emerald' },
+            { icon: HardHat,    label: 'Active Sites', value: contractors.length,                                                                              color: 'amber'   },
           ]}
         />
 
@@ -611,12 +852,35 @@ const IBOSContractors = () => {
               efficiency={efficiencyOf(c)}
               isExpanded={expandedId === (c.id || i)}
               onToggle={() => setExpandedId(expandedId === (c.id || i) ? null : (c.id || i))}
+              isSelected={compareIds.has(c.id || String(i))}
+              onCompareToggle={() => toggleCompare(c.id || String(i))}
             />
           ))}
         </div>
-        </>
+        </motion.div>
         )}
+        </AnimatePresence>
       </div>
+
+      {/* Floating Compare action bar */}
+      <CompareBar
+        count={compareIds.size}
+        isDark={isDark}
+        onClear={clearCompare}
+        onOpen={() => setShowCompare(true)}
+      />
+
+      {/* Compare modal */}
+      <CompareModal
+        open={showCompare && compareIds.size >= 2}
+        onClose={() => setShowCompare(false)}
+        isDark={isDark}
+        textPri={textPri}
+        textSec={textSec}
+        cardBg={cardBg}
+        selected={contractors.filter(c => compareIds.has(c.id || String(contractors.indexOf(c))))}
+        efficiencyOf={efficiencyOf}
+      />
     </motion.div>
   );
 };
