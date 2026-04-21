@@ -75,7 +75,29 @@ async def shopify_prime(payload: dict) -> dict:
             _runtime_creds[k] = str(v)
             accepted[k] = True
     logger.info("Shopify runtime creds primed: %s", list(accepted.keys()))
-    return {"primed": accepted, "known_keys": sorted(_runtime_creds.keys())}
+
+    # If the domain + token are now available, re-initialize the Shopify
+    # pipeline so it moves from pipeline_service.init_errors into .pipelines
+    # and becomes runnable. Safe to call repeatedly.
+    pipeline_status: dict = {"reinitialized": False}
+    if _runtime_creds.get("SHOPIFY_SHOP_DOMAIN") and _runtime_creds.get("SHOPIFY_ADMIN_TOKEN"):
+        try:
+            from app.api.pipelines import get_pipeline_service
+            from app.pipelines.shopify import ShopifyPipeline
+            svc = get_pipeline_service()
+            svc.pipelines["shopify"] = ShopifyPipeline()
+            svc.init_errors.pop("shopify", None)
+            pipeline_status["reinitialized"] = True
+            logger.info("Shopify pipeline re-initialized after prime")
+        except Exception as exc:
+            pipeline_status["error"] = str(exc)
+            logger.warning("Shopify pipeline re-init failed: %s", exc)
+
+    return {
+        "primed": accepted,
+        "known_keys": sorted(_runtime_creds.keys()),
+        "pipeline": pipeline_status,
+    }
 
 
 @router.get("/debug", include_in_schema=False)

@@ -13,6 +13,7 @@ asyncio.to_thread() so the event loop stays responsive.
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -26,6 +27,24 @@ logger = logging.getLogger(__name__)
 
 SHOPIFY_CHUNK_DAYS = 90
 SHOPIFY_PAGE_LIMIT = 250  # Shopify max per page
+
+
+def _shopify_cfg(key: str) -> str:
+    """Read a Shopify config value with this resolution order:
+    1. Runtime overrides populated by POST /api/shopify/prime (shared dict
+       in app.api.shopify_oauth) — unblocks us when Railway fails to
+       inject env vars for this service.
+    2. Live os.environ.
+    3. Cached pydantic settings.
+    """
+    try:
+        from app.api.shopify_oauth import _runtime_creds  # local import to avoid cycle
+        v = _runtime_creds.get(key)
+        if v:
+            return v
+    except Exception:
+        pass
+    return os.getenv(key) or getattr(settings, key, "") or ""
 
 
 class ShopifyPipeline(BasePipeline):
@@ -55,19 +74,23 @@ class ShopifyPipeline(BasePipeline):
         self.start_date = start_date
         self.end_date = end_date
 
-        if not settings.SHOPIFY_SHOP_DOMAIN or not settings.SHOPIFY_ADMIN_TOKEN:
+        shop_domain = _shopify_cfg("SHOPIFY_SHOP_DOMAIN")
+        admin_token = _shopify_cfg("SHOPIFY_ADMIN_TOKEN")
+        api_version = _shopify_cfg("SHOPIFY_API_VERSION") or "2026-04"
+
+        if not shop_domain or not admin_token:
             raise ValueError(
                 "Shopify not configured — set SHOPIFY_SHOP_DOMAIN and "
-                "SHOPIFY_ADMIN_TOKEN"
+                "SHOPIFY_ADMIN_TOKEN (env vars or POST /api/shopify/prime)"
             )
 
-        domain = settings.SHOPIFY_SHOP_DOMAIN.strip()
+        domain = shop_domain.strip()
         if domain.startswith("http://") or domain.startswith("https://"):
             domain = domain.split("://", 1)[1]
         domain = domain.rstrip("/")
-        self.base_url = f"https://{domain}/admin/api/{settings.SHOPIFY_API_VERSION}"
+        self.base_url = f"https://{domain}/admin/api/{api_version}"
         self.headers = {
-            "X-Shopify-Access-Token": settings.SHOPIFY_ADMIN_TOKEN,
+            "X-Shopify-Access-Token": admin_token,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
