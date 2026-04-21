@@ -213,6 +213,28 @@ class Settings(BaseSettings):
         description="WooCommerce REST API consumer secret",
     )
 
+    # Shopify (CP retail store — The Concrete Protector Store)
+    SHOPIFY_SHOP_DOMAIN: str = Field(
+        default="",
+        description="Shopify shop domain (e.g. theconcreteprotector.myshopify.com)",
+    )
+    SHOPIFY_ADMIN_TOKEN: str = Field(
+        default="",
+        description="Shopify Admin API access token (starts with shpat_)",
+    )
+    SHOPIFY_API_KEY: str = Field(
+        default="",
+        description="Shopify custom app API key (public client id)",
+    )
+    SHOPIFY_API_SECRET: str = Field(
+        default="",
+        description="Shopify custom app API secret (starts with shpss_, for webhook HMAC)",
+    )
+    SHOPIFY_API_VERSION: str = Field(
+        default="2026-04",
+        description="Shopify Admin API version",
+    )
+
     # Groq API configuration
     GROQ_API_KEY: str = Field(
         default="",

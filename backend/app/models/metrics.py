@@ -459,3 +459,94 @@ class WCProduct(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+
+class ShopifyOrder(Base):
+    """
+    Shopify order from The Concrete Protector retail store (CP brand).
+
+    One row per order. Mirrors the WCOrder shape so the Executive Summary
+    and CP brand overview can combine retail revenue from both stores.
+    """
+
+    __tablename__ = "shopify_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    order_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="paid")
+    financial_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    fulfillment_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    total: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    subtotal: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    tax: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    shipping: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    discount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    payment_method: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    customer_email: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    customer_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    billing_state: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    billing_country: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    items_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    date_created: Mapped[Optional[datetime]] = mapped_column(Date, index=True, nullable=True)
+    date_completed: Mapped[Optional[datetime]] = mapped_column(Date, nullable=True)
+    division: Mapped[str] = mapped_column(String(32), nullable=False, default="cp")
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class ShopifyProduct(Base):
+    """
+    Shopify product snapshot — full catalog refreshed on every run.
+    """
+
+    __tablename__ = "shopify_products"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    product_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    sku: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    compare_at_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    stock_quantity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    stock_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    product_type: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    vendor: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    tags: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    division: Mapped[str] = mapped_column(String(32), nullable=False, default="cp")
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class ShopifyCustomer(Base):
+    """
+    Shopify customer snapshot — unique customers with lifetime totals.
+    """
+
+    __tablename__ = "shopify_customers"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    customer_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    first_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    orders_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_spent: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    state: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    tags: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    created_at_remote: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    division: Mapped[str] = mapped_column(String(32), nullable=False, default="cp")
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )

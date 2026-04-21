@@ -4187,11 +4187,10 @@ async def get_executive_summary(
 
     # ── 8b. Rebuild Combined Total Revenue from live sources ──────────
     # TCP MAIN sheet Total Revenue cells may be empty. Fall back to:
-    #   Combined = QB Contractor Revenue + Sani-Tred Store Revenue
-    # (CP Shopify will be added when that pipeline goes live)
+    #   Combined = QB Contractor Revenue + Sani-Tred retail + CP Shopify retail
     if qb_summary and qb_summary.get("grand_total"):
         qb_total = float(qb_summary.get("grand_total") or 0)
-        # Try to get Sani-Tred retail revenue from its dedicated endpoint logic
+        # Sani-Tred retail (WooCommerce, via google_sheets retail:: rows)
         retail_total = 0.0
         try:
             retail_q = await db.execute(
@@ -4206,12 +4205,28 @@ async def get_executive_summary(
             retail_total = float(retail_q.scalar() or 0)
         except Exception:
             pass
-        live_combined = qb_total + retail_total
+        # CP Shopify retail — sum of ShopifyOrder.total over the window.
+        shopify_total = 0.0
+        try:
+            from app.models.metrics import ShopifyOrder as _SO
+            sh_q = await db.execute(
+                select(func.sum(_SO.total)).where(and_(
+                    _SO.date_created >= start_date,
+                    _SO.date_created <= end_date,
+                ))
+            )
+            shopify_total = float(sh_q.scalar() or 0)
+        except Exception:
+            pass
+        live_combined = qb_total + retail_total + shopify_total
         # Override the Combined Total Revenue scorecard if TCP MAIN was empty
         if scorecards and scorecards[0].get("label") == "Combined Total Revenue":
             if not scorecards[0].get("value"):
                 scorecards[0]["value"] = round(live_combined, 2)
-                scorecards[0]["source"] = "QB contractor + Sani-Tred retail (live)"
+                src = "QB contractor + Sani-Tred retail"
+                if shopify_total > 0:
+                    src += " + CP Shopify"
+                scorecards[0]["source"] = f"{src} (live)"
 
     # ── 9. Final payload ──────────────────────────────────────────────
     return {
@@ -4511,6 +4526,202 @@ async def get_wc_store(
             "totalDiscount": round(float(t.total_discount or 0), 2),
             "totalShipping": round(float(t.total_shipping or 0), 2),
             "totalTax": round(float(t.total_tax or 0), 2),
+        },
+        "monthly": monthly,
+        "products": products,
+        "ordersByStatus": orders_by_status,
+        "paymentMethods": payment_methods,
+        "regions": regions,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Shopify Store — CP retail (The Concrete Protector)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.get(
+    "/shopify/store",
+    summary="Shopify store metrics — orders, products, customers, revenue",
+)
+async def get_shopify_store(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+) -> dict:
+    """Aggregated Shopify data for the CP Retail Breakdown page.
+
+    Returns scorecards, monthly performance, top products, orders by
+    financial status, payment methods, and regional breakdown — all
+    from shopify_orders + shopify_products + shopify_customers tables.
+    Shape mirrors /woocommerce/store so both retail surfaces can share
+    the same frontend component.
+    """
+    from app.models.metrics import ShopifyCustomer, ShopifyOrder, ShopifyProduct
+
+    start_date, end_date = _get_date_range(date_from, date_to)
+
+    # Gate: has the pipeline ever run, or are there rows?
+    pipeline_ran = False
+    try:
+        pipeline_ran = await _has_pipeline_run(db, "shopify", "shopify_pipeline")
+    except Exception as exc:
+        logger.warning("Shopify store: pipeline check failed: %s", exc)
+
+    if not pipeline_ran:
+        try:
+            sh_count = await db.execute(select(func.count()).select_from(ShopifyOrder))
+            pr_count = await db.execute(select(func.count()).select_from(ShopifyProduct))
+            if (sh_count.scalar() or 0) > 0 or (pr_count.scalar() or 0) > 0:
+                pipeline_ran = True
+        except Exception as exc:
+            logger.warning("Shopify store: table check failed (tables may not exist): %s", exc)
+
+    if not pipeline_ran:
+        return {
+            "period": f"{start_date} to {end_date}",
+            "hasLiveData": False,
+            "scorecards": {},
+            "monthly": [],
+            "products": [],
+            "ordersByStatus": [],
+            "paymentMethods": [],
+            "regions": [],
+        }
+
+    # Scorecards — date-filtered, with all-orders fallback
+    totals = await db.execute(
+        select(
+            func.count(ShopifyOrder.id).label("total_orders"),
+            func.coalesce(func.sum(ShopifyOrder.total), 0).label("total_revenue"),
+            func.coalesce(func.avg(ShopifyOrder.total), 0).label("avg_order_value"),
+            func.coalesce(func.sum(ShopifyOrder.discount), 0).label("total_discount"),
+            func.coalesce(func.sum(ShopifyOrder.shipping), 0).label("total_shipping"),
+            func.coalesce(func.sum(ShopifyOrder.tax), 0).label("total_tax"),
+        ).where(and_(
+            ShopifyOrder.date_created >= start_date,
+            ShopifyOrder.date_created <= end_date,
+        ))
+    )
+    t = totals.first()
+    total_orders = int(t.total_orders or 0)
+    total_revenue = float(t.total_revenue or 0)
+    avg_order = float(t.avg_order_value or 0)
+
+    if total_orders == 0:
+        totals_all = await db.execute(
+            select(
+                func.count(ShopifyOrder.id).label("total_orders"),
+                func.coalesce(func.sum(ShopifyOrder.total), 0).label("total_revenue"),
+                func.coalesce(func.avg(ShopifyOrder.total), 0).label("avg_order_value"),
+                func.coalesce(func.sum(ShopifyOrder.discount), 0).label("total_discount"),
+                func.coalesce(func.sum(ShopifyOrder.shipping), 0).label("total_shipping"),
+                func.coalesce(func.sum(ShopifyOrder.tax), 0).label("total_tax"),
+            )
+        )
+        ta = totals_all.first()
+        if int(ta.total_orders or 0) > 0:
+            t = ta
+            total_orders = int(t.total_orders or 0)
+            total_revenue = float(t.total_revenue or 0)
+            avg_order = float(t.avg_order_value or 0)
+
+    cust_count_q = await db.execute(select(func.count()).select_from(ShopifyCustomer))
+    unique_customers = int(cust_count_q.scalar() or 0)
+
+    # Monthly breakdown (YYYY-MM buckets)
+    monthly_q = await db.execute(
+        select(
+            func.strftime("%Y-%m", ShopifyOrder.date_created).label("month"),
+            func.count(ShopifyOrder.id).label("orders"),
+            func.sum(ShopifyOrder.total).label("revenue"),
+        ).where(and_(
+            ShopifyOrder.date_created >= start_date,
+            ShopifyOrder.date_created <= end_date,
+        )).group_by("month").order_by("month")
+    )
+    monthly = [
+        {"month": r.month, "orders": int(r.orders or 0), "revenue": round(float(r.revenue or 0), 2)}
+        for r in monthly_q.all() if r.month
+    ]
+
+    # Top products by total_sales proxy (Shopify doesn't give per-order line items here;
+    # we'd need order line items for true revenue attribution). For now, expose the
+    # catalog sorted by price as a placeholder — upgrade once line_items are modeled.
+    products_q = await db.execute(
+        select(
+            ShopifyProduct.name,
+            ShopifyProduct.sku,
+            ShopifyProduct.price,
+            ShopifyProduct.stock_quantity,
+        ).order_by(ShopifyProduct.price.desc()).limit(10)
+    )
+    products = [
+        {"name": r.name, "sku": r.sku, "price": float(r.price or 0), "stock": int(r.stock_quantity or 0)}
+        for r in products_q.all()
+    ]
+
+    # Orders by financial status
+    status_q = await db.execute(
+        select(
+            ShopifyOrder.financial_status.label("status"),
+            func.count(ShopifyOrder.id).label("count"),
+            func.sum(ShopifyOrder.total).label("total"),
+        ).where(and_(
+            ShopifyOrder.date_created >= start_date,
+            ShopifyOrder.date_created <= end_date,
+        )).group_by(ShopifyOrder.financial_status)
+    )
+    orders_by_status = [
+        {"status": r.status or "unknown", "count": int(r.count or 0), "total": round(float(r.total or 0), 2)}
+        for r in status_q.all()
+    ]
+
+    # Payment methods
+    pm_q = await db.execute(
+        select(
+            ShopifyOrder.payment_method.label("method"),
+            func.count(ShopifyOrder.id).label("count"),
+            func.sum(ShopifyOrder.total).label("total"),
+        ).where(and_(
+            ShopifyOrder.date_created >= start_date,
+            ShopifyOrder.date_created <= end_date,
+        )).group_by(ShopifyOrder.payment_method)
+    )
+    payment_methods = [
+        {"method": r.method or "unknown", "count": int(r.count or 0), "total": round(float(r.total or 0), 2)}
+        for r in pm_q.all()
+    ]
+
+    # Regions (by billing state)
+    regions_q = await db.execute(
+        select(
+            ShopifyOrder.billing_state.label("state"),
+            func.count(ShopifyOrder.id).label("count"),
+            func.sum(ShopifyOrder.total).label("total"),
+        ).where(and_(
+            ShopifyOrder.date_created >= start_date,
+            ShopifyOrder.date_created <= end_date,
+            ShopifyOrder.billing_state.isnot(None),
+        )).group_by(ShopifyOrder.billing_state)
+        .order_by(func.sum(ShopifyOrder.total).desc()).limit(10)
+    )
+    regions = [
+        {"state": r.state, "count": int(r.count or 0), "total": round(float(r.total or 0), 2)}
+        for r in regions_q.all()
+    ]
+
+    return {
+        "period": f"{start_date} to {end_date}",
+        "hasLiveData": True,
+        "scorecards": {
+            "total_orders": total_orders,
+            "total_revenue": round(total_revenue, 2),
+            "avg_order_value": round(avg_order, 2),
+            "total_discount": round(float(t.total_discount or 0), 2),
+            "total_shipping": round(float(t.total_shipping or 0), 2),
+            "total_tax": round(float(t.total_tax or 0), 2),
+            "unique_customers": unique_customers,
         },
         "monthly": monthly,
         "products": products,
