@@ -346,12 +346,20 @@ class MetaAdsPipeline(BasePipeline):
         account_id: str,
         visible_ids: Optional[set],
     ) -> List[Dict[str, Any]]:
-        """Fetch campaign insights for a single ad account, restricted to
-        the campaign-ID whitelist so totals match Meta Ads Manager's
-        default "All ads" view (archived/deleted campaigns excluded).
+        """Fetch AD-LEVEL insights for a single ad account and aggregate
+        to campaign-daily rows in Python.
 
-        When visible_ids is None we fall back to fetching everything —
-        better to over-count than to lose data entirely.
+        Rationale: previous campaign-level fetches relied on Meta's own
+        aggregation and on a server-side filter that did not always
+        honor campaign.effective_status, which let archived/deleted
+        spend leak through. Pulling at level=ad gives us the raw
+        per-ad daily rows; we then filter by the known-good visible-
+        campaign whitelist and sum in Python, so the numbers in the DB
+        are produced entirely by code we own.
+
+        When visible_ids is None we fall back to no whitelist — better
+        to over-count than lose data entirely. Archived campaigns are
+        still tagged so a downstream audit can find them.
         """
         if not account_id.startswith("act_"):
             account_id = f"act_{account_id}"
@@ -359,10 +367,12 @@ class MetaAdsPipeline(BasePipeline):
         ad_account = AdAccount(account_id)
 
         fields = [
-            "campaign_id",
-            "campaign_name",
+            "ad_id",
+            "ad_name",
             "adset_id",
             "adset_name",
+            "campaign_id",
+            "campaign_name",
             "date_start",
             "impressions",
             "clicks",
@@ -371,14 +381,14 @@ class MetaAdsPipeline(BasePipeline):
             "action_values",
             "reach",
             "frequency",
-            "cpp",
-            "cpc",
-            "cpm",
-            "ctr",
         ]
 
         def _blocking_fetch() -> List[Dict[str, Any]]:
-            """Run the synchronous Facebook SDK call in a worker thread."""
+            """Run the synchronous Facebook SDK call in a worker thread.
+
+            Pages through results via the SDK's built-in cursor so large
+            accounts with hundreds of ads × 31 days don't truncate.
+            """
             insights = ad_account.get_insights(
                 fields=fields,
                 params={
@@ -386,33 +396,113 @@ class MetaAdsPipeline(BasePipeline):
                         "since": self.start_date.isoformat(),
                         "until": self.end_date.isoformat(),
                     },
-                    "level": "campaign",
+                    "level": "ad",
                     "time_increment": 1,
                     "limit": 500,
                 },
             )
-            out: List[Dict[str, Any]] = []
+            ad_rows: List[Dict[str, Any]] = []
             for insight in insights:
-                insight_dict = dict(insight)
-                cid = str(insight_dict.get("campaign_id") or "")
-                # Apply the visible-campaign whitelist (match Meta UI default).
+                row = dict(insight)
+                cid = str(row.get("campaign_id") or "")
                 if visible_ids is not None and cid not in visible_ids:
                     continue
-                # Honor any caller-provided campaign restriction.
                 if self.campaign_ids and cid not in self.campaign_ids:
                     continue
-                out.append(insight_dict)
-            return out
+                ad_rows.append(row)
+            return ad_rows
 
         try:
-            return await asyncio.to_thread(_blocking_fetch)
-
+            ad_rows = await asyncio.to_thread(_blocking_fetch)
         except FacebookRequestError as e:
             self.logger.warning(
                 f"Meta API error for {account_id}: code={e.api_error_code()} "
                 f"msg={e.api_error_message()}"
             )
             return []
+
+        # Aggregate ad-level rows → one row per (campaign_id, date).
+        # Reach at the ad level doesn't sum cleanly (same person can see
+        # multiple ads in the same campaign), so we take MAX as a
+        # within-campaign approximation. The period-unique account reach
+        # is written separately by post_load().
+        agg: Dict[tuple, Dict[str, Any]] = {}
+        for row in ad_rows:
+            cid = str(row.get("campaign_id") or "")
+            d = row.get("date_start")
+            key = (cid, d)
+            bucket = agg.get(key)
+            if bucket is None:
+                bucket = {
+                    "campaign_id": cid,
+                    "campaign_name": row.get("campaign_name") or "",
+                    "adset_id": row.get("adset_id") or "",
+                    "adset_name": row.get("adset_name") or "",
+                    "date_start": d,
+                    "impressions": 0,
+                    "clicks": 0,
+                    "spend": 0.0,
+                    "reach": 0,
+                    "actions": {},          # aggregated by action_type
+                    "action_values": {},    # aggregated by action_type
+                    "_ad_count": 0,
+                }
+                agg[key] = bucket
+
+            bucket["impressions"] += int(row.get("impressions", 0) or 0)
+            bucket["clicks"] += int(row.get("clicks", 0) or 0)
+            try:
+                bucket["spend"] += float(row.get("spend", 0) or 0)
+            except (TypeError, ValueError):
+                pass
+            # Reach within a campaign-day: take MAX across ads as a floor
+            r = int(row.get("reach", 0) or 0)
+            if r > bucket["reach"]:
+                bucket["reach"] = r
+            bucket["_ad_count"] += 1
+
+            # Sum action counts by action_type across ads in the same campaign-day.
+            for action in (row.get("actions") or []):
+                if not isinstance(action, dict):
+                    continue
+                atype = action.get("action_type")
+                try:
+                    val = float(action.get("value", 0) or 0)
+                except (TypeError, ValueError):
+                    val = 0.0
+                if atype:
+                    bucket["actions"][atype] = bucket["actions"].get(atype, 0.0) + val
+            for action_val in (row.get("action_values") or []):
+                if not isinstance(action_val, dict):
+                    continue
+                atype = action_val.get("action_type")
+                try:
+                    val = float(action_val.get("value", 0) or 0)
+                except (TypeError, ValueError):
+                    val = 0.0
+                if atype:
+                    bucket["action_values"][atype] = bucket["action_values"].get(atype, 0.0) + val
+
+        # Convert aggregated actions dicts back to Meta's list-of-objects
+        # format so the downstream transform step keeps working unchanged.
+        out: List[Dict[str, Any]] = []
+        for bucket in agg.values():
+            bucket["actions"] = [
+                {"action_type": k, "value": v}
+                for k, v in bucket["actions"].items()
+            ]
+            bucket["action_values"] = [
+                {"action_type": k, "value": v}
+                for k, v in bucket["action_values"].items()
+            ]
+            bucket.pop("_ad_count", None)
+            out.append(bucket)
+
+        self.logger.info(
+            f"  {account_id}: level=ad fetched {len(ad_rows)} ad-day rows, "
+            f"aggregated to {len(out)} campaign-day rows"
+        )
+        return out
 
     async def _get_account_daily_reach(
         self,
