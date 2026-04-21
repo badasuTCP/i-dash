@@ -20,6 +20,7 @@ const PIPELINE_META = {
   google_analytics: { icon: '📈', label: 'Google Analytics (GA4)', color: 'cyan',    key: 'ga4' },
   google_sheets:    { icon: '📊', label: 'Google Sheets',         color: 'teal',    key: 'googleSheets' },
   woocommerce:      { icon: '🛒', label: 'WooCommerce (Sani-Tred)', color: 'purple', key: 'woocommerce' },
+  shopify:          { icon: '🛍️', label: 'Shopify (CP)',           color: 'emerald', key: 'shopify' },
   snapshot:         { icon: '📸', label: 'Snapshot Aggregator',   color: 'violet',  key: 'snapshot' },
 };
 
@@ -115,6 +116,7 @@ const PipelinesPage = () => {
   const [frequencies, setFrequencies] = useState({
     hubspot: '2hrs', meta_ads: '2hrs', google_ads: '4hrs',
     google_analytics: '4hrs', google_sheets: '6hrs', snapshot: '4hrs',
+    woocommerce: '2hrs', shopify: '2hrs',
   });
 
   // ── Contractor state — driven by DashboardConfigContext ──────────────────────
