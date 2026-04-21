@@ -60,11 +60,17 @@ export const authAPI = {
 };
 
 // Dashboard endpoints
-// Backend FastAPI expects `date_from` and `date_to` query params (YYYY-MM-DD)
+// Backend FastAPI expects `date_from` and `date_to` query params (YYYY-MM-DD).
+// IMPORTANT: must use LOCAL calendar date (not UTC). Using toISOString on a
+// Date like "Mar 31 23:59:59 local" in EDT/EST produces "2026-04-01T..." —
+// slicing that to YYYY-MM-DD then sends Apr 1 to the backend, which
+// silently shifts the window by one day and added ~$50 of extra spend
+// for every "Last Month"-style query.
+const _pad = (n) => (n < 10 ? `0${n}` : `${n}`);
 const _fmtDate = (d) => {
   if (!d) return undefined;
   if (typeof d === 'string') return d;
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+  return `${d.getFullYear()}-${_pad(d.getMonth() + 1)}-${_pad(d.getDate())}`;
 };
 
 export const dashboardAPI = {

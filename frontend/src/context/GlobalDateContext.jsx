@@ -12,13 +12,27 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 
 const GlobalDateContext = createContext(null);
 
+// IMPORTANT: normalize Date → YYYY-MM-DD using LOCAL calendar fields, not
+// toISOString(). DateRangePicker returns endOfMonth(lm) for "Last Month",
+// which is 23:59:59.999 local time. toISOString() on that in EDT/EST bumps
+// to the next UTC day — so "Mar 31" became "Apr 1" on the wire and every
+// "Last Month" query picked up an extra day of spend. Kept as a module-level
+// helper so setGlobalDate, clearGlobalDate, and the lazy-init default all
+// use the same conversion.
+const _pad = (n) => (n < 10 ? `0${n}` : `${n}`);
+const _fmtLocal = (d) => {
+  if (!d) return null;
+  if (typeof d === 'string') return d;
+  return `${d.getFullYear()}-${_pad(d.getMonth() + 1)}-${_pad(d.getDate())}`;
+};
+
 export function GlobalDateProvider({ children }) {
   // Default to YTD (Jan 1 of current year → today)
   const [dateRange, setDateRange] = useState(() => {
     const now = new Date();
     return {
       start: `${now.getFullYear()}-01-01`,
-      end: now.toISOString().slice(0, 10),
+      end: _fmtLocal(now),
     };
   });
   const [presetId, setPresetId] = useState('ytd');
@@ -26,13 +40,8 @@ export function GlobalDateProvider({ children }) {
   /** Called by the Header DateRangePicker onApply.
    *  Normalizes Date objects to YYYY-MM-DD strings for stable comparison. */
   const setGlobalDate = useCallback((start, end, preset = null) => {
-    const fmt = (d) => {
-      if (!d) return null;
-      if (typeof d === 'string') return d;
-      return d.toISOString().slice(0, 10);
-    };
-    const s = fmt(start);
-    const e = fmt(end);
+    const s = _fmtLocal(start);
+    const e = _fmtLocal(end);
     setDateRange(s && e ? { start: s, end: e } : null);
     setPresetId(preset);
   }, []);
@@ -40,7 +49,7 @@ export function GlobalDateProvider({ children }) {
   /** Clear back to YTD default */
   const clearGlobalDate = useCallback(() => {
     const now = new Date();
-    setDateRange({ start: `${now.getFullYear()}-01-01`, end: now.toISOString().slice(0, 10) });
+    setDateRange({ start: `${now.getFullYear()}-01-01`, end: _fmtLocal(now) });
     setPresetId('ytd');
   }, []);
 
