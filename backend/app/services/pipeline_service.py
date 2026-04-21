@@ -409,10 +409,50 @@ class PipelineService:
         """
         Get list of ALL expected pipelines (including unconfigured ones).
 
+        Also opportunistically retries initialization of any pipeline still
+        in init_errors — so pipelines whose creds landed via a runtime
+        mechanism (e.g. POST /api/shopify/prime writing to /tmp) recover
+        without needing a pod restart, even on workers that didn't receive
+        the prime call directly.
+
         Returns:
             List of pipeline names.
         """
+        self._retry_failed_inits()
         return list(self.all_pipeline_names)
+
+    def _retry_failed_inits(self) -> None:
+        """Retry initialization for any pipeline currently in init_errors.
+        Cheap enough to call on every list — factories are idempotent and
+        only fail if creds still aren't available."""
+        if not self.init_errors:
+            return
+        # Lazy import to avoid cycles; only the factories referenced by
+        # pipelines currently in init_errors are needed.
+        factories = {
+            "hubspot": lambda: HubSpotPipeline(),
+            "meta_ads": lambda: MetaAdsPipeline(),
+            "google_ads": lambda: GoogleAdsPipeline(),
+            "google_analytics": lambda: GoogleAnalyticsPipeline(),
+            "google_sheets": lambda: GoogleSheetsPipeline(),
+            "woocommerce": lambda: WooCommercePipeline(),
+            "shopify": lambda: ShopifyPipeline(),
+            "snapshot": lambda: SnapshotPipeline(),
+        }
+        recovered = []
+        for name in list(self.init_errors.keys()):
+            factory = factories.get(name)
+            if not factory:
+                continue
+            try:
+                self.pipelines[name] = factory()
+                self.init_errors.pop(name, None)
+                recovered.append(name)
+            except Exception as exc:
+                # Still failing — leave the error in place and move on.
+                self.init_errors[name] = str(exc)
+        if recovered:
+            self.logger.info("Pipelines recovered on retry: %s", recovered)
 
     async def configure_google_sheets(
         self,

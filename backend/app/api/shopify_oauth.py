@@ -45,14 +45,42 @@ router = APIRouter(prefix="/shopify", tags=["shopify-oauth"])
 # Runtime credential override — workaround for Railway variable-injection
 # issues where WC_* / SHOPIFY_* env vars show in the Variables UI but never
 # reach the container. POST creds to /api/shopify/prime to populate, then
-# run the OAuth flow normally. In-memory only; cleared on pod restart.
-_runtime_creds: dict = {}
+# run the OAuth flow normally.
+#
+# Persisted to a shared tmpfs file (/tmp/shopify_runtime_creds.json) so all
+# gunicorn workers on the same container see the same values. Cleared on
+# pod restart — re-prime after every deploy until a DB-backed solution
+# replaces this.
+import json as _json
+
+_RUNTIME_CREDS_FILE = "/tmp/shopify_runtime_creds.json"
+
+
+def _load_creds() -> dict:
+    try:
+        with open(_RUNTIME_CREDS_FILE, "r", encoding="utf-8") as fh:
+            return _json.load(fh) or {}
+    except (FileNotFoundError, ValueError):
+        return {}
+    except Exception as exc:
+        logger.warning("Shopify creds file read failed: %s", exc)
+        return {}
+
+
+def _save_creds(d: dict) -> None:
+    try:
+        with open(_RUNTIME_CREDS_FILE, "w", encoding="utf-8") as fh:
+            _json.dump(d, fh)
+    except Exception as exc:
+        logger.warning("Shopify creds file write failed: %s", exc)
 
 
 def _cfg(key: str, default: str = "") -> str:
-    """Read a Shopify config value — prefer runtime overrides, then live
-    os.environ, then cached pydantic settings."""
-    return _runtime_creds.get(key) or os.getenv(key) or getattr(settings, key, "") or default
+    """Read a Shopify config value — prefer runtime overrides (file-backed,
+    visible to all workers), then live os.environ, then cached pydantic
+    settings."""
+    creds = _load_creds()
+    return creds.get(key) or os.getenv(key) or getattr(settings, key, "") or default
 
 
 @router.post("/prime", include_in_schema=False)
@@ -67,20 +95,23 @@ async def shopify_prime(payload: dict) -> dict:
     if not expected or not hmac.compare_digest(str(admin_secret), str(expected)):
         raise HTTPException(403, detail="Unauthorized")
 
+    creds = _load_creds()
     accepted = {}
     for k in ("SHOPIFY_API_KEY", "SHOPIFY_API_SECRET",
               "SHOPIFY_SHOP_DOMAIN", "SHOPIFY_ADMIN_TOKEN"):
         v = payload.get(k)
         if v:
-            _runtime_creds[k] = str(v)
+            creds[k] = str(v)
             accepted[k] = True
-    logger.info("Shopify runtime creds primed: %s", list(accepted.keys()))
+    _save_creds(creds)
+    logger.info("Shopify runtime creds primed: %s (file: %s)",
+                list(accepted.keys()), _RUNTIME_CREDS_FILE)
 
     # If the domain + token are now available, re-initialize the Shopify
     # pipeline so it moves from pipeline_service.init_errors into .pipelines
     # and becomes runnable. Safe to call repeatedly.
     pipeline_status: dict = {"reinitialized": False}
-    if _runtime_creds.get("SHOPIFY_SHOP_DOMAIN") and _runtime_creds.get("SHOPIFY_ADMIN_TOKEN"):
+    if creds.get("SHOPIFY_SHOP_DOMAIN") and creds.get("SHOPIFY_ADMIN_TOKEN"):
         try:
             from app.api.pipelines import get_pipeline_service
             from app.pipelines.shopify import ShopifyPipeline
@@ -95,7 +126,7 @@ async def shopify_prime(payload: dict) -> dict:
 
     return {
         "primed": accepted,
-        "known_keys": sorted(_runtime_creds.keys()),
+        "known_keys": sorted(creds.keys()),
         "pipeline": pipeline_status,
     }
 

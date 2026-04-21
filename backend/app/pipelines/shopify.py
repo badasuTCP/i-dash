@@ -31,18 +31,21 @@ SHOPIFY_PAGE_LIMIT = 250  # Shopify max per page
 
 def _shopify_cfg(key: str) -> str:
     """Read a Shopify config value with this resolution order:
-    1. Runtime overrides populated by POST /api/shopify/prime (shared dict
-       in app.api.shopify_oauth) — unblocks us when Railway fails to
+    1. File-backed runtime overrides at /tmp/shopify_runtime_creds.json
+       (populated by POST /api/shopify/prime) — visible to all gunicorn
+       workers on the same container. Unblocks us when Railway fails to
        inject env vars for this service.
     2. Live os.environ.
     3. Cached pydantic settings.
     """
+    import json as _json
     try:
-        from app.api.shopify_oauth import _runtime_creds  # local import to avoid cycle
-        v = _runtime_creds.get(key)
+        with open("/tmp/shopify_runtime_creds.json", "r", encoding="utf-8") as fh:
+            creds = _json.load(fh) or {}
+        v = creds.get(key)
         if v:
             return v
-    except Exception:
+    except (FileNotFoundError, ValueError, OSError):
         pass
     return os.getenv(key) or getattr(settings, key, "") or ""
 
