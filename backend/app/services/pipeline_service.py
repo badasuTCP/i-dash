@@ -252,6 +252,11 @@ class PipelineService:
             for pipeline in status['pipelines']:
                 print(f"{pipeline['name']}: {pipeline['status']}")
         """
+        # Retry any failed init first — lets pipelines whose creds landed
+        # via file-backed runtime overrides (e.g. POST /api/shopify/prime)
+        # recover on this worker without a pod restart.
+        self._retry_failed_inits()
+
         try:
             async with async_session_maker() as session:
                 pipelines_status = []
