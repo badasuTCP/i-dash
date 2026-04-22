@@ -217,9 +217,36 @@ async def debug_meta_actions(payload: dict) -> dict:
         raise HTTPException(403, detail="Unauthorized")
 
     account_id = str(payload.get("account_id") or "").strip()
+    contractor = str(payload.get("contractor") or "").strip()
     d = str(payload.get("date") or "").strip()
-    if not account_id or not d:
-        raise HTTPException(400, detail="account_id and date required")
+    if not d or (not account_id and not contractor):
+        raise HTTPException(400, detail="date + (account_id or contractor) required")
+
+    # Contractor-name lookup so the caller doesn't have to know Meta IDs.
+    if contractor and not account_id:
+        try:
+            from sqlalchemy import select as _sel
+            from app.core.database import async_session_maker
+            from app.models.brand_asset import BrandAsset
+            async with async_session_maker() as session:
+                q = await session.execute(
+                    _sel(BrandAsset.account_id, BrandAsset.account_name)
+                    .where(BrandAsset.platform == "meta")
+                )
+                rows = q.all()
+            needle = contractor.lower().replace(" ", "")
+            hit = next(
+                ((aid, name) for aid, name in rows
+                 if needle in (name or "").lower().replace(" ", "")),
+                None,
+            )
+            if not hit:
+                raise HTTPException(404, detail=f"No Meta account matching '{contractor}'. Pass account_id directly.")
+            account_id = hit[0]
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(500, detail=f"Contractor lookup failed: {exc}")
 
     # Pull the Meta access token from settings (env or pydantic config).
     token = os.getenv("META_ACCESS_TOKEN") or getattr(settings, "META_ACCESS_TOKEN", "")
