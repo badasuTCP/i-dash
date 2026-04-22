@@ -238,6 +238,42 @@ async def shopify_debug() -> dict:
         }
     except Exception as exc:
         pipeline_state = {"error": str(exc)}
+    # Row counts + pipeline log snapshot — answers "did the data actually land?"
+    data_state = {"error": "not queried"}
+    try:
+        from sqlalchemy import select as _sel, func as _func, desc as _desc
+        from app.core.database import async_session_maker
+        from app.models.metrics import ShopifyOrder, ShopifyProduct, ShopifyCustomer, SystemSecret
+        from app.models.pipeline_log import PipelineLog
+        async with async_session_maker() as session:
+            orders_count = (await session.execute(_sel(_func.count()).select_from(ShopifyOrder))).scalar() or 0
+            products_count = (await session.execute(_sel(_func.count()).select_from(ShopifyProduct))).scalar() or 0
+            customers_count = (await session.execute(_sel(_func.count()).select_from(ShopifyCustomer))).scalar() or 0
+            secrets_rows = (await session.execute(
+                _sel(SystemSecret.key).where(SystemSecret.key.like("SHOPIFY_%"))
+            )).scalars().all()
+            last_log = (await session.execute(
+                _sel(PipelineLog.pipeline_name, PipelineLog.status, PipelineLog.records_fetched,
+                     PipelineLog.duration_seconds, PipelineLog.started_at, PipelineLog.error_message)
+                .where(PipelineLog.pipeline_name.in_(["shopify", "shopify_pipeline"]))
+                .order_by(_desc(PipelineLog.started_at)).limit(3)
+            )).all()
+        data_state = {
+            "shopify_orders_rows": orders_count,
+            "shopify_products_rows": products_count,
+            "shopify_customers_rows": customers_count,
+            "system_secrets_shopify_keys": sorted(secrets_rows),
+            "recent_pipeline_logs": [
+                {
+                    "name": r[0], "status": str(r[1]), "records": r[2],
+                    "duration_s": r[3], "started_at": r[4].isoformat() if r[4] else None,
+                    "error": r[5],
+                } for r in last_log
+            ],
+        }
+    except Exception as exc:
+        data_state = {"error": str(exc)}
+
     return {
         "env_lengths": {k: len(os.getenv(k, "")) for k in keys},
         "settings_lengths": {k: len(getattr(settings, k, "") or "") for k in keys},
@@ -251,6 +287,7 @@ async def shopify_debug() -> dict:
             "keys_present": file_keys,
         },
         "pipeline_service": pipeline_state,
+        "data_state": data_state,
     }
 
 # Scopes we request when installing on CP store.
