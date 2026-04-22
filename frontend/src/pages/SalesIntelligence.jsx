@@ -192,6 +192,9 @@ const SalesIntelligence = () => {
   const { isDark } = useTheme();
   const { dateFrom, dateTo } = useGlobalDate();
   const [selectedRep, setSelectedRep] = useState(null);
+  const [repSearch, setRepSearch] = useState('');
+  const [repSortKey, setRepSortKey] = useState('winRate');
+  const [repLimit, setRepLimit] = useState('all');
   const [apiData, setApiData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -268,17 +271,31 @@ const SalesIntelligence = () => {
     ? Math.round(reps.reduce((s, r) => s + (r.avg_days || 0), 0) / reps.length)
     : 0;
 
-  // ── Leaderboard sort ──────────────────────────────────────────────────────
+  // ── Leaderboard sort + filter ─────────────────────────────────────────────
   const leaderboard = useMemo(() => {
-    return [...allReps]
-      .map(r => ({
-        ...r,
-        winRate: r.deals_won + r.deals_lost > 0
-          ? Math.round(r.deals_won / (r.deals_won + r.deals_lost) * 100) : 0,
-        quotaPct: r.quota > 0 ? Math.round(r.revenue / r.quota * 100) : 0,
-      }))
-      .sort((a, b) => b.winRate - a.winRate || a.avg_days - b.avg_days);
-  }, [allReps]);
+    const enriched = allReps.map(r => ({
+      ...r,
+      winRate: r.deals_won + r.deals_lost > 0
+        ? Math.round(r.deals_won / (r.deals_won + r.deals_lost) * 100) : 0,
+      quotaPct: r.quota > 0 ? Math.round(r.revenue / r.quota * 100) : 0,
+    }));
+    const q = repSearch.trim().toLowerCase();
+    const filtered = q
+      ? enriched.filter(r => (r.name || '').toLowerCase().includes(q))
+      : enriched;
+    const sorted = [...filtered].sort((a, b) => {
+      switch (repSortKey) {
+        case 'revenue':    return (b.revenue    || 0) - (a.revenue    || 0);
+        case 'dealsWon':   return (b.deals_won  || 0) - (a.deals_won  || 0);
+        case 'avgDays':    return (a.avg_days   || 0) - (b.avg_days   || 0);
+        case 'quotaPct':   return (b.quotaPct   || 0) - (a.quotaPct   || 0);
+        case 'name':       return (a.name || '').localeCompare(b.name || '');
+        case 'winRate':
+        default:           return (b.winRate - a.winRate) || (a.avg_days - b.avg_days);
+      }
+    });
+    return repLimit === 'all' ? sorted : sorted.slice(0, Number(repLimit));
+  }, [allReps, repSearch, repSortKey, repLimit]);
 
   // ── Radar data ────────────────────────────────────────────────────────────
   const radarData = useMemo(() => {
@@ -558,12 +575,73 @@ const SalesIntelligence = () => {
             transition={{ delay: 0.2 }}
             className={`rounded-2xl border p-6 xl:col-span-2 ${cardBg}`}
           >
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <Award size={16} className="text-amber-400" />
                 <h3 className={`font-semibold ${textPri}`}>Rep Leaderboard</h3>
               </div>
               <span className={`text-xs ${textSec}`}>Click a rep to filter all charts</span>
+            </div>
+
+            {/* ── Filter toolbar ── */}
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border flex-1 min-w-[180px] ${
+                isDark ? 'bg-slate-900/60 border-slate-700/40' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <Filter size={12} className={textSec} />
+                <input
+                  type="text"
+                  value={repSearch}
+                  onChange={(e) => setRepSearch(e.target.value)}
+                  placeholder="Search reps..."
+                  className={`bg-transparent text-xs outline-none w-full ${textPri} placeholder:${textSec}`}
+                />
+                {repSearch && (
+                  <button onClick={() => setRepSearch('')} className={textSec}>
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              <select
+                value={repSortKey}
+                onChange={(e) => setRepSortKey(e.target.value)}
+                className={`text-xs px-3 py-1.5 rounded-lg border cursor-pointer ${
+                  isDark ? 'bg-slate-900/60 border-slate-700/40 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}
+                title="Sort leaderboard"
+              >
+                <option value="winRate">Win Rate</option>
+                <option value="revenue">Revenue</option>
+                <option value="dealsWon">Deals Won</option>
+                <option value="avgDays">Fastest Close</option>
+                <option value="quotaPct">Quota %</option>
+                <option value="name">Name (A–Z)</option>
+              </select>
+              <select
+                value={repLimit}
+                onChange={(e) => setRepLimit(e.target.value)}
+                className={`text-xs px-3 py-1.5 rounded-lg border cursor-pointer ${
+                  isDark ? 'bg-slate-900/60 border-slate-700/40 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}
+                title="Show top N"
+              >
+                <option value="all">All</option>
+                <option value="5">Top 5</option>
+                <option value="10">Top 10</option>
+                <option value="20">Top 20</option>
+              </select>
+              {(repSearch || repSortKey !== 'winRate' || repLimit !== 'all') && (
+                <button
+                  onClick={() => { setRepSearch(''); setRepSortKey('winRate'); setRepLimit('all'); }}
+                  className={`text-xs px-2 py-1.5 rounded-lg ${textSec} hover:text-indigo-400`}
+                  title="Reset filters"
+                >
+                  Reset
+                </button>
+              )}
+              <span className={`text-[10px] ${textSec} ml-auto`}>
+                {leaderboard.length} {leaderboard.length === 1 ? 'rep' : 'reps'} shown
+              </span>
             </div>
 
             {hasReps ? (
