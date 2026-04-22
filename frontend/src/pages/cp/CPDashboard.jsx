@@ -17,6 +17,7 @@ const CPDashboard = () => {
   const { dateFrom, dateTo } = useGlobalDate();
   const { filterReps } = useRepExclusions();
   const [data, setData] = useState(null);
+  const [shopifyDetail, setShopifyDetail] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const ytdStart = `${new Date().getFullYear()}-01-01`;
@@ -27,9 +28,13 @@ const CPDashboard = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: d } = await dashboardAPI.getBrandSummary('cp', from, to);
-      setData(d);
-    } catch { setData(null); }
+      const [summaryRes, shopifyRes] = await Promise.all([
+        dashboardAPI.getBrandSummary('cp', from, to),
+        dashboardAPI.getShopifyStore(from, to).catch(() => null),
+      ]);
+      setData(summaryRes?.data || null);
+      setShopifyDetail(shopifyRes?.data || null);
+    } catch { setData(null); setShopifyDetail(null); }
     finally { setLoading(false); }
   }, [from, to]);
 
@@ -208,6 +213,115 @@ const CPDashboard = () => {
             </div>
           </motion.div>
         </div>
+
+        {/* Row 4: CP Store (Shopify) charts */}
+        {(shopifyDetail?.hasLiveData) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+              className={`rounded-xl p-6 ${cardBg}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <ShoppingBag size={16} className="text-rose-400" />
+                <h3 className={`text-base font-semibold ${textPri}`}>CP Store — Monthly Revenue</h3>
+              </div>
+              {(shopifyDetail?.monthly?.length || 0) > 0 ? (
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={shopifyDetail.monthly}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.3)'} />
+                    <XAxis dataKey="month" stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                    <YAxis stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }}
+                      tickFormatter={(v) => v >= 1000 ? `$${(v/1000).toFixed(0)}K` : `$${v}`} />
+                    <Tooltip contentStyle={tooltipStyle}
+                      formatter={(v, k) => k === 'orders' ? [`${v} orders`, 'Orders'] : [`$${Number(v).toLocaleString()}`, 'Revenue']} />
+                    <Bar dataKey="revenue" fill="#F97066" radius={[4,4,0,0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className={`text-sm ${textSec} text-center py-12`}>No Shopify orders in range</p>
+              )}
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+              className={`rounded-xl p-6 ${cardBg}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <TrendingUp size={16} className="text-violet-400" />
+                <h3 className={`text-base font-semibold ${textPri}`}>CP Store — Top Products by Revenue</h3>
+              </div>
+              {(() => {
+                const rows = (shopifyDetail?.products || []).filter(p => (p.revenue || 0) > 0).slice(0, 5);
+                if (rows.length === 0) {
+                  return <p className={`text-sm ${textSec} text-center py-12`}>No product sales in range yet. Re-run the Shopify pipeline after this deploy to populate order lines.</p>;
+                }
+                return (
+                  <ResponsiveContainer width="100%" height={Math.max(200, rows.length * 42)}>
+                    <BarChart data={rows} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.08)' : 'rgba(203,213,225,0.3)'} />
+                      <XAxis type="number" tickFormatter={(v) => v >= 1000 ? `$${(v/1000).toFixed(0)}K` : `$${v}`}
+                        stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                      <YAxis type="category" dataKey="name" width={140} stroke={isDark ? 'rgba(148,163,184,0.4)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                      <Tooltip contentStyle={tooltipStyle}
+                        formatter={(v) => [`$${Number(v).toLocaleString()}`, 'Revenue']} />
+                      <Bar dataKey="revenue" fill="#8B5CF6" radius={[0,4,4,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                );
+              })()}
+            </motion.div>
+          </div>
+        )}
+
+        {/* Row 5: Orders by Status pie + Refund stats */}
+        {(shopifyDetail?.hasLiveData) && (shopifyDetail?.ordersByStatus?.length || 0) > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+              className={`lg:col-span-1 rounded-xl p-6 ${cardBg}`}>
+              <h3 className={`text-base font-semibold mb-4 ${textPri}`}>Orders by Status</h3>
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie data={shopifyDetail.ordersByStatus} dataKey="count" nameKey="status"
+                    cx="50%" cy="50%" innerRadius={45} outerRadius={80} paddingAngle={3}>
+                    {shopifyDetail.ordersByStatus.map((_, i) => (
+                      <Cell key={i} fill={_clrs[i % _clrs.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={tooltipStyle} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="mt-2 space-y-1">
+                {shopifyDetail.ordersByStatus.map((s, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: _clrs[i % _clrs.length] }} />
+                      <span className={textSec}>{s.status || 'unknown'}</span>
+                    </div>
+                    <span className={`font-medium ${textPri}`}>{s.count}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}
+              className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
+              <h3 className={`text-base font-semibold mb-4 ${textPri}`}>CP Store Summary</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: 'Total Revenue', value: `$${Number(shopifyDetail?.scorecards?.totalRevenue || 0).toLocaleString()}` },
+                  { label: 'Orders', value: (shopifyDetail?.scorecards?.totalOrders || 0).toLocaleString() },
+                  { label: 'Avg Order', value: `$${Number(shopifyDetail?.scorecards?.avgOrderValue || 0).toFixed(0)}` },
+                  { label: 'Refund Rate', value: `${Number(shopifyDetail?.scorecards?.refundRate || 0)}%` },
+                  { label: 'Unique Customers', value: (shopifyDetail?.scorecards?.uniqueCustomers || 0).toLocaleString() },
+                  { label: 'Tax Collected', value: `$${Number(shopifyDetail?.scorecards?.totalTax || 0).toLocaleString()}` },
+                  { label: 'Shipping', value: `$${Number(shopifyDetail?.scorecards?.totalShipping || 0).toLocaleString()}` },
+                  { label: 'Discounts Given', value: `$${Number(shopifyDetail?.scorecards?.totalDiscount || 0).toLocaleString()}` },
+                ].map((kpi, i) => (
+                  <div key={i} className={`rounded-lg p-3 ${isDark ? 'bg-slate-800/40' : 'bg-slate-50'}`}>
+                    <p className={`text-[10px] uppercase tracking-wide font-semibold mb-1 ${textSec}`}>{kpi.label}</p>
+                    <p className={`text-lg font-bold ${textPri}`}>{kpi.value}</p>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        )}
       </div>
     </motion.div>
   );
