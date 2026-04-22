@@ -197,6 +197,52 @@ async def shopify_prime(payload: dict) -> dict:
     }
 
 
+@router.post("/debug-meta-actions", include_in_schema=False)
+async def debug_meta_actions(payload: dict) -> dict:
+    """Fetch raw Meta insights (action_types + values) for a single account-day.
+
+    Admin-gated. Used to diagnose lead-count discrepancies between our
+    pipeline and Meta Ads Manager. Returns the full `actions` and
+    `action_values` arrays exactly as Meta returns them so we can see
+    which event types fired and decide how to bucket them.
+
+    Payload:
+      admin_secret: SECRET_KEY
+      account_id:   Meta ad account ID (without the `act_` prefix)
+      date:         YYYY-MM-DD
+    """
+    admin_secret = payload.get("admin_secret", "")
+    expected = os.getenv("SECRET_KEY") or getattr(settings, "SECRET_KEY", "") or ""
+    if not expected or not hmac.compare_digest(str(admin_secret), str(expected)):
+        raise HTTPException(403, detail="Unauthorized")
+
+    account_id = str(payload.get("account_id") or "").strip()
+    d = str(payload.get("date") or "").strip()
+    if not account_id or not d:
+        raise HTTPException(400, detail="account_id and date required")
+
+    # Pull the Meta access token from settings (env or pydantic config).
+    token = os.getenv("META_ACCESS_TOKEN") or getattr(settings, "META_ACCESS_TOKEN", "")
+    if not token:
+        raise HTTPException(500, detail="META_ACCESS_TOKEN not configured")
+
+    acct = account_id if account_id.startswith("act_") else f"act_{account_id}"
+    url = f"https://graph.facebook.com/v19.0/{acct}/insights"
+    params = {
+        "access_token": token,
+        "level": "campaign",
+        "time_range": _json.dumps({"since": d, "until": d}),
+        "fields": "campaign_name,spend,impressions,clicks,actions,action_values",
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(url, params=params)
+    try:
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text}
+    return {"account_id": acct, "date": d, "response": data}
+
+
 @router.post("/migrate", include_in_schema=False)
 async def shopify_migrate(payload: dict) -> dict:
     """Force-create Shopify tables + system_secrets on the CURRENT DB.
