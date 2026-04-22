@@ -4606,8 +4606,8 @@ async def get_shopify_store(
 
     if not pipeline_ran:
         try:
-            sh_count = await db.execute(select(func.count()).select_from(ShopifyOrder))
-            pr_count = await db.execute(select(func.count()).select_from(ShopifyProduct))
+            sh_count = await db.execute(select(func.count(ShopifyOrder.id)))
+            pr_count = await db.execute(select(func.count(ShopifyProduct.id)))
             if (sh_count.scalar() or 0) > 0 or (pr_count.scalar() or 0) > 0:
                 pipeline_ran = True
         except Exception as exc:
@@ -4662,102 +4662,167 @@ async def get_shopify_store(
             total_revenue = float(t.total_revenue or 0)
             avg_order = float(t.avg_order_value or 0)
 
-    cust_count_q = await db.execute(select(func.count()).select_from(ShopifyCustomer))
+    cust_count_q = await db.execute(select(func.count(ShopifyCustomer.id)))
     unique_customers = int(cust_count_q.scalar() or 0)
 
-    # Monthly breakdown (YYYY-MM buckets)
-    monthly_q = await db.execute(
-        select(
-            func.strftime("%Y-%m", ShopifyOrder.date_created).label("month"),
-            func.count(ShopifyOrder.id).label("orders"),
-            func.sum(ShopifyOrder.total).label("revenue"),
-        ).where(and_(
+    # Refund detection — Shopify financial_status values: refunded, partially_refunded
+    from sqlalchemy import case, extract
+    refunded_q = await db.execute(
+        select(func.count(ShopifyOrder.id))
+        .where(and_(
             ShopifyOrder.date_created >= start_date,
             ShopifyOrder.date_created <= end_date,
-        )).group_by("month").order_by("month")
+            ShopifyOrder.financial_status.in_(["refunded", "partially_refunded"]),
+        ))
     )
-    monthly = [
-        {"month": r.month, "orders": int(r.orders or 0), "revenue": round(float(r.revenue or 0), 2)}
-        for r in monthly_q.all() if r.month
-    ]
+    refunded = int(refunded_q.scalar() or 0)
+    refund_rate = round((refunded / max(total_orders, 1)) * 100, 1)
 
-    # Top products by total_sales proxy (Shopify doesn't give per-order line items here;
-    # we'd need order line items for true revenue attribution). For now, expose the
-    # catalog sorted by price as a placeholder — upgrade once line_items are modeled.
-    products_q = await db.execute(
-        select(
-            ShopifyProduct.name,
-            ShopifyProduct.sku,
-            ShopifyProduct.price,
-            ShopifyProduct.stock_quantity,
-        ).order_by(ShopifyProduct.price.desc()).limit(10)
-    )
-    products = [
-        {"name": r.name, "sku": r.sku, "price": float(r.price or 0), "stock": int(r.stock_quantity or 0)}
-        for r in products_q.all()
-    ]
+    # Monthly breakdown via extract(year/month) — Postgres-compatible and matches WC shape
+    monthly = []
+    try:
+        year_col = extract("year", ShopifyOrder.date_created)
+        month_col = extract("month", ShopifyOrder.date_created)
+        monthly_q = await db.execute(
+            select(
+                year_col.label("yr"),
+                month_col.label("mn"),
+                func.count(ShopifyOrder.id).label("orders"),
+                func.coalesce(func.sum(ShopifyOrder.total), 0).label("revenue"),
+                func.coalesce(func.avg(ShopifyOrder.total), 0).label("avg_order"),
+                func.sum(case((ShopifyOrder.financial_status.in_(["refunded", "partially_refunded"]), 1), else_=0)).label("refunds"),
+            ).where(and_(
+                ShopifyOrder.date_created >= start_date,
+                ShopifyOrder.date_created <= end_date,
+                ShopifyOrder.date_created.isnot(None),
+            )).group_by(year_col, month_col)
+            .order_by(year_col, month_col)
+        )
+        import calendar
+        monthly = [
+            {
+                "month": f"{calendar.month_abbr[int(row.mn)]} {int(row.yr)}" if row.yr and row.mn else "—",
+                "orders": int(row.orders or 0),
+                "revenue": round(float(row.revenue or 0), 2),
+                "avg_order": round(float(row.avg_order or 0), 2),
+                "refunds": int(row.refunds or 0),
+            }
+            for row in monthly_q.all()
+        ]
+    except Exception as exc:
+        logger.warning("Shopify store monthly query failed: %s", exc)
 
-    # Orders by financial status
-    status_q = await db.execute(
-        select(
-            ShopifyOrder.financial_status.label("status"),
-            func.count(ShopifyOrder.id).label("count"),
-            func.sum(ShopifyOrder.total).label("total"),
-        ).where(and_(
-            ShopifyOrder.date_created >= start_date,
-            ShopifyOrder.date_created <= end_date,
-        )).group_by(ShopifyOrder.financial_status)
-    )
-    orders_by_status = [
-        {"status": r.status or "unknown", "count": int(r.count or 0), "total": round(float(r.total or 0), 2)}
-        for r in status_q.all()
-    ]
+    # Products — Shopify has no total_sales column; approximate revenue via
+    # orders line_items if ever modeled. For now, list catalog ordered by price.
+    products = []
+    try:
+        products_q = await db.execute(
+            select(ShopifyProduct).order_by(ShopifyProduct.price.desc()).limit(20)
+        )
+        products = [
+            {
+                "product_id": p.product_id,
+                "name": p.name,
+                "sku": p.sku or "—",
+                "price": float(p.price or 0),
+                "total_sales": int(p.stock_quantity or 0),
+                "revenue": round(float(p.price or 0) * int(p.stock_quantity or 0), 2),
+                "stock_status": p.status or "—",
+                "categories": p.product_type or "—",
+            }
+            for p in products_q.scalars().all()
+        ]
+    except Exception as exc:
+        logger.warning("Shopify store products query failed: %s", exc)
 
-    # Payment methods
-    pm_q = await db.execute(
-        select(
-            ShopifyOrder.payment_method.label("method"),
-            func.count(ShopifyOrder.id).label("count"),
-            func.sum(ShopifyOrder.total).label("total"),
-        ).where(and_(
-            ShopifyOrder.date_created >= start_date,
-            ShopifyOrder.date_created <= end_date,
-        )).group_by(ShopifyOrder.payment_method)
-    )
-    payment_methods = [
-        {"method": r.method or "unknown", "count": int(r.count or 0), "total": round(float(r.total or 0), 2)}
-        for r in pm_q.all()
-    ]
+    # Orders by financial status — uses "revenue" key to match WC shape
+    orders_by_status = []
+    try:
+        status_q = await db.execute(
+            select(
+                ShopifyOrder.financial_status.label("status"),
+                func.count(ShopifyOrder.id).label("count"),
+                func.coalesce(func.sum(ShopifyOrder.total), 0).label("revenue"),
+            ).where(and_(
+                ShopifyOrder.date_created >= start_date,
+                ShopifyOrder.date_created <= end_date,
+            )).group_by(ShopifyOrder.financial_status)
+            .order_by(func.count(ShopifyOrder.id).desc())
+        )
+        orders_by_status = [
+            {"status": row.status or "unknown", "count": int(row.count), "revenue": round(float(row.revenue), 2)}
+            for row in status_q.all()
+        ]
+    except Exception as exc:
+        logger.warning("Shopify store orders-by-status query failed: %s", exc)
 
-    # Regions (by billing state)
-    regions_q = await db.execute(
-        select(
-            ShopifyOrder.billing_state.label("state"),
-            func.count(ShopifyOrder.id).label("count"),
-            func.sum(ShopifyOrder.total).label("total"),
-        ).where(and_(
-            ShopifyOrder.date_created >= start_date,
-            ShopifyOrder.date_created <= end_date,
-            ShopifyOrder.billing_state.isnot(None),
-        )).group_by(ShopifyOrder.billing_state)
-        .order_by(func.sum(ShopifyOrder.total).desc()).limit(10)
-    )
-    regions = [
-        {"state": r.state, "count": int(r.count or 0), "total": round(float(r.total or 0), 2)}
-        for r in regions_q.all()
-    ]
+    # Payment methods — uses "revenue" key to match WC shape
+    payment_methods = []
+    try:
+        pm_q = await db.execute(
+            select(
+                ShopifyOrder.payment_method,
+                func.count(ShopifyOrder.id).label("count"),
+                func.coalesce(func.sum(ShopifyOrder.total), 0).label("revenue"),
+            ).where(and_(
+                ShopifyOrder.date_created >= start_date,
+                ShopifyOrder.date_created <= end_date,
+                ShopifyOrder.payment_method.isnot(None),
+                ShopifyOrder.payment_method != "",
+            )).group_by(ShopifyOrder.payment_method)
+            .order_by(func.sum(ShopifyOrder.total).desc())
+        )
+        payment_methods = [
+            {"method": row.payment_method or "Unknown", "count": int(row.count), "revenue": round(float(row.revenue), 2)}
+            for row in pm_q.all()
+        ]
+    except Exception as exc:
+        logger.warning("Shopify store payment methods query failed: %s", exc)
+
+    # Regions — matches WC shape (state, orders, revenue, avg_order, pct_of_total)
+    regions = []
+    try:
+        region_q = await db.execute(
+            select(
+                ShopifyOrder.billing_state,
+                func.count(ShopifyOrder.id).label("orders"),
+                func.coalesce(func.sum(ShopifyOrder.total), 0).label("revenue"),
+                func.coalesce(func.avg(ShopifyOrder.total), 0).label("avg_order"),
+            ).where(and_(
+                ShopifyOrder.date_created >= start_date,
+                ShopifyOrder.date_created <= end_date,
+                ShopifyOrder.billing_state.isnot(None),
+                ShopifyOrder.billing_state != "",
+            )).group_by(ShopifyOrder.billing_state)
+            .order_by(func.sum(ShopifyOrder.total).desc())
+            .limit(20)
+        )
+        regions = [
+            {
+                "state": row.billing_state,
+                "orders": int(row.orders),
+                "revenue": round(float(row.revenue), 2),
+                "avg_order": round(float(row.avg_order), 2),
+                "pct_of_total": round((float(row.revenue) / max(total_revenue, 1)) * 100, 1),
+            }
+            for row in region_q.all()
+        ]
+    except Exception as exc:
+        logger.warning("Shopify store regional query failed: %s", exc)
 
     return {
         "period": f"{start_date} to {end_date}",
         "hasLiveData": True,
         "scorecards": {
-            "total_orders": total_orders,
-            "total_revenue": round(total_revenue, 2),
-            "avg_order_value": round(avg_order, 2),
-            "total_discount": round(float(t.total_discount or 0), 2),
-            "total_shipping": round(float(t.total_shipping or 0), 2),
-            "total_tax": round(float(t.total_tax or 0), 2),
-            "unique_customers": unique_customers,
+            "totalRevenue": round(total_revenue, 2),
+            "totalOrders": total_orders,
+            "avgOrderValue": round(avg_order, 2),
+            "refundedOrders": refunded,
+            "refundRate": refund_rate,
+            "uniqueCustomers": unique_customers,
+            "totalDiscount": round(float(t.total_discount or 0), 2),
+            "totalShipping": round(float(t.total_shipping or 0), 2),
+            "totalTax": round(float(t.total_tax or 0), 2),
         },
         "monthly": monthly,
         "products": products,
