@@ -613,14 +613,21 @@ class MetaAdsPipeline(BasePipeline):
                     conversions = 0.0
                     conversion_value = 0.0
 
+                    # ``complete_registration`` and ``submit_application``
+                    # typically fire on the SAME thank-you page as ``Lead``
+                    # (many pixels redundantly trigger both standard events
+                    # for a single form submission — e.g. Beckley's setup).
+                    # Treat them as overlapping lead signals and take max().
+                    # Purchase-types stay additive — they're e-commerce
+                    # conversions genuinely distinct from lead events.
                     LEAD_OVERLAP_TYPES = {
                         "lead",
                         "offsite_conversion.fb_pixel_lead",
                         "onsite_conversion.lead_grouped",
-                    }
-                    NON_LEAD_CONVERSION_TYPES = {
                         "complete_registration",
                         "submit_application",
+                    }
+                    PURCHASE_TYPES = {
                         "purchase",
                         "omni_purchase",
                     }
@@ -628,7 +635,7 @@ class MetaAdsPipeline(BasePipeline):
                     # contact_total, etc.) is NOT a lead and is excluded.
 
                     lead_bucket = {}  # action_type -> count for dedupe
-                    non_lead_total = 0.0
+                    purchase_total = 0.0
 
                     actions = campaign_insight.get("actions", [])
                     if isinstance(actions, list):
@@ -640,11 +647,11 @@ class MetaAdsPipeline(BasePipeline):
                                 )
                                 if action_type in LEAD_OVERLAP_TYPES:
                                     lead_bucket[action_type] = action_count
-                                elif action_type in NON_LEAD_CONVERSION_TYPES:
-                                    non_lead_total += action_count
+                                elif action_type in PURCHASE_TYPES:
+                                    purchase_total += action_count
 
                     leads = max(lead_bucket.values()) if lead_bucket else 0.0
-                    conversions = leads + non_lead_total
+                    conversions = leads + purchase_total
 
                     action_values = campaign_insight.get(
                         "action_values", []
