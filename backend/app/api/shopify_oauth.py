@@ -141,13 +141,38 @@ async def shopify_debug() -> dict:
     # see if Railway injected anything at all under those prefixes.
     shopify_keys = sorted(k for k in os.environ if k.startswith("SHOPIFY"))
     wc_keys = sorted(k for k in os.environ if k.startswith("WC_"))
+    # File-backed creds diagnostic
+    import os as _os
+    file_exists = _os.path.exists(_RUNTIME_CREDS_FILE)
+    file_size = _os.path.getsize(_RUNTIME_CREDS_FILE) if file_exists else 0
+    creds = _load_creds()
+    file_keys = sorted(creds.keys())
+    # Pipeline service state
+    pipeline_state = {"error": "not reachable"}
+    try:
+        from app.api.pipelines import get_pipeline_service
+        svc = get_pipeline_service()
+        pipeline_state = {
+            "init_errors": dict(svc.init_errors),
+            "registered_pipelines": sorted(svc.pipelines.keys()),
+            "has_retry_method": hasattr(svc, "_retry_failed_inits"),
+            "worker_pid": _os.getpid(),
+        }
+    except Exception as exc:
+        pipeline_state = {"error": str(exc)}
     return {
         "env_lengths": {k: len(os.getenv(k, "")) for k in keys},
         "settings_lengths": {k: len(getattr(settings, k, "") or "") for k in keys},
         "env_keys_starting_with_SHOPIFY": shopify_keys,
         "env_keys_starting_with_WC_": wc_keys,
         "total_env_vars": len(os.environ),
-        "all_env_keys": sorted(os.environ.keys()),
+        "runtime_creds_file": {
+            "path": _RUNTIME_CREDS_FILE,
+            "exists": file_exists,
+            "size_bytes": file_size,
+            "keys_present": file_keys,
+        },
+        "pipeline_service": pipeline_state,
     }
 
 # Scopes we request when installing on CP store.
