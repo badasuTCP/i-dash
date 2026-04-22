@@ -64,6 +64,7 @@ export const brandPages = {
     { to: '/dashboard/cp',                     label: 'Overview',           icon: LayoutDashboard },
     { to: '/dashboard/cp/web-analytics',       label: 'Web Analytics',      icon: Globe },
     { to: '/dashboard/cp/marketing',           label: 'Marketing Campaign', icon: Megaphone },
+    { to: '/dashboard/cp/retail',              label: 'CP Store',           icon: ShoppingBag },
     { to: '/dashboard/sales-intelligence',     label: 'Sales Intelligence', icon: TrendingUp },
   ],
   sanitred: [

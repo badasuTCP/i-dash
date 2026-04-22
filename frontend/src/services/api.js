@@ -119,6 +119,10 @@ export const dashboardAPI = {
     apiClient.get('/dashboard/woocommerce/store', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
     }),
+  getShopifyStore: (startDate, endDate) =>
+    apiClient.get('/dashboard/shopify/store', {
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
+    }),
   getContractorRevenue: (startDate, endDate) =>
     apiClient.get('/dashboard/contractor-revenue', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },

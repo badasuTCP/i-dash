@@ -20,7 +20,7 @@ const PIPELINE_META = {
   google_analytics: { icon: '📈', label: 'Google Analytics (GA4)', color: 'cyan',    key: 'ga4' },
   google_sheets:    { icon: '📊', label: 'Google Sheets',         color: 'teal',    key: 'googleSheets' },
   woocommerce:      { icon: '🛒', label: 'WooCommerce (Sani-Tred)', color: 'purple', key: 'woocommerce' },
-  shopify:          { icon: '🛍️', label: 'Shopify (CP)',           color: 'emerald', key: 'shopify' },
+  shopify:          { icon: '🛍️', label: 'Shopify (CP Store)',     color: 'emerald', key: 'shopify' },
   snapshot:         { icon: '📸', label: 'Snapshot Aggregator',   color: 'violet',  key: 'snapshot' },
 };
 
