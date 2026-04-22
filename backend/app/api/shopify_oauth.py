@@ -217,6 +217,7 @@ async def shopify_migrate(payload: dict) -> dict:
 
     wanted = [
         _metrics.ShopifyOrder.__table__,
+        _metrics.ShopifyOrderLine.__table__,
         _metrics.ShopifyProduct.__table__,
         _metrics.ShopifyCustomer.__table__,
         _metrics.SystemSecret.__table__,

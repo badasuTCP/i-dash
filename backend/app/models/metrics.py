@@ -547,6 +547,35 @@ class ShopifyProduct(Base):
     )
 
 
+class ShopifyOrderLine(Base):
+    """Line item from a Shopify order — one row per product on an order.
+
+    Lets the dashboard compute real top-product sales and revenue over any
+    date range by JOINing lines to ShopifyProduct on product_id. Lines are
+    range-deleted alongside their parent orders on every sync so the data
+    stays consistent with ShopifyOrder.
+    """
+
+    __tablename__ = "shopify_order_lines"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    product_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    variant_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    sku: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    line_total: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    order_date: Mapped[Optional[datetime]] = mapped_column(Date, index=True, nullable=True)
+    division: Mapped[str] = mapped_column(String(32), nullable=False, default="cp")
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class ShopifyCustomer(Base):
     """
     Shopify customer snapshot — unique customers with lifetime totals.

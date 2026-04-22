@@ -4712,26 +4712,66 @@ async def get_shopify_store(
     except Exception as exc:
         logger.warning("Shopify store monthly query failed: %s", exc)
 
-    # Products — Shopify has no total_sales column; approximate revenue via
-    # orders line_items if ever modeled. For now, list catalog ordered by price.
+    # Top products — aggregate from shopify_order_lines in the date range so
+    # "Product Performance" reflects real sales, not catalog listing order.
+    # Falls back to the catalog (sorted by price) if no line data is present.
+    from app.models.metrics import ShopifyOrderLine
     products = []
     try:
-        products_q = await db.execute(
-            select(ShopifyProduct).order_by(ShopifyProduct.price.desc()).limit(20)
+        lines_q = await db.execute(
+            select(
+                ShopifyOrderLine.product_id,
+                func.max(ShopifyOrderLine.title).label("title"),
+                func.max(ShopifyOrderLine.sku).label("sku"),
+                func.sum(ShopifyOrderLine.quantity).label("units"),
+                func.sum(ShopifyOrderLine.line_total).label("revenue"),
+                func.avg(ShopifyOrderLine.price).label("avg_price"),
+            ).where(and_(
+                ShopifyOrderLine.order_date >= start_date,
+                ShopifyOrderLine.order_date <= end_date,
+                ShopifyOrderLine.product_id.isnot(None),
+            )).group_by(ShopifyOrderLine.product_id)
+            .order_by(func.sum(ShopifyOrderLine.line_total).desc())
+            .limit(10)
         )
-        products = [
-            {
-                "product_id": p.product_id,
-                "name": p.name,
-                "sku": p.sku or "—",
-                "price": float(p.price or 0),
-                "total_sales": int(p.stock_quantity or 0),
-                "revenue": round(float(p.price or 0) * int(p.stock_quantity or 0), 2),
-                "stock_status": p.status or "—",
-                "categories": p.product_type or "—",
-            }
-            for p in products_q.scalars().all()
-        ]
+        line_rows = lines_q.all()
+        if line_rows:
+            # Enrich with categories from ShopifyProduct where available.
+            prod_map_q = await db.execute(
+                select(ShopifyProduct.product_id, ShopifyProduct.product_type)
+            )
+            prod_types = {r[0]: r[1] for r in prod_map_q.all()}
+            products = [
+                {
+                    "product_id": r.product_id,
+                    "name": r.title or "—",
+                    "sku": r.sku or "—",
+                    "price": round(float(r.avg_price or 0), 2),
+                    "total_sales": int(r.units or 0),
+                    "revenue": round(float(r.revenue or 0), 2),
+                    "stock_status": "—",
+                    "categories": prod_types.get(r.product_id) or "—",
+                }
+                for r in line_rows
+            ]
+        else:
+            # No line items in range — fall back to catalog listing (no sales shown).
+            products_q = await db.execute(
+                select(ShopifyProduct).order_by(ShopifyProduct.price.desc()).limit(10)
+            )
+            products = [
+                {
+                    "product_id": p.product_id,
+                    "name": p.name,
+                    "sku": p.sku or "—",
+                    "price": float(p.price or 0),
+                    "total_sales": 0,
+                    "revenue": 0.0,
+                    "stock_status": p.status or "—",
+                    "categories": p.product_type or "—",
+                }
+                for p in products_q.scalars().all()
+            ]
     except Exception as exc:
         logger.warning("Shopify store products query failed: %s", exc)
 

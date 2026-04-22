@@ -14,7 +14,7 @@ import ExecutiveDashboard from './pages/ExecutiveDashboard';
 import CPDashboard from './pages/cp/CPDashboard';
 import CPWebAnalytics from './pages/cp/CPWebAnalytics';
 import CPMarketing from './pages/cp/CPMarketing';
-import CPRetail from './pages/cp/CPRetail';
+import CPStore from './pages/cp/CPStore';
 
 // Pages - Sani-Tred (Retail)
 import SaniTredDashboard from './pages/sanitred/SaniTredDashboard';
@@ -85,7 +85,7 @@ const AppContent = () => {
       <Route path="/dashboard/cp" element={<ProtectedPageRoute><CPDashboard /></ProtectedPageRoute>} />
       <Route path="/dashboard/cp/web-analytics" element={<ProtectedPageRoute><CPWebAnalytics /></ProtectedPageRoute>} />
       <Route path="/dashboard/cp/marketing" element={<ProtectedPageRoute><CPMarketing /></ProtectedPageRoute>} />
-      <Route path="/dashboard/cp/retail" element={<ProtectedPageRoute><CPRetail /></ProtectedPageRoute>} />
+      <Route path="/dashboard/cp/retail" element={<ProtectedPageRoute><CPStore /></ProtectedPageRoute>} />
 
       {/* Sani-Tred (Retail) */}
       <Route path="/dashboard/sanitred" element={<ProtectedPageRoute><SaniTredDashboard /></ProtectedPageRoute>} />

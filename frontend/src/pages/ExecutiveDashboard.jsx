@@ -458,7 +458,7 @@ const ExecutiveSummary = () => {
             color="emerald" format="currency" />
           <ScoreCard label="CP Store Revenue"
             value={summary?.cp_shopify?.revenue || 0}
-            color="pink" format="currency" />
+            color="violet" format="currency" />
           <ScoreCard label="Total Web Visits"
             value={Object.values(webByBrand).reduce((a, w) => a + (w?.scorecards?.totalVisits || 0), 0)}
             color="cyan" format="number" />

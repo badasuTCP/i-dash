@@ -32,12 +32,14 @@ const TABS = [
   { id: 'regional',  label: 'Regional Insights' },
 ];
 
-const CPRetail = () => {
+const CPStore = () => {
   const { isDark } = useTheme();
   const { dateRange } = useDashboardDateFilter();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
+  const [prodSortBy, setProdSortBy] = useState('revenue');
+  const [prodSortDir, setProdSortDir] = useState('desc');
 
   useEffect(() => {
     let cancelled = false;
@@ -72,7 +74,7 @@ const CPRetail = () => {
   const hasLive = data?.hasLiveData;
 
   const scorecards = [
-    { label: 'Total Retail Revenue', value: s.totalRevenue || 0, color: 'blue', format: 'currency' },
+    { label: 'Total Store Revenue', value: s.totalRevenue || 0, color: 'blue', format: 'currency' },
     { label: 'Online Orders',        value: s.totalOrders  || 0, color: 'violet', format: 'number' },
     { label: 'Avg Order Value',      value: s.avgOrderValue || 0, color: 'emerald', format: 'currency' },
     { label: 'Refund Rate',          value: s.refundRate || 0, color: 'amber', format: 'percent' },
@@ -186,54 +188,83 @@ const CPRetail = () => {
           </>
         )}
 
-        {tab === 'products' && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={`rounded-xl p-6 mb-8 ${cardBg}`}>
-              <div className="flex items-center gap-2 mb-4">
-                <Package className="text-violet-400" size={18} />
-                <h3 className={`text-lg font-semibold ${textPrimary}`}>Product Performance</h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead><tr className={`border-b ${tableBorder}`}>
-                    <th className={`text-left py-3 px-4 ${textSec}`}>#</th>
-                    <th className={`text-left py-3 px-4 ${textSec}`}>Product</th>
-                    <th className={`text-right py-3 px-4 ${textSec}`}>Units Sold</th>
-                    <th className={`text-right py-3 px-4 ${textSec}`}>Revenue</th>
-                    <th className={`text-right py-3 px-4 ${textSec}`}>Price</th>
-                    <th className={`text-left py-3 px-4 ${textSec}`}>Categories</th>
-                  </tr></thead>
-                  <tbody>
-                    {(data?.products || []).map((p, i) => (
-                      <tr key={p.product_id} className={`border-b ${tableBorder} ${tableHover}`}>
-                        <td className={`py-3 px-4 ${textSec}`}>{i + 1}</td>
-                        <td className={`py-3 px-4 font-medium ${textPrimary}`}>{p.name}</td>
-                        <td className={`text-right py-3 px-4 ${textSec}`}>{p.total_sales.toLocaleString()}</td>
-                        <td className={`text-right py-3 px-4 ${textSec}`}>{fmtCurrency(p.revenue)}</td>
-                        <td className={`text-right py-3 px-4 ${textSec}`}>{fmtCurrency(p.price)}</td>
-                        <td className={`py-3 px-4 text-xs ${textSec}`}>{p.categories}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </motion.div>
-            {(data?.products?.length || 0) > 0 && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={`rounded-xl p-6 ${cardBg}`}>
-                <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Revenue by Product</h3>
-                <ResponsiveContainer width="100%" height={Math.max(300, (data.products.length || 1) * 35)}>
-                  <BarChart data={data.products.slice(0, 10)} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
-                    <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                    <YAxis type="category" dataKey="name" width={180} tick={{ fontSize: 11 }} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
-                    <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtCurrency(v)} />
-                    <Bar dataKey="revenue" fill="#8B5CF6" radius={[0,4,4,0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+        {tab === 'products' && (() => {
+          const rows = [...(data?.products || [])];
+          rows.sort((a, b) => {
+            const av = a[prodSortBy];
+            const bv = b[prodSortBy];
+            const na = typeof av === 'number' ? av : (av == null ? '' : String(av).toLowerCase());
+            const nb = typeof bv === 'number' ? bv : (bv == null ? '' : String(bv).toLowerCase());
+            if (na < nb) return prodSortDir === 'asc' ? -1 : 1;
+            if (na > nb) return prodSortDir === 'asc' ? 1 : -1;
+            return 0;
+          });
+          const topRows = rows.filter(r => (r.total_sales || 0) > 0);
+          const chartRows = (topRows.length > 0 ? topRows : rows).slice(0, 10);
+          const sortIcon = (col) => prodSortBy === col ? (prodSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+          const clickHeader = (col, defaultDir = 'desc') => () => {
+            if (prodSortBy === col) {
+              setProdSortDir(prodSortDir === 'asc' ? 'desc' : 'asc');
+            } else {
+              setProdSortBy(col);
+              setProdSortDir(defaultDir);
+            }
+          };
+          const hasSales = rows.some(r => (r.total_sales || 0) > 0);
+          return (
+            <>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={`rounded-xl p-6 mb-8 ${cardBg}`}>
+                <div className="flex items-center gap-2 mb-4">
+                  <Package className="text-violet-400" size={18} />
+                  <h3 className={`text-lg font-semibold ${textPrimary}`}>Top 10 Products by Revenue</h3>
+                  {!hasSales && (
+                    <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/25">
+                      No sales in range — showing catalog
+                    </span>
+                  )}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className={`border-b ${tableBorder}`}>
+                      <th className={`text-left py-3 px-4 ${textSec}`}>#</th>
+                      <th className={`text-left py-3 px-4 cursor-pointer select-none ${prodSortBy === 'name' ? 'text-indigo-400' : textSec}`} onClick={clickHeader('name', 'asc')}>Product{sortIcon('name')}</th>
+                      <th className={`text-right py-3 px-4 cursor-pointer select-none ${prodSortBy === 'total_sales' ? 'text-indigo-400' : textSec}`} onClick={clickHeader('total_sales')}>Units Sold{sortIcon('total_sales')}</th>
+                      <th className={`text-right py-3 px-4 cursor-pointer select-none ${prodSortBy === 'revenue' ? 'text-indigo-400' : textSec}`} onClick={clickHeader('revenue')}>Revenue{sortIcon('revenue')}</th>
+                      <th className={`text-right py-3 px-4 cursor-pointer select-none ${prodSortBy === 'price' ? 'text-indigo-400' : textSec}`} onClick={clickHeader('price')}>Price{sortIcon('price')}</th>
+                      <th className={`text-left py-3 px-4 cursor-pointer select-none ${prodSortBy === 'categories' ? 'text-indigo-400' : textSec}`} onClick={clickHeader('categories', 'asc')}>Categories{sortIcon('categories')}</th>
+                    </tr></thead>
+                    <tbody>
+                      {rows.map((p, i) => (
+                        <tr key={p.product_id} className={`border-b ${tableBorder} ${tableHover}`}>
+                          <td className={`py-3 px-4 ${textSec}`}>{i + 1}</td>
+                          <td className={`py-3 px-4 font-medium ${textPrimary}`}>{p.name}</td>
+                          <td className={`text-right py-3 px-4 ${textSec}`}>{(p.total_sales || 0).toLocaleString()}</td>
+                          <td className={`text-right py-3 px-4 ${textSec}`}>{fmtCurrency(p.revenue)}</td>
+                          <td className={`text-right py-3 px-4 ${textSec}`}>{fmtCurrency(p.price)}</td>
+                          <td className={`py-3 px-4 text-xs ${textSec}`}>{p.categories}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </motion.div>
-            )}
-          </>
-        )}
+              {hasSales && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={`rounded-xl p-6 ${cardBg}`}>
+                  <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Revenue by Product</h3>
+                  <ResponsiveContainer width="100%" height={Math.max(300, chartRows.length * 35)}>
+                    <BarChart data={chartRows} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
+                      <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
+                      <YAxis type="category" dataKey="name" width={180} tick={{ fontSize: 11 }} stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} />
+                      <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtCurrency(v)} />
+                      <Bar dataKey="revenue" fill="#F97066" radius={[0,4,4,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </motion.div>
+              )}
+            </>
+          );
+        })()}
 
         {tab === 'orders' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
@@ -326,4 +357,4 @@ const CPRetail = () => {
   );
 };
 
-export default CPRetail;
+export default CPStore;

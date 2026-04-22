@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.core.config import settings
-from app.models.metrics import ShopifyCustomer, ShopifyOrder, ShopifyProduct
+from app.models.metrics import ShopifyCustomer, ShopifyOrder, ShopifyOrderLine, ShopifyProduct
 from app.pipelines.base import BasePipeline
 
 logger = logging.getLogger(__name__)
@@ -226,6 +226,10 @@ class ShopifyPipeline(BasePipeline):
         for o in raw_data.get("orders", []):
             try:
                 records.append(self._order_to_model(o))
+                # Emit one ShopifyOrderLine per line_item so the dashboard can
+                # report real top-product sales and revenue per date window.
+                for line in self._order_lines(o):
+                    records.append(line)
             except Exception as e:
                 self.logger.warning("Error processing Shopify order %s: %s", o.get("id"), e)
 
@@ -267,6 +271,33 @@ class ShopifyPipeline(BasePipeline):
             return datetime.fromisoformat(s.replace("Z", "+00:00"))
         except Exception:
             return None
+
+    def _order_lines(self, o: Dict[str, Any]) -> List[ShopifyOrderLine]:
+        """Build ShopifyOrderLine rows for every line_item on an order."""
+        order_id = str(o.get("id", ""))
+        order_date = self._parse_iso_date(o.get("created_at"))
+        out: List[ShopifyOrderLine] = []
+        for li in (o.get("line_items", []) or []):
+            try:
+                qty = int(li.get("quantity", 0) or 0)
+                price = float(li.get("price", 0) or 0)
+                title = (li.get("title") or "")[:512] or None
+                sku_v = (li.get("sku") or None)
+                out.append(ShopifyOrderLine(
+                    order_id=order_id,
+                    product_id=(str(li["product_id"]) if li.get("product_id") else None),
+                    variant_id=(str(li["variant_id"]) if li.get("variant_id") else None),
+                    title=title,
+                    sku=(sku_v[:128] if sku_v else None),
+                    quantity=qty,
+                    price=price,
+                    line_total=round(price * qty, 2),
+                    order_date=order_date,
+                    division="cp",
+                ))
+            except Exception as exc:
+                self.logger.warning("Skipping malformed line_item on order %s: %s", order_id, exc)
+        return out
 
     def _order_to_model(self, o: Dict[str, Any]) -> ShopifyOrder:
         line_items = o.get("line_items", []) or []
@@ -375,6 +406,7 @@ class ShopifyPipeline(BasePipeline):
             return 0
 
         orders = [r for r in records if isinstance(r, ShopifyOrder)]
+        order_lines = [r for r in records if isinstance(r, ShopifyOrderLine)]
         products = [r for r in records if isinstance(r, ShopifyProduct)]
         customers = [r for r in records if isinstance(r, ShopifyCustomer)]
 
@@ -386,7 +418,13 @@ class ShopifyPipeline(BasePipeline):
                         await session.execute(
                             delete(ShopifyOrder).where(ShopifyOrder.date_created == d)
                         )
+                        # Keep order_lines in sync with their parent orders.
+                        await session.execute(
+                            delete(ShopifyOrderLine).where(ShopifyOrderLine.order_date == d)
+                        )
                     session.add_all(orders)
+                    if order_lines:
+                        session.add_all(order_lines)
 
                 if products:
                     await session.execute(delete(ShopifyProduct))
@@ -398,10 +436,10 @@ class ShopifyPipeline(BasePipeline):
 
                 await session.commit()
 
-                total = len(orders) + len(products) + len(customers)
+                total = len(orders) + len(order_lines) + len(products) + len(customers)
                 self.logger.info(
-                    "Loaded %d Shopify records (%d orders + %d products + %d customers)",
-                    total, len(orders), len(products), len(customers),
+                    "Loaded %d Shopify records (%d orders, %d lines, %d products, %d customers)",
+                    total, len(orders), len(order_lines), len(products), len(customers),
                 )
                 return total
             except Exception as e:
