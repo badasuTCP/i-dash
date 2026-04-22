@@ -31,6 +31,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { useGlobalDate } from '../context/GlobalDateContext';
 import { dashboardAPI } from '../services/api';
+import useRepExclusions from '../hooks/useRepExclusions';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COLOR SYSTEM — neon accents for dark mode
@@ -195,6 +196,8 @@ const SalesIntelligence = () => {
   const [repSearch, setRepSearch] = useState('');
   const [repSortKey, setRepSortKey] = useState('winRate');
   const [repLimit, setRepLimit] = useState('all');
+  const [excludeMenuOpen, setExcludeMenuOpen] = useState(false);
+  const { excluded, toggle: toggleExcluded, clear: clearExcluded, filterReps } = useRepExclusions();
   const [apiData, setApiData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -231,7 +234,11 @@ const SalesIntelligence = () => {
   }, [fetchSalesData]);
 
   // ── Derived data from API response ────────────────────────────────────────
-  const allReps = useMemo(() => apiData?.reps || [], [apiData]);
+  // Raw list straight from API — used by the exclusion manager so execs can
+  // see EVERY owner, including the ones currently hidden, and toggle them.
+  const rawReps = useMemo(() => apiData?.reps || [], [apiData]);
+  // allReps drives every chart/aggregate on the page — exclusions apply here.
+  const allReps = useMemo(() => filterReps(rawReps), [rawReps, filterReps]);
 
   const reps = useMemo(() => {
     if (selectedRep) return allReps.filter(r => r.id === selectedRep);
@@ -639,8 +646,76 @@ const SalesIntelligence = () => {
                   Reset
                 </button>
               )}
+              {/* ── Manage excluded reps ── */}
+              <div className="relative">
+                <button
+                  onClick={() => setExcludeMenuOpen((o) => !o)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1.5 ${
+                    excluded.length > 0
+                      ? 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                      : isDark ? 'bg-slate-900/60 border-slate-700/40 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                  title="Hide reps from leaderboards (e.g. non-sales owners)"
+                >
+                  <Eye size={12} />
+                  Manage reps{excluded.length > 0 ? ` (${excluded.length} hidden)` : ''}
+                </button>
+                {excludeMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setExcludeMenuOpen(false)} />
+                    <div className={`absolute right-0 top-9 z-20 w-72 rounded-xl border shadow-2xl p-3 ${
+                      isDark ? 'bg-slate-900 border-slate-700/60' : 'bg-white border-slate-200'
+                    }`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`text-xs font-semibold ${textPri}`}>Hide reps from all charts</span>
+                        {excluded.length > 0 && (
+                          <button
+                            onClick={clearExcluded}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-300"
+                          >
+                            Unhide all
+                          </button>
+                        )}
+                      </div>
+                      <p className={`text-[10px] mb-2 ${textSec}`}>
+                        Use this to exclude non-sales HubSpot owners (marketing, admin) from the leaderboard and aggregates. Saved to this browser.
+                      </p>
+                      <div className="max-h-64 overflow-y-auto space-y-1">
+                        {rawReps.length === 0 && (
+                          <p className={`text-xs ${textSec} py-2`}>No reps loaded yet.</p>
+                        )}
+                        {rawReps.map((r) => {
+                          const isHidden = excluded.includes(String(r.id));
+                          return (
+                            <label
+                              key={r.id}
+                              className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-md cursor-pointer ${
+                                isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <input
+                                  type="checkbox"
+                                  checked={!isHidden}
+                                  onChange={() => toggleExcluded(r.id)}
+                                  className="accent-indigo-500 flex-shrink-0"
+                                />
+                                <span className={`text-xs truncate ${isHidden ? textSec : textPri}`}>
+                                  {r.name || `Rep ${r.id}`}
+                                </span>
+                              </div>
+                              {isHidden && <span className="text-[9px] text-rose-400 flex-shrink-0">hidden</span>}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
               <span className={`text-[10px] ${textSec} ml-auto`}>
                 {leaderboard.length} {leaderboard.length === 1 ? 'rep' : 'reps'} shown
+                {excluded.length > 0 && ` · ${excluded.length} hidden`}
               </span>
             </div>
 

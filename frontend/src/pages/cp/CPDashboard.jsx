@@ -10,10 +10,12 @@ import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
+import useRepExclusions from '../../hooks/useRepExclusions';
 
 const CPDashboard = () => {
   const { isDark } = useTheme();
   const { dateFrom, dateTo } = useGlobalDate();
+  const { filterReps } = useRepExclusions();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -72,14 +74,9 @@ const CPDashboard = () => {
           const deals = data?.crm?.deals || 0;
           const storeRev = data?.shopify?.revenue || 0;
           const storeOrders = data?.shopify?.orders || 0;
-          const revCard = sc.find(s => /total revenue/i.test(s.label));
-          const breakdown = revCard?.breakdown || [];
-          if (breakdown.length) {
-            const parts = breakdown
-              .filter(b => (b.value || 0) > 0)
-              .map(b => `${b.label} $${Number(b.value).toLocaleString()}`)
-              .join(' + ');
-            if (parts) out.push(`Total Revenue = ${parts}. No other sources counted — QB contractor payouts and Sani-Tred retail intentionally excluded.`);
+          const storeCard = sc.find(s => /cp store revenue/i.test(s.label));
+          if (storeCard && (storeCard.value || 0) > 0) {
+            out.push(`CP Store Revenue = Shopify order totals only. HubSpot deals, QB contractor revenue, and Sani-Tred retail are intentionally excluded from this tile.`);
           }
           if (visits) out.push(`CP traffic: ${Number(visits).toLocaleString()} visits year-to-date.`);
           if (spend) out.push(`CP marketing spend: $${Number(spend).toLocaleString()} · ${Number(leads).toLocaleString()} ad leads.`);
@@ -129,7 +126,7 @@ const CPDashboard = () => {
               <h3 className={`text-base font-semibold ${textPri}`}>Top Sales Reps</h3>
             </div>
             <div className="space-y-3">
-              {(data?.top_reps || []).map((rep, i) => (
+              {filterReps(data?.top_reps || []).map((rep, i) => (
                 <div key={i} className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${

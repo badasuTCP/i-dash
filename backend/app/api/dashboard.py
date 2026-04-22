@@ -612,6 +612,7 @@ async def get_hubspot_metrics(
         func.sum(HubSpotMetric.pipeline_value).label("pipeline"),
         func.sum(HubSpotMetric.meetings_booked).label("meetings"),
         func.sum(HubSpotMetric.emails_sent).label("emails"),
+        func.sum(HubSpotMetric.tasks_completed).label("tasks"),
     ).where(
         and_(
             HubSpotMetric.date >= start_date,
@@ -624,16 +625,40 @@ async def get_hubspot_metrics(
 
     logger.info(f"User {current_user.id} retrieved HubSpot metrics")
 
+    contacts_created = int(data[0] or 0)
+    deals_created = int(data[1] or 0)
+    deals_won = int(data[2] or 0)
+    deals_lost = int(data[3] or 0)
+    revenue_won = float(data[4] or 0)
+    pipeline_value = float(data[5] or 0)
+    meetings_booked = int(data[6] or 0)
+    emails_sent = int(data[7] or 0)
+    tasks_completed = int(data[8] or 0)
+
     return {
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
-        "contacts_created": int(data[0] or 0),
-        "deals_created": int(data[1] or 0),
-        "deals_won": int(data[2] or 0),
-        "deals_lost": int(data[3] or 0),
-        "revenue_won": float(data[4] or 0),
-        "pipeline_value": float(data[5] or 0),
-        "meetings_booked": int(data[6] or 0),
-        "emails_sent": int(data[7] or 0),
+        # Flat keys — legacy consumers
+        "contacts_created": contacts_created,
+        "deals_created": deals_created,
+        "deals_won": deals_won,
+        "deals_lost": deals_lost,
+        "revenue_won": revenue_won,
+        "pipeline_value": pipeline_value,
+        "meetings_booked": meetings_booked,
+        "emails_sent": emails_sent,
+        "tasks_completed": tasks_completed,
+        # Nested scorecards — what the Executive Summary reads
+        "scorecards": {
+            "contacts_created": contacts_created,
+            "deals_created": deals_created,
+            "deals_won": deals_won,
+            "deals_lost": deals_lost,
+            "revenue_won": revenue_won,
+            "pipeline_value": pipeline_value,
+            "meetings_booked": meetings_booked,
+            "emails_sent": emails_sent,
+            "tasks_completed": tasks_completed,
+        },
     }
 
 
@@ -1662,26 +1687,18 @@ async def get_brand_summary(
 
     # ── Brand-specific KPIs ───────────────────────────────────────────
     if brand == "cp":
-        # CP-attributable revenue ONLY. Two sources we can confidently say
-        # belong to "The Concrete Protector": HubSpot won deals (B2B/training
-        # contracts) and Shopify order totals (CP Store e-commerce). We
-        # deliberately exclude the blanket sheets_revenue sum because it
-        # includes qb_revenue::* (contractor payouts, not CP) and retail::*
-        # (Sani-Tred, a different brand) — those would inflate the figure
-        # and mislabel cross-brand revenue as CP's.
-        cp_total_revenue = crm["revenue"] + shopify_stats["revenue"]
-        revenue_sources = [
-            {"label": "HubSpot closed-won deals", "value": round(crm["revenue"], 2)},
-            {"label": "CP Store (Shopify) orders", "value": round(shopify_stats["revenue"], 2)},
-        ]
+        # Headline revenue for the CP brand page is CP Store (Shopify) ONLY.
+        # HubSpot closed-won deals aren't necessarily store sales — they
+        # include training contracts, B2B, etc. — so counting them as "CP
+        # Store Revenue" would be wrong. When we need a composite figure
+        # we'll add a separately labeled tile rather than silently summing.
         scorecards = [
             {
-                "label": "Total Revenue",
-                "value": round(cp_total_revenue, 2),
+                "label": "CP Store Revenue",
+                "value": round(shopify_stats["revenue"], 2),
                 "format": "currency",
                 "color": "blue",
-                "source": "HubSpot won + CP Store (Shopify)",
-                "breakdown": revenue_sources,
+                "source": "Shopify — CP Store orders",
             },
             {"label": "Total Web Visits", "value": web["visits"], "format": "number", "color": "emerald"},
             {"label": "Total Ad Spend", "value": ads["spend"], "format": "currency", "color": "violet"},
@@ -1772,7 +1789,7 @@ async def get_brand_summary(
             oid = row[0]
             info = owners_map.get(oid, {})
             name = f"{info.get('first', '')} {info.get('last', '')}".strip() or f"Rep {oid}"
-            top_reps.append({"name": name, "deals": row[1]})
+            top_reps.append({"id": str(oid) if oid is not None else None, "name": name, "deals": row[1]})
     except Exception:
         pass
 
