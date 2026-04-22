@@ -1662,8 +1662,27 @@ async def get_brand_summary(
 
     # ── Brand-specific KPIs ───────────────────────────────────────────
     if brand == "cp":
+        # CP-attributable revenue ONLY. Two sources we can confidently say
+        # belong to "The Concrete Protector": HubSpot won deals (B2B/training
+        # contracts) and Shopify order totals (CP Store e-commerce). We
+        # deliberately exclude the blanket sheets_revenue sum because it
+        # includes qb_revenue::* (contractor payouts, not CP) and retail::*
+        # (Sani-Tred, a different brand) — those would inflate the figure
+        # and mislabel cross-brand revenue as CP's.
+        cp_total_revenue = crm["revenue"] + shopify_stats["revenue"]
+        revenue_sources = [
+            {"label": "HubSpot closed-won deals", "value": round(crm["revenue"], 2)},
+            {"label": "CP Store (Shopify) orders", "value": round(shopify_stats["revenue"], 2)},
+        ]
         scorecards = [
-            {"label": "Total Revenue", "value": crm["revenue"] + sheets_revenue + shopify_stats["revenue"], "format": "currency", "color": "blue"},
+            {
+                "label": "Total Revenue",
+                "value": round(cp_total_revenue, 2),
+                "format": "currency",
+                "color": "blue",
+                "source": "HubSpot won + CP Store (Shopify)",
+                "breakdown": revenue_sources,
+            },
             {"label": "Total Web Visits", "value": web["visits"], "format": "number", "color": "emerald"},
             {"label": "Total Ad Spend", "value": ads["spend"], "format": "currency", "color": "violet"},
             {"label": "Training Signups", "value": crm["contacts"], "format": "number", "color": "amber"},

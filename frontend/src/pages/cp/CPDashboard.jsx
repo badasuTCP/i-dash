@@ -72,6 +72,15 @@ const CPDashboard = () => {
           const deals = data?.crm?.deals || 0;
           const storeRev = data?.shopify?.revenue || 0;
           const storeOrders = data?.shopify?.orders || 0;
+          const revCard = sc.find(s => /total revenue/i.test(s.label));
+          const breakdown = revCard?.breakdown || [];
+          if (breakdown.length) {
+            const parts = breakdown
+              .filter(b => (b.value || 0) > 0)
+              .map(b => `${b.label} $${Number(b.value).toLocaleString()}`)
+              .join(' + ');
+            if (parts) out.push(`Total Revenue = ${parts}. No other sources counted — QB contractor payouts and Sani-Tred retail intentionally excluded.`);
+          }
           if (visits) out.push(`CP traffic: ${Number(visits).toLocaleString()} visits year-to-date.`);
           if (spend) out.push(`CP marketing spend: $${Number(spend).toLocaleString()} · ${Number(leads).toLocaleString()} ad leads.`);
           if (storeOrders) out.push(`CP Store: $${Number(storeRev).toLocaleString()} across ${storeOrders.toLocaleString()} orders.`);
