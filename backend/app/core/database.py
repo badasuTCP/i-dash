@@ -98,6 +98,20 @@ async def init_db() -> None:
     pass on every startup so the live schema stays in lockstep with the
     code. Each statement is safe to run repeatedly.
     """
+    # Force-import every model module so each ``Mapped[...]`` class registers
+    # itself on Base.metadata BEFORE create_all runs. Without this, models
+    # that aren't imported via the active request paths (e.g. ShopifyOrder
+    # on a cold boot before any /shopify endpoint is called) silently miss
+    # table creation — which is exactly how we shipped "shopify_orders does
+    # not exist" on Railway.
+    import app.models.brand_asset  # noqa: F401
+    import app.models.contractor  # noqa: F401
+    import app.models.discovery_audit  # noqa: F401
+    import app.models.ga4_property  # noqa: F401
+    import app.models.metrics  # noqa: F401
+    import app.models.pipeline_log  # noqa: F401
+    import app.models.user  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_meta_ad_metrics_schema(conn)
