@@ -1635,10 +1635,35 @@ async def get_brand_summary(
     except Exception:
         pass
 
+    # ── Shopify retail (CP Store — CP brand only) ─────────────────────
+    shopify_stats = {"revenue": 0.0, "orders": 0, "avg_order": 0.0}
+    if brand == "cp":
+        try:
+            from app.models.metrics import ShopifyOrder as _SO
+            sh_q = await db.execute(
+                select(
+                    func.coalesce(func.sum(_SO.total), 0),
+                    func.count(_SO.id),
+                    func.coalesce(func.avg(_SO.total), 0),
+                ).where(and_(
+                    _SO.date_created >= start_date,
+                    _SO.date_created <= end_date,
+                ))
+            )
+            row = sh_q.one_or_none()
+            if row:
+                shopify_stats = {
+                    "revenue": float(row[0] or 0),
+                    "orders": int(row[1] or 0),
+                    "avg_order": float(row[2] or 0),
+                }
+        except Exception as exc:
+            logger.warning("Brand summary Shopify query failed: %s", exc)
+
     # ── Brand-specific KPIs ───────────────────────────────────────────
     if brand == "cp":
         scorecards = [
-            {"label": "Total Revenue", "value": crm["revenue"] + sheets_revenue, "format": "currency", "color": "blue"},
+            {"label": "Total Revenue", "value": crm["revenue"] + sheets_revenue + shopify_stats["revenue"], "format": "currency", "color": "blue"},
             {"label": "Total Web Visits", "value": web["visits"], "format": "number", "color": "emerald"},
             {"label": "Total Ad Spend", "value": ads["spend"], "format": "currency", "color": "violet"},
             {"label": "Training Signups", "value": crm["contacts"], "format": "number", "color": "amber"},
@@ -1735,12 +1760,13 @@ async def get_brand_summary(
     return {
         "brand": brand,
         "period": f"{start_date} to {end_date}",
-        "hasLiveData": web["visits"] > 0 or ads["spend"] > 0 or crm["deals"] > 0,
+        "hasLiveData": web["visits"] > 0 or ads["spend"] > 0 or crm["deals"] > 0 or shopify_stats["orders"] > 0,
         "scorecards": scorecards,
         "web": web,
         "ads": ads,
         "crm": crm,
         "sheets_revenue": sheets_revenue,
+        "shopify": shopify_stats,
         "top_websites": top_websites,
         "traffic_trend": traffic_trend,
         "top_reps": top_reps,
@@ -4188,6 +4214,27 @@ async def get_executive_summary(
     # ── 8b. Rebuild Combined Total Revenue from live sources ──────────
     # TCP MAIN sheet Total Revenue cells may be empty. Fall back to:
     #   Combined = QB Contractor Revenue + Sani-Tred retail + CP Shopify retail
+    # CP Shopify retail — always compute so it can surface on the dashboard
+    shopify_total = 0.0
+    shopify_orders = 0
+    try:
+        from app.models.metrics import ShopifyOrder as _SO
+        sh_q = await db.execute(
+            select(
+                func.coalesce(func.sum(_SO.total), 0),
+                func.count(_SO.id),
+            ).where(and_(
+                _SO.date_created >= start_date,
+                _SO.date_created <= end_date,
+            ))
+        )
+        sh_row = sh_q.one_or_none()
+        if sh_row:
+            shopify_total = float(sh_row[0] or 0)
+            shopify_orders = int(sh_row[1] or 0)
+    except Exception as exc:
+        logger.warning("Executive summary: Shopify retail query failed: %s", exc)
+
     if qb_summary and qb_summary.get("grand_total"):
         qb_total = float(qb_summary.get("grand_total") or 0)
         # Sani-Tred retail (WooCommerce, via google_sheets retail:: rows)
@@ -4203,19 +4250,6 @@ async def get_executive_summary(
                 ))
             )
             retail_total = float(retail_q.scalar() or 0)
-        except Exception:
-            pass
-        # CP Shopify retail — sum of ShopifyOrder.total over the window.
-        shopify_total = 0.0
-        try:
-            from app.models.metrics import ShopifyOrder as _SO
-            sh_q = await db.execute(
-                select(func.sum(_SO.total)).where(and_(
-                    _SO.date_created >= start_date,
-                    _SO.date_created <= end_date,
-                ))
-            )
-            shopify_total = float(sh_q.scalar() or 0)
         except Exception:
             pass
         live_combined = qb_total + retail_total + shopify_total
@@ -4242,12 +4276,14 @@ async def get_executive_summary(
         "revenue_by_quarter": revenue_by_quarter,
         "yoy_sales": yoy_sales,
         "qb_revenue": qb_summary,
+        "cp_shopify": {"revenue": shopify_total, "orders": shopify_orders},
         "pipeline_status": pipeline_status,
         "sources": {
             "quarterly_kpis": "google_sheets :: TCP MAIN",
             "marketing_spend": "meta_ad_metrics + google_ad_metrics",
             "marketing_leads": "meta_ad_metrics + google_ad_metrics (conversions)",
             "qb_revenue": "google_sheets :: QB_Contractor_Revenue",
+            "cp_shopify": "shopify_orders (The Concrete Protector Store)",
         },
     }
 

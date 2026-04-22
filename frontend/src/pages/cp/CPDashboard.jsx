@@ -4,7 +4,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
 } from 'recharts';
-import { CheckCircle2, AlertCircle, TrendingUp, Users, Globe, DollarSign } from 'lucide-react';
+import { CheckCircle2, AlertCircle, TrendingUp, Users, Globe, DollarSign, ShoppingBag } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -67,11 +67,14 @@ const CPDashboard = () => {
           const out = [];
           const sc = data?.scorecards || [];
           const visits = sc.find(s => /visit/i.test(s.label))?.value || 0;
-          const leads = sc.find(s => /lead/i.test(s.label))?.value || 0;
+          const leads = data?.ads?.leads || 0;
           const spend = data?.ads?.spend || 0;
           const deals = data?.crm?.deals || 0;
+          const storeRev = data?.shopify?.revenue || 0;
+          const storeOrders = data?.shopify?.orders || 0;
           if (visits) out.push(`CP traffic: ${Number(visits).toLocaleString()} visits year-to-date.`);
-          if (spend) out.push(`CP marketing spend: $${Number(spend).toLocaleString()} · ${Number(leads).toLocaleString()} leads.`);
+          if (spend) out.push(`CP marketing spend: $${Number(spend).toLocaleString()} · ${Number(leads).toLocaleString()} ad leads.`);
+          if (storeOrders) out.push(`CP Store: $${Number(storeRev).toLocaleString()} across ${storeOrders.toLocaleString()} orders.`);
           if (deals) out.push(`${deals} active deals in HubSpot CRM.`);
           return out;
         })()} />
@@ -185,6 +188,8 @@ const CPDashboard = () => {
                 { label: 'Bounce Rate', value: `${data?.web?.bounce_rate || 0}%`, sub: 'avg across all sites' },
                 { label: 'Ad Clicks', value: (data?.ads?.clicks || 0).toLocaleString(), sub: `${(data?.ads?.impressions || 0).toLocaleString()} impressions` },
                 { label: 'Ad Leads', value: (data?.ads?.leads || 0).toLocaleString(), sub: `$${((data?.ads?.spend || 0) / Math.max(data?.ads?.leads || 1, 1)).toFixed(0)} CPL` },
+                { label: 'CP Store Revenue', value: `$${Number(data?.shopify?.revenue || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, sub: `${(data?.shopify?.orders || 0).toLocaleString()} online orders` },
+                { label: 'Avg Order Value', value: `$${Number(data?.shopify?.avg_order || 0).toFixed(0)}`, sub: 'Shopify (CP Store)' },
                 { label: 'HubSpot Deals', value: (data?.crm?.deals || 0).toLocaleString(), sub: `${data?.crm?.deals_won || 0} won` },
                 { label: 'Meetings', value: (data?.crm?.meetings || 0).toLocaleString(), sub: `${(data?.crm?.contacts || 0).toLocaleString()} contacts` },
               ].map((m, i) => (

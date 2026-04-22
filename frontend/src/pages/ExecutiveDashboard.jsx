@@ -456,12 +456,12 @@ const ExecutiveSummary = () => {
           <ScoreCard label="Sani-Tred Store Revenue"
             value={wcStore?.scorecards?.totalRevenue || 0}
             color="emerald" format="currency" />
+          <ScoreCard label="CP Store Revenue"
+            value={summary?.cp_shopify?.revenue || 0}
+            color="pink" format="currency" />
           <ScoreCard label="Total Web Visits"
             value={Object.values(webByBrand).reduce((a, w) => a + (w?.scorecards?.totalVisits || 0), 0)}
             color="cyan" format="number" />
-          <ScoreCard label="WooCommerce Orders"
-            value={wcStore?.scorecards?.totalOrders || 0}
-            color="violet" format="number" />
           <ScoreCard label="HubSpot Deals Won"
             value={hubspot?.scorecards?.deals_won || hubspot?.scorecards?.dealsWon || 0}
             color="amber" format="number" />
