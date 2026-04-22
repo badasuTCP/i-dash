@@ -152,11 +152,23 @@ async def shopify_debug() -> dict:
     try:
         from app.api.pipelines import get_pipeline_service
         svc = get_pipeline_service()
+        # Run the exact status call the frontend gets, so we see the
+        # shopify row the UI is rendering from.
+        try:
+            full_status = await svc.get_pipeline_status()
+            shopify_row = next(
+                (p for p in full_status.get("pipelines", [])
+                 if p.get("name") == "shopify"),
+                {"missing": True},
+            )
+        except Exception as exc:
+            shopify_row = {"status_call_error": str(exc)}
         pipeline_state = {
             "init_errors": dict(svc.init_errors),
             "registered_pipelines": sorted(svc.pipelines.keys()),
             "has_retry_method": hasattr(svc, "_retry_failed_inits"),
             "worker_pid": _os.getpid(),
+            "shopify_status_row": shopify_row,
         }
     except Exception as exc:
         pipeline_state = {"error": str(exc)}
