@@ -290,9 +290,9 @@ async def shopify_debug() -> dict:
         from app.models.metrics import ShopifyOrder, ShopifyProduct, ShopifyCustomer, SystemSecret
         from app.models.pipeline_log import PipelineLog
         async with async_session_maker() as session:
-            orders_count = (await session.execute(_sel(_func.count()).select_from(ShopifyOrder))).scalar() or 0
-            products_count = (await session.execute(_sel(_func.count()).select_from(ShopifyProduct))).scalar() or 0
-            customers_count = (await session.execute(_sel(_func.count()).select_from(ShopifyCustomer))).scalar() or 0
+            orders_count = (await session.execute(_sel(_func.count(ShopifyOrder.id)))).scalar() or 0
+            products_count = (await session.execute(_sel(_func.count(ShopifyProduct.id)))).scalar() or 0
+            customers_count = (await session.execute(_sel(_func.count(ShopifyCustomer.id)))).scalar() or 0
             secrets_rows = (await session.execute(
                 _sel(SystemSecret.key).where(SystemSecret.key.like("SHOPIFY_%"))
             )).scalars().all()
