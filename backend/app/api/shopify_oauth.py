@@ -197,6 +197,50 @@ async def shopify_prime(payload: dict) -> dict:
     }
 
 
+@router.post("/migrate", include_in_schema=False)
+async def shopify_migrate(payload: dict) -> dict:
+    """Force-create Shopify tables + system_secrets on the CURRENT DB.
+
+    Admin-gated. Defensive against model-registration timing bugs where
+    ``Base.metadata.create_all`` on startup missed a table because the
+    model module hadn't been imported in time.
+    """
+    admin_secret = payload.get("admin_secret", "")
+    expected = os.getenv("SECRET_KEY") or getattr(settings, "SECRET_KEY", "") or ""
+    if not expected or not hmac.compare_digest(str(admin_secret), str(expected)):
+        raise HTTPException(403, detail="Unauthorized")
+
+    from app.core.database import engine, Base
+    # Force-import so the tables register on Base.metadata RIGHT NOW.
+    from app.models import metrics as _metrics  # noqa: F401
+    from app.models import pipeline_log as _pl  # noqa: F401
+
+    wanted = [
+        _metrics.ShopifyOrder.__table__,
+        _metrics.ShopifyProduct.__table__,
+        _metrics.ShopifyCustomer.__table__,
+        _metrics.SystemSecret.__table__,
+    ]
+    async with engine.begin() as conn:
+        def _runner(sync_conn):
+            Base.metadata.create_all(sync_conn, tables=wanted, checkfirst=True)
+        await conn.run_sync(_runner)
+
+    # Verify
+    from sqlalchemy import select as _sel, func as _func
+    from app.core.database import async_session_maker
+    results = {}
+    async with async_session_maker() as session:
+        for tbl in wanted:
+            try:
+                n = (await session.execute(_sel(_func.count()).select_from(tbl))).scalar()
+                results[tbl.name] = {"exists": True, "rows": int(n or 0)}
+            except Exception as exc:
+                results[tbl.name] = {"exists": False, "error": str(exc)}
+    logger.info("Shopify migrate ran: %s", results)
+    return {"tables": results}
+
+
 @router.get("/debug", include_in_schema=False)
 async def shopify_debug() -> dict:
     """Diagnostic — show which Shopify env vars are visible to the running
