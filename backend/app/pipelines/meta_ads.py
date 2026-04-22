@@ -602,9 +602,33 @@ class MetaAdsPipeline(BasePipeline):
                         campaign_insight.get("frequency", 0) or 0
                     )
 
-                    # Extract conversion data — count leads AND purchases
+                    # Extract conversion data — count leads AND purchases.
+                    # Meta returns MULTIPLE overlapping action_types for the
+                    # same lead event (e.g. `lead` is a superset of both
+                    # `offsite_conversion.fb_pixel_lead` and
+                    # `onsite_conversion.lead_grouped`). Summing them
+                    # double-counts a single website lead as 2–3. Fix: take
+                    # max() across the overlapping lead types, then add the
+                    # non-overlapping form/purchase conversions.
                     conversions = 0.0
                     conversion_value = 0.0
+
+                    LEAD_OVERLAP_TYPES = {
+                        "lead",
+                        "offsite_conversion.fb_pixel_lead",
+                        "onsite_conversion.lead_grouped",
+                    }
+                    NON_LEAD_CONVERSION_TYPES = {
+                        "complete_registration",
+                        "submit_application",
+                        "purchase",
+                        "omni_purchase",
+                    }
+                    # Anything else (messaging, add_to_cart, checkout,
+                    # contact_total, etc.) is NOT a lead and is excluded.
+
+                    lead_bucket = {}  # action_type -> count for dedupe
+                    non_lead_total = 0.0
 
                     actions = campaign_insight.get("actions", [])
                     if isinstance(actions, list):
@@ -614,21 +638,13 @@ class MetaAdsPipeline(BasePipeline):
                                 action_count = float(
                                     action.get("value", 0) or 0
                                 )
-                                # Count lead + purchase actions as conversions
-                                if action_type in [
-                                    "lead",
-                                    "offsite_conversion.fb_pixel_lead",
-                                    "onsite_conversion.lead_grouped",
-                                    "onsite_conversion.messaging_conversation_started_7d",
-                                    "purchase",
-                                    "omni_purchase",
-                                    "checkout",
-                                    "add_to_cart",
-                                    "complete_registration",
-                                    "contact_total",
-                                    "submit_application",
-                                ]:
-                                    conversions += action_count
+                                if action_type in LEAD_OVERLAP_TYPES:
+                                    lead_bucket[action_type] = action_count
+                                elif action_type in NON_LEAD_CONVERSION_TYPES:
+                                    non_lead_total += action_count
+
+                    leads = max(lead_bucket.values()) if lead_bucket else 0.0
+                    conversions = leads + non_lead_total
 
                     action_values = campaign_insight.get(
                         "action_values", []
