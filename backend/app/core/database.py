@@ -104,6 +104,7 @@ async def init_db() -> None:
         await _ensure_meta_period_reach_schema(conn)
         await _ensure_google_ad_metrics_schema(conn)
         await _ensure_contractors_schema(conn)
+        await _ensure_shopify_customers_schema(conn)
         await _backfill_ad_metric_divisions(conn)
         await _reconcile_ga4_property_enabled(conn)
 
@@ -190,6 +191,31 @@ async def _ensure_contractors_schema(conn) -> None:
         ))
     except Exception as exc:
         logger.warning("ensure_schema: contractors.meta_account_status: %s", exc)
+
+
+async def _ensure_shopify_customers_schema(conn) -> None:
+    """Widen shopify_customers text columns to handle oddball Shopify data.
+
+    Some customer records put non-name content into first_name/last_name
+    (e.g. addresses, company blobs). The original 128-char cap caused
+    StringDataRightTruncationError during backfill. ALTER COLUMN TYPE
+    on a widening VARCHAR is a metadata-only operation in Postgres.
+    """
+    WIDENED = [
+        ("first_name", "VARCHAR(256)"),
+        ("last_name",  "VARCHAR(256)"),
+        ("state",      "VARCHAR(128)"),
+    ]
+    for col, new_type in WIDENED:
+        try:
+            await conn.execute(text(
+                f"ALTER TABLE shopify_customers ALTER COLUMN {col} TYPE {new_type}"
+            ))
+        except Exception as exc:
+            logger.warning(
+                "ensure_schema: shopify_customers.%s widen to %s failed: %s",
+                col, new_type, exc,
+            )
 
 
 async def _ensure_google_ad_metrics_schema(conn) -> None:

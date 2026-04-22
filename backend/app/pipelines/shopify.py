@@ -344,15 +344,20 @@ class ShopifyPipeline(BasePipeline):
     def _customer_to_model(self, c: Dict[str, Any]) -> ShopifyCustomer:
         default_addr = c.get("default_address") or {}
         tags = c.get("tags") or None
+        email = c.get("email") or None
+        first_name = c.get("first_name") or None
+        last_name = c.get("last_name") or None
+        state = default_addr.get("province") or None
+        country = default_addr.get("country_code") or None
         return ShopifyCustomer(
             customer_id=str(c.get("id", "")),
-            email=c.get("email"),
-            first_name=c.get("first_name"),
-            last_name=c.get("last_name"),
+            email=(email[:256] if email else None),
+            first_name=(first_name[:256] if first_name else None),
+            last_name=(last_name[:256] if last_name else None),
             orders_count=int(c.get("orders_count") or 0),
             total_spent=float(c.get("total_spent") or 0),
-            state=(default_addr.get("province") or None),
-            country=(default_addr.get("country_code") or None),
+            state=(state[:128] if state else None),
+            country=(country[:8] if country else None),
             tags=(tags[:512] if tags else None),
             created_at_remote=self._parse_iso_datetime(c.get("created_at")),
             division="cp",

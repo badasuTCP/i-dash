@@ -92,7 +92,7 @@ const CPRetail = () => {
 
         <div className="mb-6">
           <h1 className={`text-3xl font-bold mb-1 ${textPrimary}`}>CP Store</h1>
-          <p className={textSec}>The Concrete Protector retail — Shopify orders, products, and customer insights</p>
+          <p className={textSec}>The Concrete Protector store — Shopify orders, products, and customer insights</p>
         </div>
 
         {!hasLive && (
