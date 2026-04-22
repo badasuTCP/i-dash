@@ -232,6 +232,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"I-BOS brand asset seeding skipped: {e}")
 
+    # Rehydrate Shopify runtime creds from DB into /tmp so pipelines survive
+    # pod restarts without a manual /api/shopify/prime round-trip.
+    try:
+        from app.api.shopify_oauth import rehydrate_creds_from_db
+        rehydrated = await rehydrate_creds_from_db()
+        if rehydrated:
+            # Re-init the Shopify pipeline now that creds are available so
+            # the first scheduled tick after startup doesn't fail.
+            try:
+                from app.api.pipelines import get_pipeline_service
+                from app.pipelines.shopify import ShopifyPipeline
+                svc = get_pipeline_service()
+                svc.pipelines["shopify"] = ShopifyPipeline()
+                svc.init_errors.pop("shopify", None)
+                logger.info("Shopify pipeline re-initialized from DB-backed creds")
+            except Exception as e:
+                logger.warning(f"Shopify pipeline re-init after rehydrate failed: {e}")
+    except Exception as e:
+        logger.warning(f"Shopify creds rehydrate skipped: {e}")
+
     try:
         await _start_scheduler()
     except Exception as e:

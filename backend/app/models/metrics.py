@@ -8,10 +8,31 @@ HubSpot, Meta (Facebook), Google Ads, Google Sheets, and aggregated dashboards.
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import Date, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+
+
+class SystemSecret(Base):
+    """Key/value store for runtime secrets that must survive pod restarts.
+
+    Used as the persistence layer for Shopify / WooCommerce credentials that
+    Railway's Variables UI doesn't inject into the container. Writes go
+    through POST /api/shopify/prime; reads are cached in-memory + /tmp after
+    startup so hot-path pipeline code doesn't hit the DB.
+    """
+
+    __tablename__ = "system_secrets"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
 
 class HubSpotMetric(Base):

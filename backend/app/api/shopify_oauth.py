@@ -55,6 +55,14 @@ import json as _json
 
 _RUNTIME_CREDS_FILE = "/tmp/shopify_runtime_creds.json"
 
+# Keys we persist as SystemSecret rows. Keep in sync with the prime payload.
+_PERSISTED_KEYS = (
+    "SHOPIFY_API_KEY",
+    "SHOPIFY_API_SECRET",
+    "SHOPIFY_SHOP_DOMAIN",
+    "SHOPIFY_ADMIN_TOKEN",
+)
+
 
 def _load_creds() -> dict:
     try:
@@ -73,6 +81,64 @@ def _save_creds(d: dict) -> None:
             _json.dump(d, fh)
     except Exception as exc:
         logger.warning("Shopify creds file write failed: %s", exc)
+
+
+async def _persist_creds_to_db(d: dict) -> None:
+    """Upsert the Shopify creds into the system_secrets table so they
+    survive pod restarts. Called from the prime endpoint."""
+    try:
+        from sqlalchemy.dialects.postgresql import insert as _pg_insert
+        from app.core.database import async_session_maker
+        from app.models.metrics import SystemSecret
+
+        async with async_session_maker() as session:
+            for k in _PERSISTED_KEYS:
+                v = d.get(k)
+                if not v:
+                    continue
+                stmt = _pg_insert(SystemSecret).values(key=k, value=str(v))
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["key"],
+                    set_={"value": stmt.excluded.value},
+                )
+                await session.execute(stmt)
+            await session.commit()
+        logger.info("Shopify creds persisted to system_secrets")
+    except Exception as exc:
+        logger.warning("Shopify creds DB persistence failed: %s", exc)
+
+
+async def rehydrate_creds_from_db() -> bool:
+    """Rehydrate /tmp/shopify_runtime_creds.json from the system_secrets
+    table. Called once on startup — after this, worker pids and pipeline
+    init can treat /tmp as the source of truth exactly like before.
+
+    Returns True if any creds were written to the file.
+    """
+    try:
+        from sqlalchemy import select as _sel
+        from app.core.database import async_session_maker
+        from app.models.metrics import SystemSecret
+
+        async with async_session_maker() as session:
+            rows = await session.execute(
+                _sel(SystemSecret.key, SystemSecret.value).where(
+                    SystemSecret.key.in_(_PERSISTED_KEYS)
+                )
+            )
+            pairs = {k: v for k, v in rows.all() if v}
+        if not pairs:
+            return False
+        existing = _load_creds()
+        existing.update(pairs)
+        _save_creds(existing)
+        logger.info(
+            "Shopify creds rehydrated from DB: %s", sorted(pairs.keys())
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Shopify creds DB rehydrate failed: %s", exc)
+        return False
 
 
 def _cfg(key: str, default: str = "") -> str:
@@ -97,14 +163,14 @@ async def shopify_prime(payload: dict) -> dict:
 
     creds = _load_creds()
     accepted = {}
-    for k in ("SHOPIFY_API_KEY", "SHOPIFY_API_SECRET",
-              "SHOPIFY_SHOP_DOMAIN", "SHOPIFY_ADMIN_TOKEN"):
+    for k in _PERSISTED_KEYS:
         v = payload.get(k)
         if v:
             creds[k] = str(v)
             accepted[k] = True
     _save_creds(creds)
-    logger.info("Shopify runtime creds primed: %s (file: %s)",
+    await _persist_creds_to_db(creds)
+    logger.info("Shopify runtime creds primed: %s (file: %s, DB: system_secrets)",
                 list(accepted.keys()), _RUNTIME_CREDS_FILE)
 
     # If the domain + token are now available, re-initialize the Shopify
