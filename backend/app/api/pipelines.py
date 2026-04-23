@@ -435,18 +435,37 @@ async def get_pipeline_schedules(
     Missing pipelines fall back to ``DEFAULT_INTERVALS`` — the client can
     PUT once to persist the default.
     """
-    result = await db.execute(select(PipelineSchedule))
-    rows = {s.pipeline_name: s for s in result.scalars().all()}
+    try:
+        result = await db.execute(select(PipelineSchedule))
+        rows = {s.pipeline_name: s for s in result.scalars().all()}
+    except Exception as exc:
+        logger.exception("get_pipeline_schedules: DB query failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"schedules query failed: {type(exc).__name__}: {exc}",
+        )
+
     schedules = []
     for name in DEFAULT_INTERVALS.keys():
         row = rows.get(name)
-        schedules.append({
-            "pipeline_name": name,
-            "interval_value": row.interval_value if row else DEFAULT_INTERVALS[name],
-            "enabled": row.enabled if row else True,
-            "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
-            "persisted": row is not None,
-        })
+        try:
+            schedules.append({
+                "pipeline_name": name,
+                "interval_value": row.interval_value if row else DEFAULT_INTERVALS[name],
+                "enabled": bool(row.enabled) if row else True,
+                "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+                "persisted": row is not None,
+            })
+        except Exception as exc:
+            logger.exception("get_pipeline_schedules: row serialization failed for %s", name)
+            schedules.append({
+                "pipeline_name": name,
+                "interval_value": DEFAULT_INTERVALS[name],
+                "enabled": True,
+                "updated_at": None,
+                "persisted": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
     return {"schedules": schedules}
 
 
@@ -490,24 +509,31 @@ async def update_pipeline_schedule(
             detail=f"Interval '{interval_value}' has no trigger mapping",
         )
 
-    result = await db.execute(
-        select(PipelineSchedule).where(PipelineSchedule.pipeline_name == name)
-    )
-    row = result.scalar_one_or_none()
-    if row is None:
-        row = PipelineSchedule(
-            pipeline_name=name,
-            interval_value=interval_value or DEFAULT_INTERVALS[name],
-            enabled=bool(enabled),
+    try:
+        result = await db.execute(
+            select(PipelineSchedule).where(PipelineSchedule.pipeline_name == name)
         )
-        db.add(row)
-    else:
-        if interval_value:
-            row.interval_value = interval_value
-        row.enabled = bool(enabled)
-        row.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(row)
+        row = result.scalar_one_or_none()
+        if row is None:
+            row = PipelineSchedule(
+                pipeline_name=name,
+                interval_value=interval_value or DEFAULT_INTERVALS[name],
+                enabled=bool(enabled),
+            )
+            db.add(row)
+        else:
+            if interval_value:
+                row.interval_value = interval_value
+            row.enabled = bool(enabled)
+            row.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(row)
+    except Exception as exc:
+        logger.exception("update_pipeline_schedule: DB update failed for %s", name)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"schedule update failed: {type(exc).__name__}: {exc}",
+        )
 
     # Ask the running scheduler to pick up the change immediately so the
     # user doesn't have to wait for the next reconcile tick. The global
