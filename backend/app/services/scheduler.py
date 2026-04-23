@@ -154,10 +154,23 @@ class SchedulerService:
 
         The lock auto-releases when ``self._lock_conn`` is closed (worker
         death, explicit stop), so the other gunicorn worker can take over
-        on its next reconcile tick.
+        on its next reconcile tick. We also ping the lock connection each
+        time so a silently-dropped connection (idle timeout, network blip)
+        causes this worker to drop leadership and re-attempt acquisition.
         """
+        # If we think we're already leader, verify the underlying lock
+        # connection is still alive. If not, drop leadership so we (or
+        # someone) can re-acquire.
         if self.is_leader:
-            return True
+            from sqlalchemy import text
+            try:
+                await self._lock_conn.execute(text("SELECT 1"))
+                return True
+            except Exception as exc:
+                self.logger.warning(
+                    "Leader lock connection died (%s) — stepping down", exc
+                )
+                await self._release_leader_lock()
 
         try:
             conn = await engine.connect()
