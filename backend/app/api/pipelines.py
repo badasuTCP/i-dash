@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_maker, get_db
@@ -422,6 +422,33 @@ async def get_pipeline_history(
 VALID_INTERVALS = {"30min", "1hr", "2hrs", "4hrs", "6hrs", "12hrs", "daily"}
 
 
+_PIPELINE_SCHEDULES_DDL = text(
+    """
+    CREATE TABLE IF NOT EXISTS pipeline_schedules (
+        id SERIAL PRIMARY KEY,
+        pipeline_name VARCHAR(64) NOT NULL UNIQUE,
+        interval_value VARCHAR(16) NOT NULL DEFAULT '4hrs',
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    )
+    """
+)
+
+
+async def _ensure_pipeline_schedules_table(db: AsyncSession) -> None:
+    """Per-request safety net in case the startup migration missed this
+    connection. Cheap and idempotent."""
+    try:
+        await db.execute(_PIPELINE_SCHEDULES_DDL)
+        await db.commit()
+    except Exception as exc:
+        logger.warning("pipeline_schedules DDL refresh failed (ignored): %s", exc)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+
+
 @router.get(
     "/schedules",
     summary="Get per-pipeline schedule configuration",
@@ -435,6 +462,7 @@ async def get_pipeline_schedules(
     Missing pipelines fall back to ``DEFAULT_INTERVALS`` — the client can
     PUT once to persist the default.
     """
+    await _ensure_pipeline_schedules_table(db)
     try:
         result = await db.execute(select(PipelineSchedule))
         rows = {s.pipeline_name: s for s in result.scalars().all()}
@@ -509,6 +537,7 @@ async def update_pipeline_schedule(
             detail=f"Interval '{interval_value}' has no trigger mapping",
         )
 
+    await _ensure_pipeline_schedules_table(db)
     try:
         result = await db.execute(
             select(PipelineSchedule).where(PipelineSchedule.pipeline_name == name)
