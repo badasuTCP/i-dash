@@ -11,7 +11,7 @@ import {
   Activity, AlertCircle, Wifi, WifiOff, Loader2,
   Globe, Target, BarChart3,
 } from 'lucide-react';
-import { useDashboardDateFilter } from '../hooks/useDashboardDateFilter';
+import { useDashboardDateFilter, parseLabel } from '../hooks/useDashboardDateFilter';
 import { dashboardAPI } from '../services/api';
 import PageInsight from '../components/common/PageInsight';
 import SortableBarChart from '../components/common/SortableBarChart';
@@ -194,6 +194,55 @@ const ExecutiveSummary = () => {
     }, 0);
   }, [summary]);
 
+  // Combined Total Revenue is the sum of the "Total Revenue" row from the
+  // TCP MAIN Quarterly KPI table, restricted to the quarters that overlap
+  // the currently-selected centralised date range. This matches the big
+  // number leadership reports every quarter. Atomic-quarter semantics:
+  // if ANY part of a quarter overlaps the picker's range, include the
+  // whole quarter (quarters are the smallest unit on the sheet).
+  const combinedTotalRevenueFromTable = useMemo(() => {
+    const parseMoney = (v) => {
+      if (v === null || v === undefined || v === '—') return 0;
+      let s = String(v).replace(/[$,%\s⚠★]/g, '').trim();
+      let mult = 1;
+      if (s.endsWith('M')) { mult = 1_000_000; s = s.slice(0, -1); }
+      else if (s.endsWith('K')) { mult = 1_000; s = s.slice(0, -1); }
+      else if (s.endsWith('B')) { mult = 1_000_000_000; s = s.slice(0, -1); }
+      const n = parseFloat(s);
+      return isNaN(n) ? 0 : n * mult;
+    };
+
+    const liveRows = summary?.quarterly_kpis?.rows;
+    const liveQuarters = summary?.quarterly_kpis?.quarters;
+
+    // Quarter label → raw value resolver (live TCP MAIN first, fallback snapshot otherwise)
+    let quartersList, rowValue;
+    if (liveRows?.length && liveQuarters?.length) {
+      const row = liveRows.find((r) => (r.metric || '').toLowerCase() === 'total revenue');
+      if (!row) return 0;
+      quartersList = liveQuarters;
+      rowValue = (q) => row[q];
+    } else {
+      const fbRow = FALLBACK_QUARTERLY.find((r) => r.metric.toLowerCase() === 'total revenue');
+      if (!fbRow) return 0;
+      quartersList = FALLBACK_QUARTERS;
+      rowValue = (q) => fbRow.values[quartersList.indexOf(q)];
+    }
+
+    // Quarters to include: those whose date range overlaps the picker.
+    // No picker range → include every quarter in the table.
+    const filterStart = dateRange?.start ? new Date(dateRange.start) : null;
+    const filterEnd   = dateRange?.end   ? new Date(dateRange.end)   : null;
+    const included = quartersList.filter((q) => {
+      if (!filterStart || !filterEnd) return true;
+      const qRange = parseLabel(q);
+      if (!qRange) return true;
+      return qRange.start <= filterEnd && qRange.end >= filterStart;
+    });
+
+    return included.reduce((sum, q) => sum + parseMoney(rowValue(q)), 0);
+  }, [summary, dateRange]);
+
   const scorecards = useMemo(() => {
     if (summary?.scorecards?.length) {
       const palette = ['blue', 'violet', 'emerald', 'amber'];
@@ -204,19 +253,22 @@ const ExecutiveSummary = () => {
         if (s.label === 'Equipment Sold' && (!value || value === 0) && equipmentSoldFromTable > 0) {
           value = equipmentSoldFromTable;
         }
+        // Combined Total Revenue is now canonically the Total Revenue row
+        // from the TCP MAIN quarterly table, summed over quarters that
+        // overlap the centralised date range. This makes the scorecard
+        // match what leadership reports, and it reacts to the date picker.
+        let source = s.source;
+        if (s.label === 'Combined Total Revenue') {
+          value = combinedTotalRevenueFromTable;
+          source = 'Google Sheets · TCP MAIN · Total Revenue row';
+        }
         return {
           label: s.label,
           value,
           change: s.change ?? 0,
           color: palette[idx % palette.length],
           format: s.format || 'currency',
-          source: s.source,
-          // Flag Combined Total Revenue as pending until the Head of Sales
-          // confirms how this KPI should be composed.
-          pending: s.label === 'Combined Total Revenue',
-          pendingNote: s.label === 'Combined Total Revenue'
-            ? '* KPI definition pending Head of Sales review'
-            : null,
+          source,
         };
       });
     }
@@ -224,12 +276,13 @@ const ExecutiveSummary = () => {
     const spend = Object.values(mktByBrand).reduce((a, m) => a + (m?.scorecards?.totalSpend || 0), 0);
     const leads = Object.values(mktByBrand).reduce((a, m) => a + (m?.scorecards?.totalLeads || 0), 0);
     return [
-      { label: 'Combined Total Revenue', value: 7123452, change: 14.2, color: 'blue',    format: 'currency' },
+      { label: 'Combined Total Revenue', value: combinedTotalRevenueFromTable, change: null, color: 'blue',    format: 'currency',
+        source: 'Google Sheets · TCP MAIN · Total Revenue row' },
       { label: 'Marketing Spend',        value: spend,   change: 19.4, color: 'violet',  format: 'currency' },
       { label: 'Marketing Leads',        value: leads,   change: null, color: 'emerald', format: 'number'   },
       { label: 'Equipment Sold',         value: equipmentSoldFromTable, change: null, color: 'amber',  format: 'number'   },
     ];
-  }, [summary, mktByBrand, equipmentSoldFromTable]);
+  }, [summary, mktByBrand, equipmentSoldFromTable, combinedTotalRevenueFromTable]);
 
   const quarters       = hasExecData ? summary.quarterly_kpis.quarters : FALLBACK_QUARTERS;
   // ── Quarterly KPI table sort ─────────────────────────────────────
