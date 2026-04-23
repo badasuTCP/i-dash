@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, role_required
 from app.models.contractor import Contractor
 from app.models.user import User, UserRole
 
@@ -851,9 +851,11 @@ async def approve_contractor(
 async def list_brand_assets(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
     brand: Optional[str] = None,
 ) -> List[Dict]:
-    """Return brand_assets, optionally filtered by brand slug."""
+    """Return brand_assets, optionally filtered by brand slug.
+    Admin / data-analyst only — exposes the full ad-account inventory."""
     from app.models.brand_asset import BrandAsset
 
     stmt = select(BrandAsset).order_by(BrandAsset.brand, BrandAsset.mapped_at.desc())
@@ -879,8 +881,10 @@ async def list_brand_assets(
 async def get_discovery_count(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
 ) -> Dict:
-    """Count accounts in discovery_audit that haven't been mapped to a brand."""
+    """Count accounts in discovery_audit that haven't been mapped to a brand.
+    Admin / data-analyst only."""
     try:
         from app.models.discovery_audit import DiscoveryAudit
         from app.models.brand_asset import BrandAsset

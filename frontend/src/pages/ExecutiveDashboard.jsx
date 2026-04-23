@@ -375,7 +375,31 @@ const ExecutiveSummary = () => {
     : FALLBACK_REVENUE_BY_QUARTER;
   const yoySales = hasExecData && summary?.yoy_sales?.length ? summary.yoy_sales : FALLBACK_YOY;
 
-  const divisionRevenue = summary?.division_revenue || { cp: 4730018, sanitred: 1132388, ibos: 1261046 };
+  // Revenue per division, computed from live sources:
+  //   CP        → Shopify store revenue (canonical for the CP tile)
+  //   Sani-Tred → WooCommerce store revenue
+  //   I-BOS     → sum of QB revenue for active contractors
+  // If the backend exposes a pre-aggregated `summary.division_revenue`
+  // block, that wins — it's the single source of truth. Otherwise we
+  // assemble from the per-pipeline responses. Missing values stay null
+  // so the table renders "—" instead of a made-up number.
+  const divisionRevenue = useMemo(() => {
+    if (summary?.division_revenue) return summary.division_revenue;
+    return {
+      cp:       summary?.cp_shopify?.revenue ?? null,
+      sanitred: wcStore?.scorecards?.totalRevenue ?? null,
+      ibos:     summary?.qb_revenue?.active_total ?? contractorRev?.totalRevenue ?? null,
+    };
+  }, [summary, wcStore, contractorRev]);
+
+  const divisionRevenueIsLive = useMemo(() => {
+    // All three sources present → live; otherwise we annotate the row.
+    return (
+      divisionRevenue.cp != null &&
+      divisionRevenue.sanitred != null &&
+      divisionRevenue.ibos != null
+    );
+  }, [divisionRevenue]);
 
   // ── Cross-division live KPI table (NEW) ────────────────────────────────
   // Pulls from /dashboard/web-analytics + /dashboard/marketing for each
@@ -456,14 +480,19 @@ const ExecutiveSummary = () => {
       const topName = contractorRev?.contractors?.[0]?.name || 'Unknown';
       bullets.push(`Contractor revenue (QB): ${fmtCurrency(qbRev)} from ${qbCount} contractors · Top: ${topName}.`);
     }
-    const topRev = Math.max(divisionRevenue.cp, divisionRevenue.sanitred, divisionRevenue.ibos);
-    const topName = topRev === divisionRevenue.cp ? 'CP' : topRev === divisionRevenue.sanitred ? 'Sani-Tred' : 'I-BOS';
-    bullets.push(`${topName} is top-revenue division at ${fmtCurrency(topRev)} cumulative.`);
+    // Only assert "top division" when we actually have numbers across all
+    // three — Math.max on a null drags the answer to NaN, which would
+    // silently mislabel the leader.
+    if (divisionRevenueIsLive) {
+      const topRev = Math.max(divisionRevenue.cp, divisionRevenue.sanitred, divisionRevenue.ibos);
+      const topName = topRev === divisionRevenue.cp ? 'CP' : topRev === divisionRevenue.sanitred ? 'Sani-Tred' : 'I-BOS';
+      bullets.push(`${topName} is top-revenue division at ${fmtCurrency(topRev)} cumulative.`);
+    }
     if (!hasExecData) {
       bullets.push('TCP MAIN sheet pending pivot-detection — quarterly table showing curated snapshot.');
     }
     return bullets.slice(0, 5);
-  }, [mktByBrand, webByBrand, divisionRevenue, hasExecData, wcStore, contractorRev]);
+  }, [mktByBrand, webByBrand, divisionRevenue, divisionRevenueIsLive, hasExecData, wcStore, contractorRev]);
 
   // ── Render ─────────────────────────────────────────────────────────────
   if (loading) {
@@ -625,16 +654,44 @@ const ExecutiveSummary = () => {
                 </tr>
               </thead>
               <tbody>
-                {quarterlyRows.map((row, idx) => (
-                  <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
-                    <td className={`py-3 px-4 font-medium ${textPrimary}`}>{row.metric}</td>
-                    {row.values.map((v, qIdx) => (
-                      <td key={qIdx} className={`text-right py-3 px-4 ${isLatestCol(qIdx) ? `font-semibold ${textPrimary}` : textSecondary}`}>
-                        {v}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+                {quarterlyRows.map((row, idx) => {
+                  // Per-cell anomaly detection: flag any value that swung
+                  // by > 90% vs the prior quarter. Skips YoY / growth rows
+                  // (those are ratios, not absolutes) and empty ("—") cells.
+                  // The warning stays soft — we just annotate, so the CEO
+                  // knows to verify before quoting the number.
+                  const metricLower = (row.metric || '').toLowerCase();
+                  const skipAnomaly = metricLower.includes('yoy')
+                    || metricLower.includes('growth');
+                  const numericValues = row.values.map(parseDisplayValue);
+                  return (
+                    <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover} transition-colors`}>
+                      <td className={`py-3 px-4 font-medium ${textPrimary}`}>{row.metric}</td>
+                      {row.values.map((v, qIdx) => {
+                        let warn = false;
+                        let warnTitle = null;
+                        if (!skipAnomaly && qIdx > 0) {
+                          const cur  = numericValues[qIdx];
+                          const prev = numericValues[qIdx - 1];
+                          if (cur != null && prev != null && prev !== 0) {
+                            const pct = Math.abs((cur - prev) / prev);
+                            if (pct > 0.9) {
+                              warn = true;
+                              warnTitle = `Large swing vs prior quarter (${(pct * 100).toFixed(0)}% change) — verify before quoting. May indicate a data gap.`;
+                            }
+                          }
+                        }
+                        return (
+                          <td key={qIdx} className={`text-right py-3 px-4 ${isLatestCol(qIdx) ? `font-semibold ${textPrimary}` : textSecondary}`}
+                              title={warnTitle || undefined}>
+                            {v}
+                            {warn && <span className="ml-1 text-amber-400">⚠</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -797,12 +854,37 @@ const ExecutiveSummary = () => {
                 </ResponsiveContainer>
               </motion.div>
             )}
-            {showHubspot && hubspot && (
+            {showHubspot && hubspot && (() => {
+              // Resolve an "as of" timestamp the CEO can quote. Prefer an
+              // explicit last_synced / updated_at / as_of field on the
+              // HubSpot response; fall back to the page's lastUpdated.
+              const asOfRaw =
+                hubspot?.last_synced
+                || hubspot?.updated_at
+                || hubspot?.as_of
+                || hubspot?.scorecards?.last_synced
+                || (lastUpdated ? lastUpdated.toISOString() : null);
+              let asOfDisplay = null;
+              if (asOfRaw) {
+                try {
+                  const d = new Date(asOfRaw);
+                  if (!isNaN(d)) asOfDisplay = d.toLocaleString(undefined, {
+                    month: 'short', day: 'numeric', year: 'numeric',
+                    hour: 'numeric', minute: '2-digit',
+                  });
+                } catch { /* noop */ }
+              }
+              return (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.48 }}
                 className={`rounded-xl p-6 ${cardBg}`}>
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-xl">🟠</span>
                   <h3 className={`text-lg font-semibold ${textPrimary}`}>HubSpot CRM Snapshot</h3>
+                  {asOfDisplay && (
+                    <span className={`ml-auto text-[10px] ${textSecondary}`}>
+                      As of {asOfDisplay}
+                    </span>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   {[
@@ -821,8 +903,12 @@ const ExecutiveSummary = () => {
                     </div>
                   ))}
                 </div>
+                <p className={`text-[10px] mt-3 ${textSecondary}`}>
+                  Scoped to the current date range · sourced from HubSpot pipeline
+                </p>
               </motion.div>
-            )}
+              );
+            })()}
           </div>
         )}
 
@@ -910,10 +996,15 @@ const ExecutiveSummary = () => {
               </thead>
               <tbody>
                 <tr className={`border-b ${tableBorder} ${tableRowHover}`}>
-                  <td className={`py-3 px-4 font-medium ${textPrimary}`}>Revenue · cumulative</td>
-                  <td className={`text-right py-3 px-4 ${textSecondary}`}>{fmtCurrency(divisionRevenue.cp)}</td>
-                  <td className={`text-right py-3 px-4 ${textSecondary}`}>{fmtCurrency(divisionRevenue.sanitred)}</td>
-                  <td className={`text-right py-3 px-4 ${textSecondary}`}>{fmtCurrency(divisionRevenue.ibos)}</td>
+                  <td className={`py-3 px-4 font-medium ${textPrimary}`}>
+                    Revenue · cumulative
+                    {!divisionRevenueIsLive && (
+                      <span className="ml-1.5 text-amber-400" title="Partial data — one or more pipelines have no recent sync">⚠</span>
+                    )}
+                  </td>
+                  <td className={`text-right py-3 px-4 ${textSecondary}`}>{divisionRevenue.cp != null ? fmtCurrency(divisionRevenue.cp) : '—'}</td>
+                  <td className={`text-right py-3 px-4 ${textSecondary}`}>{divisionRevenue.sanitred != null ? fmtCurrency(divisionRevenue.sanitred) : '—'}</td>
+                  <td className={`text-right py-3 px-4 ${textSecondary}`}>{divisionRevenue.ibos != null ? fmtCurrency(divisionRevenue.ibos) : '—'}</td>
                 </tr>
                 {crossDivisionRows.map((r, idx) => (
                   <tr key={idx} className={`border-b ${tableBorder} ${tableRowHover}`}>

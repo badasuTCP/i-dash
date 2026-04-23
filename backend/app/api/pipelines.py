@@ -62,17 +62,13 @@ def get_pipeline_service() -> PipelineService:
 )
 async def list_pipelines(
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
     pipeline_service: PipelineService = Depends(get_pipeline_service),
 ) -> Dict[str, Any]:
     """
     Get list of all available pipelines with their current status.
-
-    Args:
-        current_user: Current authenticated user.
-        pipeline_service: Pipeline service instance.
-
-    Returns:
-        Dictionary with pipeline list and status information.
+    Admin / data-analyst only — exposes operational status + last sync
+    which non-admin roles have no business seeing.
     """
     status_data = await pipeline_service.get_pipeline_status()
 
@@ -285,8 +281,10 @@ async def run_pipeline(
 async def get_pipeline_run_status(
     name: str,
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
 ) -> Dict[str, Any]:
-    """Return the current or most recent background run result for a pipeline."""
+    """Return the current or most recent background run result for a pipeline.
+    Admin / data-analyst only."""
     bg = _running_pipelines.get(name)
     if bg:
         return {"pipeline": name, **bg}
@@ -365,11 +363,13 @@ async def run_all_pipelines(
 async def get_pipeline_history(
     name: str,
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
     limit: int = Query(20, ge=1, le=100, description="Max results (1-100)"),
     pipeline_service: PipelineService = Depends(get_pipeline_service),
 ) -> Dict[str, Any]:
     """
     Get execution history for a specific pipeline.
+    Admin / data-analyst only — exposes operational run history.
 
     Args:
         name: Pipeline name.
@@ -455,9 +455,11 @@ async def _ensure_pipeline_schedules_table(db: AsyncSession) -> None:
 )
 async def get_pipeline_schedules(
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Return current schedule config for every pipeline.
+    Admin / data-analyst only — pairs with the admin-only PUT endpoint.
 
     Missing pipelines fall back to ``DEFAULT_INTERVALS`` — the client can
     PUT once to persist the default.
@@ -594,8 +596,10 @@ async def update_pipeline_schedule(
 )
 async def get_scheduler_status(
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
 ) -> Dict[str, Any]:
-    """Expose APScheduler job registry for diagnostics."""
+    """Expose APScheduler job registry for diagnostics.
+    Admin / data-analyst only."""
     try:
         from app.main import _scheduler
         if _scheduler is None:
@@ -611,10 +615,12 @@ async def get_scheduler_status(
 )
 async def get_recent_errors(
     current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ) -> List[Dict[str, Any]]:
-    """Return the most recent failed pipeline executions across all pipelines."""
+    """Return the most recent failed pipeline executions across all pipelines.
+    Admin / data-analyst only — exposes error logs."""
     from sqlalchemy import desc
 
     result = await db.execute(
