@@ -112,12 +112,46 @@ const PipelinesPage = () => {
   const pollingRef = useRef(null);
   const countdownRef = useRef(null);
 
-  // ── Frequencies (local UI state, can later persist to backend) ───────────────
+  // ── Frequencies (persisted per pipeline in DB) ──────────────────────────────
   const [frequencies, setFrequencies] = useState({
     hubspot: '2hrs', meta_ads: '2hrs', google_ads: '4hrs',
     google_analytics: '4hrs', google_sheets: '6hrs', snapshot: '4hrs',
     woocommerce: '2hrs', shopify: '2hrs',
   });
+  // Track in-flight PUTs so we can show a tiny loading state and revert on error
+  const [freqSaving, setFreqSaving] = useState({}); // { pipelineName: bool }
+
+  // Load persisted schedules from backend on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await pipelinesAPI.getSchedules();
+        if (cancelled || !data?.schedules) return;
+        const loaded = {};
+        data.schedules.forEach((s) => { loaded[s.pipeline_name] = s.interval_value; });
+        setFrequencies((prev) => ({ ...prev, ...loaded }));
+      } catch {
+        // ignore — defaults are fine for demo mode / unauth'd
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Persist a schedule change; optimistically update local state and revert on error
+  const handleFrequencyChange = useCallback(async (name, nextValue) => {
+    const prev = frequencies[name];
+    setFrequencies((p) => ({ ...p, [name]: nextValue }));
+    setFreqSaving((p) => ({ ...p, [name]: true }));
+    try {
+      await pipelinesAPI.updateSchedule(name, nextValue, true);
+    } catch (err) {
+      console.warn(`Failed to save schedule for ${name}:`, err);
+      setFrequencies((p) => ({ ...p, [name]: prev })); // revert
+    } finally {
+      setFreqSaving((p) => ({ ...p, [name]: false }));
+    }
+  }, [frequencies]);
 
   // ── Contractor state — driven by DashboardConfigContext ──────────────────────
   const [contractorFilter, setContractorFilter] = useState(_initialFilter);
@@ -544,11 +578,13 @@ const PipelinesPage = () => {
                             </div>
                           </div>
 
-                          {/* Frequency picker */}
+                          {/* Frequency picker — persists to backend on change */}
                           <select
                             value={frequencies[name] || '2hrs'}
-                            onChange={(e) => setFrequencies((p) => ({ ...p, [name]: e.target.value }))}
-                            className={`px-2 py-1 rounded-lg text-xs border ${inputCls}`}
+                            onChange={(e) => handleFrequencyChange(name, e.target.value)}
+                            disabled={freqSaving[name]}
+                            title={freqSaving[name] ? 'Saving…' : 'Pipeline auto-run cadence'}
+                            className={`px-2 py-1 rounded-lg text-xs border ${inputCls} ${freqSaving[name] ? 'opacity-60 cursor-wait' : ''}`}
                           >
                             {FREQ_OPTIONS.map((o) => (
                               <option key={o.value} value={o.value}>{o.label}</option>

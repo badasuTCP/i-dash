@@ -110,6 +110,7 @@ async def init_db() -> None:
     import app.models.ga4_property  # noqa: F401
     import app.models.metrics  # noqa: F401
     import app.models.pipeline_log  # noqa: F401
+    import app.models.pipeline_schedule  # noqa: F401
     import app.models.user  # noqa: F401
 
     async with engine.begin() as conn:

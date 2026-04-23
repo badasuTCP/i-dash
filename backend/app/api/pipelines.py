@@ -13,14 +13,20 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_maker, get_db
 from app.core.security import get_current_user, role_required
 from app.models.pipeline_log import PipelineLog, PipelineStatus
+from app.models.pipeline_schedule import PipelineSchedule
 from app.models.user import User
 from app.services.pipeline_service import PipelineService
+from app.services.scheduler import (
+    DEFAULT_INTERVALS,
+    _interval_to_trigger_kwargs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -413,6 +419,137 @@ async def get_pipeline_history(
         )
 
 
+VALID_INTERVALS = {"30min", "1hr", "2hrs", "4hrs", "6hrs", "12hrs", "daily"}
+
+
+@router.get(
+    "/schedules",
+    summary="Get per-pipeline schedule configuration",
+)
+async def get_pipeline_schedules(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Return current schedule config for every pipeline.
+
+    Missing pipelines fall back to ``DEFAULT_INTERVALS`` — the client can
+    PUT once to persist the default.
+    """
+    result = await db.execute(select(PipelineSchedule))
+    rows = {s.pipeline_name: s for s in result.scalars().all()}
+    schedules = []
+    for name in DEFAULT_INTERVALS.keys():
+        row = rows.get(name)
+        schedules.append({
+            "pipeline_name": name,
+            "interval_value": row.interval_value if row else DEFAULT_INTERVALS[name],
+            "enabled": row.enabled if row else True,
+            "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+            "persisted": row is not None,
+        })
+    return {"schedules": schedules}
+
+
+@router.put(
+    "/{name}/schedule",
+    summary="Update a pipeline's run schedule (admin only)",
+)
+async def update_pipeline_schedule(
+    name: str,
+    payload: Dict[str, Any] = Body(...),
+    current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin", "data-analyst"])),
+    db: AsyncSession = Depends(get_db),
+    pipeline_service: PipelineService = Depends(get_pipeline_service),
+) -> Dict[str, Any]:
+    """Persist a new interval / enabled flag for one pipeline.
+
+    Body: ``{"interval_value": "2hrs", "enabled": true}``. Valid interval
+    values match the Pipeline Control UI dropdown.
+    """
+    if name not in DEFAULT_INTERVALS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown pipeline '{name}'",
+        )
+
+    interval_value = payload.get("interval_value")
+    enabled = payload.get("enabled", True)
+
+    if interval_value is not None and interval_value not in VALID_INTERVALS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid interval_value '{interval_value}' — "
+                f"expected one of {sorted(VALID_INTERVALS)}"
+            ),
+        )
+    if interval_value and not _interval_to_trigger_kwargs(interval_value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Interval '{interval_value}' has no trigger mapping",
+        )
+
+    result = await db.execute(
+        select(PipelineSchedule).where(PipelineSchedule.pipeline_name == name)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        row = PipelineSchedule(
+            pipeline_name=name,
+            interval_value=interval_value or DEFAULT_INTERVALS[name],
+            enabled=bool(enabled),
+        )
+        db.add(row)
+    else:
+        if interval_value:
+            row.interval_value = interval_value
+        row.enabled = bool(enabled)
+        row.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(row)
+
+    # Ask the running scheduler to pick up the change immediately so the
+    # user doesn't have to wait for the next reconcile tick. The global
+    # instance lives in app.main; fail silently if it isn't wired in yet
+    # (tests, cold start, etc.).
+    try:
+        from app.main import _scheduler
+        if _scheduler is not None:
+            asyncio.create_task(_scheduler.reconcile_now())
+    except Exception as exc:
+        logger.debug("Could not trigger immediate reconcile: %s", exc)
+
+    logger.info(
+        "Admin %s updated schedule for %s → %s (enabled=%s)",
+        current_user.id, name, row.interval_value, row.enabled,
+    )
+
+    return {
+        "pipeline_name": row.pipeline_name,
+        "interval_value": row.interval_value,
+        "enabled": row.enabled,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.get(
+    "/system/scheduler",
+    summary="Scheduler health + active job list",
+)
+async def get_scheduler_status(
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Expose APScheduler job registry for diagnostics."""
+    try:
+        from app.main import _scheduler
+        if _scheduler is None:
+            return {"is_running": False, "is_leader": False, "jobs": [], "total_jobs": 0}
+        return await _scheduler.get_status()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 @router.get(
     "/system/recent-errors",
     summary="Recent pipeline errors for admin system log viewer",
@@ -423,7 +560,7 @@ async def get_recent_errors(
     db: AsyncSession = Depends(get_db),
 ) -> List[Dict[str, Any]]:
     """Return the most recent failed pipeline executions across all pipelines."""
-    from sqlalchemy import desc, select
+    from sqlalchemy import desc
 
     result = await db.execute(
         select(PipelineLog)

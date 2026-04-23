@@ -181,6 +181,10 @@ export const pipelinesAPI = {
   runAll:    ()           => apiClient.post('/pipelines/run-all', null, { timeout: 120000 }),
   getStatus: (name)       => apiClient.get(`/pipelines/${name}/status`),
   getHistory:(name, limit=20) => apiClient.get(`/pipelines/${name}/history`, { params: { limit } }),
+  getSchedules: ()        => apiClient.get('/pipelines/schedules'),
+  updateSchedule: (name, interval_value, enabled = true) =>
+    apiClient.put(`/pipelines/${name}/schedule`, { interval_value, enabled }),
+  getSchedulerStatus: ()  => apiClient.get('/pipelines/system/scheduler'),
 };
 
 // AI endpoints — backend uses query params, not body

@@ -276,11 +276,17 @@ class PipelineService:
                         })
                         continue
 
-                    # Get most recent log entry
+                    # Get most recent log entry. Accept both the short
+                    # ("hubspot") and BasePipeline-internal ("hubspot_pipeline")
+                    # forms — scheduled runs go through BasePipeline._log_pipeline_execution
+                    # which writes the long form, while manual /run triggers
+                    # write the short form via api/pipelines._persist_pipeline_log.
                     stmt = (
                         select(PipelineLog)
                         .where(
-                            PipelineLog.pipeline_name == pipeline_name
+                            PipelineLog.pipeline_name.in_(
+                                [pipeline_name, f"{pipeline_name}_pipeline"]
+                            )
                         )
                         .order_by(desc(PipelineLog.started_at))
                         .limit(1)
@@ -378,7 +384,9 @@ class PipelineService:
                 stmt = (
                     select(PipelineLog)
                     .where(
-                        PipelineLog.pipeline_name == pipeline_name
+                        PipelineLog.pipeline_name.in_(
+                            [pipeline_name, f"{pipeline_name}_pipeline"]
+                        )
                     )
                     .order_by(desc(PipelineLog.started_at))
                     .limit(limit)
