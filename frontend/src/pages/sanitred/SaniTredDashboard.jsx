@@ -8,12 +8,18 @@ import { CheckCircle2, AlertCircle, TrendingUp, ShoppingBag, Globe } from 'lucid
 import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
 
 const SaniTredDashboard = () => {
   const { isDark } = useTheme();
   const { dateFrom, dateTo } = useGlobalDate();
+  const { isPipelineVisible } = useDashboardConfig();
+  const showGA4          = isPipelineVisible('ga4');
+  const showWooCommerce  = isPipelineVisible('woocommerce');
+  const showGoogleSheets = isPipelineVisible('googleSheets');
+  const showAds          = isPipelineVisible('metaAds') || isPipelineVisible('googleAds');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -82,7 +88,9 @@ const SaniTredDashboard = () => {
         </div>
 
         {/* Traffic Trend + Websites */}
+        {(showGA4 || showGoogleSheets || showAds) && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+          {showGA4 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
             className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">
@@ -105,32 +113,40 @@ const SaniTredDashboard = () => {
               </AreaChart>
             </ResponsiveContainer>
           </motion.div>
+          )}
 
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
+            className={`rounded-xl p-6 ${cardBg} ${showGA4 ? '' : 'lg:col-span-3'}`}>
             <div className="flex items-center gap-2 mb-4">
               <ShoppingBag size={16} className="text-emerald-400" />
               <h3 className={`text-base font-semibold ${textPri}`}>Revenue Summary</h3>
             </div>
             <div className="space-y-4">
+              {showGoogleSheets && (
               <div>
                 <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Sheets Revenue</p>
                 <p className={`text-2xl font-bold ${textPri}`}>${((data?.sheets_revenue || 0) / 1000000).toFixed(2)}M</p>
               </div>
+              )}
+              {showAds && (
               <div>
                 <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Ad Spend</p>
                 <p className={`text-2xl font-bold ${textPri}`}>${((data?.ads?.spend || 0) / 1000).toFixed(1)}K</p>
               </div>
+              )}
+              {showGA4 && (
               <div>
                 <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Web Users</p>
                 <p className={`text-2xl font-bold ${textPri}`}>{(data?.web?.users || 0).toLocaleString()}</p>
               </div>
+              )}
             </div>
           </motion.div>
         </div>
+        )}
 
-        {/* Top Websites */}
-        {(data?.top_websites || []).length > 0 && (
+        {/* Top Websites (GA4) */}
+        {showGA4 && (data?.top_websites || []).length > 0 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
             className={`rounded-xl p-6 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">

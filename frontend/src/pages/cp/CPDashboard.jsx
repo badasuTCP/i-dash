@@ -8,6 +8,7 @@ import { CheckCircle2, AlertCircle, TrendingUp, Users, Globe, DollarSign, Shoppi
 import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
 import useRepExclusions from '../../hooks/useRepExclusions';
@@ -16,6 +17,11 @@ const CPDashboard = () => {
   const { isDark } = useTheme();
   const { dateFrom, dateTo } = useGlobalDate();
   const { filterReps } = useRepExclusions();
+  const { isPipelineVisible } = useDashboardConfig();
+  const showHubspot = isPipelineVisible('hubspot');
+  const showGA4     = isPipelineVisible('ga4');
+  const showShopify = isPipelineVisible('shopify');
+  const showAds     = isPipelineVisible('metaAds') || isPipelineVisible('googleAds');
   const [data, setData] = useState(null);
   const [shopifyDetail, setShopifyDetail] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -98,8 +104,10 @@ const CPDashboard = () => {
         </div>
 
         {/* Row 2: Traffic Trend + Top Reps */}
+        {(showGA4 || showHubspot) && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          {/* Traffic Trend — 2/3 width */}
+          {/* Traffic Trend — 2/3 width (GA4) */}
+          {showGA4 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
             className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">
@@ -122,10 +130,12 @@ const CPDashboard = () => {
               </AreaChart>
             </ResponsiveContainer>
           </motion.div>
+          )}
 
-          {/* Top Reps — 1/3 width */}
+          {/* Top Reps — 1/3 width (HubSpot) */}
+          {showHubspot && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
+            className={`rounded-xl p-6 ${cardBg} ${showGA4 ? '' : 'lg:col-span-3'}`}>
             <div className="flex items-center gap-2 mb-4">
               <Users size={16} className="text-violet-400" />
               <h3 className={`text-base font-semibold ${textPri}`}>Top Sales Reps</h3>
@@ -148,7 +158,9 @@ const CPDashboard = () => {
               )}
             </div>
           </motion.div>
+          )}
         </div>
+        )}
 
         {/* Row 3: Top Websites + Quick Stats */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -215,7 +227,7 @@ const CPDashboard = () => {
         </div>
 
         {/* Row 4: CP Store (Shopify) charts */}
-        {(shopifyDetail?.hasLiveData) && (
+        {showShopify && (shopifyDetail?.hasLiveData) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
               className={`rounded-xl p-6 ${cardBg}`}>
@@ -270,7 +282,7 @@ const CPDashboard = () => {
         )}
 
         {/* Row 5: Orders by Status pie + Refund stats */}
-        {(shopifyDetail?.hasLiveData) && (shopifyDetail?.ordersByStatus?.length || 0) > 0 && (
+        {showShopify && (shopifyDetail?.hasLiveData) && (shopifyDetail?.ordersByStatus?.length || 0) > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
               className={`lg:col-span-1 rounded-xl p-6 ${cardBg}`}>

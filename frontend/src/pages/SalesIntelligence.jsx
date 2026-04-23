@@ -30,8 +30,10 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useGlobalDate } from '../context/GlobalDateContext';
+import { useDashboardConfig } from '../context/DashboardConfigContext';
 import { dashboardAPI } from '../services/api';
 import useRepExclusions from '../hooks/useRepExclusions';
+import PipelineHiddenBanner from '../components/common/PipelineHiddenBanner';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COLOR SYSTEM — neon accents for dark mode
@@ -192,6 +194,7 @@ function generateInsights(reps, stalledDeals, selectedRep) {
 const SalesIntelligence = () => {
   const { isDark } = useTheme();
   const { dateFrom, dateTo } = useGlobalDate();
+  const { isPipelineVisible } = useDashboardConfig();
   const [selectedRep, setSelectedRep] = useState(null);
   const [repSearch, setRepSearch] = useState('');
   const [repSortKey, setRepSortKey] = useState('winRate');
@@ -343,6 +346,17 @@ const SalesIntelligence = () => {
   }, [apiData]);
 
   const clearFilter = useCallback(() => setSelectedRep(null), []);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PIPELINE-HIDDEN STATE — this page is HubSpot-only, so the whole
+  // dashboard is meaningless when the HubSpot pipeline is toggled off
+  // from Pipeline Control's eye icon.
+  // ─────────────────────────────────────────────────────────────────────────
+  if (!isPipelineVisible('hubspot')) {
+    return <PipelineHiddenBanner pipelineLabel="HubSpot CRM"
+      pageTitle="Sales Intelligence"
+      pageSubtitle="Live HubSpot CRM visualizations — rep leaderboard, pipeline, quota" />;
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // LOADING / ERROR STATE

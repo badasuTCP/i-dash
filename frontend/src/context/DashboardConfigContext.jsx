@@ -25,6 +25,9 @@ const defaultConfig = {
     googleAds: true,
     ga4: true,
     googleSheets: true,
+    woocommerce: true,
+    shopify: true,
+    snapshot: true,
   },
   sections: {
     scorecards: true,
@@ -57,11 +60,39 @@ const defaultConfig = {
 
 const DashboardConfigContext = createContext();
 
+// localStorage key for pipeline visibility (survives page reload so the
+// data analyst's "hide this pipeline" choice sticks across sessions).
+const PIPELINE_VIS_KEY = 'idash_pipeline_visibility';
+
+function loadPipelineVisibility() {
+  try {
+    const raw = localStorage.getItem(PIPELINE_VIS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch {
+    // corrupted / no localStorage — ignore
+  }
+  return null;
+}
+
+function savePipelineVisibility(pipelines) {
+  try {
+    localStorage.setItem(PIPELINE_VIS_KEY, JSON.stringify(pipelines));
+  } catch {
+    // quota exceeded or no localStorage — best-effort only
+  }
+}
+
 export const DashboardConfigProvider = ({ children }) => {
   const [config, setConfig] = useState(() => {
     try {
       const saved = window.__dashConfig;
-      return saved || defaultConfig;
+      const persistedPipelines = loadPipelineVisibility();
+      const merged = saved || defaultConfig;
+      return persistedPipelines
+        ? { ...merged, pipelines: { ...merged.pipelines, ...persistedPipelines } }
+        : merged;
     } catch {
       return defaultConfig;
     }
@@ -118,12 +149,16 @@ export const DashboardConfigProvider = ({ children }) => {
     return () => { cancelled = true; };
   }, []);
 
-  // ── Pipeline / Section / Division toggles (local-only) ─────────────
+  // ── Pipeline / Section / Division toggles ──────────────────────────
+  // Pipeline visibility is persisted to localStorage so the "hide from
+  // dashboards" choice survives a browser refresh. Every dashboard page
+  // that renders pipeline-specific data reads this via isPipelineVisible.
   const updatePipeline = useCallback((key, enabled) => {
-    setConfig((prev) => ({
-      ...prev,
-      pipelines: { ...prev.pipelines, [key]: enabled },
-    }));
+    setConfig((prev) => {
+      const nextPipelines = { ...prev.pipelines, [key]: enabled };
+      savePipelineVisibility(nextPipelines);
+      return { ...prev, pipelines: nextPipelines };
+    });
   }, []);
 
   const updateSection = useCallback((key, enabled) => {

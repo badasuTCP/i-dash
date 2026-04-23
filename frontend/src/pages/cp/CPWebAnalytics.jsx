@@ -1,13 +1,22 @@
 import React, { useState } from 'react';
 import WebAnalyticsDashboard from '../templates/WebAnalyticsDashboard';
 import { useWebAnalytics } from '../../hooks/useWebAnalytics';
+import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import PropertySwitcher from '../../components/PropertySwitcher';
+import PipelineHiddenBanner from '../../components/common/PipelineHiddenBanner';
 
 const CPWebAnalytics = () => {
   const [selectedPropertyId, setSelectedPropertyId] = useState(null);
   const [selectedPropertyName, setSelectedPropertyName] = useState('All Properties');
+  const { isPipelineVisible } = useDashboardConfig();
 
   const ga4 = useWebAnalytics('cp', {}, selectedPropertyId);
+
+  if (!isPipelineVisible('ga4')) {
+    return <PipelineHiddenBanner pipelineLabel="Google Analytics (GA4)"
+      pageTitle="CP Web Analytics"
+      pageSubtitle="The Concrete Protector — GA4 traffic, devices, sources" />;
+  }
 
   const handlePropertySelect = (propertyId, displayName) => {
     setSelectedPropertyId(propertyId);

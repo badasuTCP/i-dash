@@ -1,6 +1,8 @@
 import React from 'react';
 import WebAnalyticsDashboard from '../templates/WebAnalyticsDashboard';
 import { useWebAnalytics } from '../../hooks/useWebAnalytics';
+import { useDashboardConfig } from '../../context/DashboardConfigContext';
+import PipelineHiddenBanner from '../../components/common/PipelineHiddenBanner';
 
 // ── Static fallback data (shown when GA4 pipeline hasn't run yet) ────────────
 const STATIC_METRICS_PER_PERIOD = {
@@ -50,7 +52,14 @@ const STATIC_FALLBACK = {
 };
 
 const SaniTredWebAnalytics = () => {
+  const { isPipelineVisible } = useDashboardConfig();
   const ga4 = useWebAnalytics('sanitred', STATIC_FALLBACK);
+
+  if (!isPipelineVisible('ga4')) {
+    return <PipelineHiddenBanner pipelineLabel="Google Analytics (GA4)"
+      pageTitle="Sani-Tred Web Analytics"
+      pageSubtitle="Sani-Tred Retail — GA4 traffic, devices, sources" />;
+  }
 
   return (
     <WebAnalyticsDashboard

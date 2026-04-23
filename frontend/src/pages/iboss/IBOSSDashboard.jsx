@@ -8,6 +8,7 @@ import { CheckCircle2, AlertCircle, HardHat, Megaphone, Globe, Award, TrendingUp
 import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
 import SortableBarChart from '../../components/common/SortableBarChart';
@@ -15,6 +16,10 @@ import SortableBarChart from '../../components/common/SortableBarChart';
 const IBOSSDashboard = () => {
   const { isDark } = useTheme();
   const { dateFrom, dateTo } = useGlobalDate();
+  const { isPipelineVisible } = useDashboardConfig();
+  const showGA4     = isPipelineVisible('ga4');
+  const showHubspot = isPipelineVisible('hubspot');
+  const showAds     = isPipelineVisible('metaAds') || isPipelineVisible('googleAds');
   const [data, setData] = useState(null);
   const [revenueData, setRevenueData] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
@@ -119,7 +124,9 @@ const IBOSSDashboard = () => {
         )}
 
         {/* Traffic Trend + Marketing Summary */}
+        {(showGA4 || showAds || showHubspot) && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+          {showGA4 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
             className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">
@@ -142,14 +149,18 @@ const IBOSSDashboard = () => {
               </AreaChart>
             </ResponsiveContainer>
           </motion.div>
+          )}
 
+          {(showAds || showHubspot) && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-            className={`rounded-xl p-6 ${cardBg}`}>
+            className={`rounded-xl p-6 ${cardBg} ${showGA4 ? '' : 'lg:col-span-3'}`}>
             <div className="flex items-center gap-2 mb-4">
               <Megaphone size={16} className="text-violet-400" />
               <h3 className={`text-base font-semibold ${textPri}`}>Marketing Pulse</h3>
             </div>
             <div className="space-y-4">
+              {showAds && (
+              <>
               <div>
                 <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Total Spend</p>
                 <p className={`text-2xl font-bold ${textPri}`}>${((data?.ads?.spend || 0) / 1000).toFixed(1)}K</p>
@@ -162,16 +173,22 @@ const IBOSSDashboard = () => {
                 <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Leads Generated</p>
                 <p className={`text-2xl font-bold ${textPri}`}>{(data?.ads?.leads || 0).toLocaleString()}</p>
               </div>
+              </>
+              )}
+              {showHubspot && (
               <div>
                 <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>HubSpot Deals</p>
                 <p className={`text-2xl font-bold ${textPri}`}>{(data?.crm?.deals || 0).toLocaleString()}</p>
               </div>
+              )}
             </div>
           </motion.div>
+          )}
         </div>
+        )}
 
-        {/* Top Contractor Sites */}
-        {(data?.top_websites || []).length > 0 && (
+        {/* Top Contractor Sites (GA4) */}
+        {showGA4 && (data?.top_websites || []).length > 0 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
             className={`rounded-xl p-6 mb-8 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">

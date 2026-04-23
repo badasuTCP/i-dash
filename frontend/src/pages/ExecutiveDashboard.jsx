@@ -5,6 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart,
 } from 'recharts';
 import { useTheme } from '../context/ThemeContext';
+import { useDashboardConfig } from '../context/DashboardConfigContext';
 import ScoreCard from '../components/scorecards/ScoreCard';
 import {
   Activity, AlertCircle, Wifi, WifiOff, Loader2,
@@ -76,6 +77,14 @@ const FALLBACK_YOY = [
 
 const ExecutiveSummary = () => {
   const { isDark } = useTheme();
+  const { isPipelineVisible } = useDashboardConfig();
+  const showHubspot      = isPipelineVisible('hubspot');
+  const showMetaAds      = isPipelineVisible('metaAds');
+  const showGoogleAds    = isPipelineVisible('googleAds');
+  const showGA4          = isPipelineVisible('ga4');
+  const showGoogleSheets = isPipelineVisible('googleSheets');
+  const showWooCommerce  = isPipelineVisible('woocommerce');
+  const showShopify      = isPipelineVisible('shopify');
   const { dateRange } = useDashboardDateFilter();
   const { registerExport, clearExport } = useExport();
 
@@ -451,21 +460,31 @@ const ExecutiveSummary = () => {
         </motion.div>
 
         {/* ── ROW 2 SCORECARDS (operational KPIs) ──────────────────────── */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <ScoreCard label="Sani-Tred Store Revenue"
-            value={wcStore?.scorecards?.totalRevenue || 0}
-            color="emerald" format="currency" />
-          <ScoreCard label="CP Store Revenue"
-            value={summary?.cp_shopify?.revenue || 0}
-            color="violet" format="currency" />
-          <ScoreCard label="Total Web Visits"
-            value={Object.values(webByBrand).reduce((a, w) => a + (w?.scorecards?.totalVisits || 0), 0)}
-            color="cyan" format="number" />
-          <ScoreCard label="HubSpot Deals Won"
-            value={hubspot?.scorecards?.deals_won || hubspot?.scorecards?.dealsWon || 0}
-            color="amber" format="number" />
-        </motion.div>
+        {(showWooCommerce || showShopify || showGA4 || showHubspot) && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {showWooCommerce && (
+              <ScoreCard label="Sani-Tred Store Revenue"
+                value={wcStore?.scorecards?.totalRevenue || 0}
+                color="emerald" format="currency" />
+            )}
+            {showShopify && (
+              <ScoreCard label="CP Store Revenue"
+                value={summary?.cp_shopify?.revenue || 0}
+                color="violet" format="currency" />
+            )}
+            {showGA4 && (
+              <ScoreCard label="Total Web Visits"
+                value={Object.values(webByBrand).reduce((a, w) => a + (w?.scorecards?.totalVisits || 0), 0)}
+                color="cyan" format="number" />
+            )}
+            {showHubspot && (
+              <ScoreCard label="HubSpot Deals Won"
+                value={hubspot?.scorecards?.deals_won || hubspot?.scorecards?.dealsWon || 0}
+                color="amber" format="number" />
+            )}
+          </motion.div>
+        )}
 
         {/* ── ROW 3 SCORECARDS — QB Revenue breakdown ─────────────────── */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.115 }}
@@ -506,6 +525,7 @@ const ExecutiveSummary = () => {
         </motion.div>
 
         {/* ── QUARTERLY KPI TABLE (TCP MAIN) ───────────────────────────── */}
+        {showGoogleSheets && (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
           className={`rounded-xl p-6 mb-8 ${cardBg}`}>
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -560,15 +580,17 @@ const ExecutiveSummary = () => {
           </div>
           <p className={`text-[10px] mt-2 ${textSecondary}`}>💡 Click any column header to sort</p>
         </motion.div>
+        )}
 
         {/* ── CROSS-DIVISION LIVE KPIS (NEW) ───────────────────────────── */}
+        {(showGA4 || showMetaAds || showGoogleAds) && (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
           className={`rounded-xl p-6 mb-8 ${cardBg}`}>
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 className="text-indigo-400" size={18} />
             <h3 className={`text-lg font-semibold ${textPrimary}`}>Cross-Division Live Metrics</h3>
             <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-400 ml-auto">
-              Source: GA4 + Meta Ads + Google Ads
+              Source: {[showGA4 && 'GA4', showMetaAds && 'Meta Ads', showGoogleAds && 'Google Ads'].filter(Boolean).join(' + ')}
             </span>
           </div>
           <div className="overflow-x-auto">
@@ -608,6 +630,7 @@ const ExecutiveSummary = () => {
             </table>
           </div>
         </motion.div>
+        )}
 
         {/* ── ROW 1: Revenue by Quarter + YOY ──────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
@@ -646,7 +669,9 @@ const ExecutiveSummary = () => {
         </div>
 
         {/* ── ROW 2: Marketing by Brand + Web Traffic by Brand (NEW) ───── */}
+        {((showMetaAds || showGoogleAds) || showGA4) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {(showMetaAds || showGoogleAds) && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.38 }}
             className={`rounded-xl p-6 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">
@@ -666,7 +691,9 @@ const ExecutiveSummary = () => {
               </ComposedChart>
             </ResponsiveContainer>
           </motion.div>
+          )}
 
+          {showGA4 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
             className={`rounded-xl p-6 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">
@@ -685,12 +712,14 @@ const ExecutiveSummary = () => {
               </BarChart>
             </ResponsiveContainer>
           </motion.div>
+          )}
         </div>
+        )}
 
         {/* ── ROW 3: Sani-Tred Store Revenue + HubSpot Summary ──────── */}
-        {(wcStore?.monthly?.length > 0 || hubspot) && (
+        {((showWooCommerce && wcStore?.monthly?.length > 0) || (showHubspot && hubspot)) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            {wcStore?.monthly?.length > 0 && (
+            {showWooCommerce && wcStore?.monthly?.length > 0 && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.46 }}
                 className={`rounded-xl p-6 ${cardBg}`}>
                 <div className="flex items-center gap-2 mb-4">
@@ -708,7 +737,7 @@ const ExecutiveSummary = () => {
                 </ResponsiveContainer>
               </motion.div>
             )}
-            {hubspot && (
+            {showHubspot && hubspot && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.48 }}
                 className={`rounded-xl p-6 ${cardBg}`}>
                 <div className="flex items-center gap-2 mb-4">

@@ -5,10 +5,12 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import { useTheme } from '../../context/ThemeContext';
+import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import { dashboardAPI } from '../../services/api';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
+import PipelineHiddenBanner from '../../components/common/PipelineHiddenBanner';
 import { Loader2, AlertCircle, ShoppingCart, Package, MapPin } from 'lucide-react';
 
 const fmtCurrency = (v) => {
@@ -34,6 +36,8 @@ const TABS = [
 const SaniTredRetail = () => {
   const { isDark } = useTheme();
   const { dateRange } = useDashboardDateFilter();
+  const { isPipelineVisible } = useDashboardConfig();
+  const wcVisible = isPipelineVisible('woocommerce');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
@@ -62,6 +66,12 @@ const SaniTredRetail = () => {
     border: `1px solid ${isDark ? 'rgba(71,85,105,0.3)' : 'rgba(203,213,225,0.5)'}`,
     borderRadius: '8px', color: isDark ? '#e2e8f0' : '#1e293b',
   };
+
+  if (!wcVisible) {
+    return <PipelineHiddenBanner pipelineLabel="WooCommerce (Sani-Tred)"
+      pageTitle="Sani-Tred Retail"
+      pageSubtitle="Sani-Tred retail store — WooCommerce orders, products, and customer insights" />;
+  }
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-indigo-400" size={36} /></div>;

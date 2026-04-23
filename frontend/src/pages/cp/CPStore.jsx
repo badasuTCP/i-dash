@@ -5,10 +5,12 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import { useTheme } from '../../context/ThemeContext';
+import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import { dashboardAPI } from '../../services/api';
 import { useDashboardDateFilter } from '../../hooks/useDashboardDateFilter';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
+import PipelineHiddenBanner from '../../components/common/PipelineHiddenBanner';
 import { Loader2, AlertCircle, ShoppingCart, Package, MapPin } from 'lucide-react';
 
 const fmtCurrency = (v) => {
@@ -35,6 +37,8 @@ const TABS = [
 const CPStore = () => {
   const { isDark } = useTheme();
   const { dateRange } = useDashboardDateFilter();
+  const { isPipelineVisible } = useDashboardConfig();
+  const shopifyVisible = isPipelineVisible('shopify');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
@@ -65,6 +69,12 @@ const CPStore = () => {
     border: `1px solid ${isDark ? 'rgba(71,85,105,0.3)' : 'rgba(203,213,225,0.5)'}`,
     borderRadius: '8px', color: isDark ? '#e2e8f0' : '#1e293b',
   };
+
+  if (!shopifyVisible) {
+    return <PipelineHiddenBanner pipelineLabel="Shopify (CP Store)"
+      pageTitle="CP Store"
+      pageSubtitle="The Concrete Protector store — Shopify orders, products, and customer insights" />;
+  }
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-indigo-400" size={36} /></div>;
@@ -103,6 +113,7 @@ const CPStore = () => {
             <span>Awaiting Shopify pipeline. Run the pipeline from Data Pipelines to load live data.</span>
           </div>
         )}
+
 
         {hasLive && <PageInsight insights={insights} />}
 

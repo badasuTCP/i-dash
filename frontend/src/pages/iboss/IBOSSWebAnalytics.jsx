@@ -4,14 +4,21 @@ import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import { useWebAnalytics } from '../../hooks/useWebAnalytics';
 import { useContractorWebData } from '../../hooks/useContractorWebData';
 import PropertySwitcher from '../../components/PropertySwitcher';
+import PipelineHiddenBanner from '../../components/common/PipelineHiddenBanner';
 
 const IBOSSWebAnalytics = () => {
-  const { isContractorActive } = useDashboardConfig();
+  const { isContractorActive, isPipelineVisible } = useDashboardConfig();
   const [selectedPropertyId, setSelectedPropertyId] = useState(null);
   const [selectedPropertyName, setSelectedPropertyName] = useState('All Properties');
 
   // Aggregate GA4 scorecards / trends — respects global date via hook internals
   const ga4 = useWebAnalytics('ibos', {}, selectedPropertyId);
+
+  if (!isPipelineVisible('ga4')) {
+    return <PipelineHiddenBanner pipelineLabel="Google Analytics (GA4)"
+      pageTitle="I-BOS Web Analytics"
+      pageSubtitle="Contractor web traffic, devices, and sources (GA4)" />;
+  }
 
   // Per-contractor breakdown table + pie chart — respects global date via hook internals
   const { contractorDetails: liveDetails, websiteBreakdown: liveBreakdown } =
