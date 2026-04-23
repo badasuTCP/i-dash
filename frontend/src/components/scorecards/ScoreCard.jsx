@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { TrendingUp, TrendingDown, Clock, AlertTriangle } from 'lucide-react';
+import { TrendingUp, TrendingDown, Clock, AlertTriangle, Info } from 'lucide-react';
 
 // ── Staleness thresholds (milliseconds) ──────────────────────────────────────
 const STALE_WARN_MS  = 4 * 60 * 60 * 1000;   // 4 hours  → amber
@@ -42,9 +42,25 @@ const ScoreCard = ({
   forecast = null,      // forecast value for this metric — shows vs-forecast indicator
   pending = false,      // if true, shows an asterisk + "pending" footnote
   pendingNote = null,   // custom footnote text (default: "* Pending definition")
+  infoNote = null,      // optional provenance note — renders an (i) icon top-right; click toggles tooltip
 }) => {
   const [displayValue, setDisplayValue] = useState(0);
   const [showTooltip, setShowTooltip] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const infoBoxRef = useRef(null);
+
+  // Close the info tooltip on outside click so it doesn't linger when the
+  // user clicks elsewhere.
+  useEffect(() => {
+    if (!showInfo) return;
+    const onDocClick = (ev) => {
+      if (infoBoxRef.current && !infoBoxRef.current.contains(ev.target)) {
+        setShowInfo(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showInfo]);
 
   const gradientMap = {
     blue: 'linear-gradient(135deg, #4F46E5, #3B82F6)',
@@ -264,18 +280,44 @@ const ScoreCard = ({
           )}
         </div>
 
-        {change !== null && change !== undefined && (
-          <div className="flex items-center gap-1 bg-white/20 rounded-full px-2 py-0.5">
-            {isPositive ? (
-              <TrendingUp className="w-3 h-3 text-white" />
-            ) : (
-              <TrendingDown className="w-3 h-3 text-white" />
-            )}
-            <span className="text-sm font-semibold text-white">
-              {isPositive ? '+' : '-'}{absChange.toFixed(1)}%
-            </span>
-          </div>
-        )}
+        <div className="flex items-center gap-1.5">
+          {change !== null && change !== undefined && (
+            <div className="flex items-center gap-1 bg-white/20 rounded-full px-2 py-0.5">
+              {isPositive ? (
+                <TrendingUp className="w-3 h-3 text-white" />
+              ) : (
+                <TrendingDown className="w-3 h-3 text-white" />
+              )}
+              <span className="text-sm font-semibold text-white">
+                {isPositive ? '+' : '-'}{absChange.toFixed(1)}%
+              </span>
+            </div>
+          )}
+          {infoNote && (
+            <div ref={infoBoxRef} className="relative">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setShowInfo((v) => !v); }}
+                className="w-5 h-5 rounded-full bg-white/15 hover:bg-white/30 flex items-center justify-center transition-colors"
+                title="About this metric"
+                aria-label="About this metric"
+              >
+                <Info className="w-3 h-3 text-white" />
+              </button>
+              <AnimatePresence>
+                {showInfo && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+                    className="absolute right-0 top-7 z-50 w-64 px-3 py-2 rounded-lg text-xs font-medium shadow-xl"
+                    style={{ backgroundColor: 'rgba(15, 17, 23, 0.98)', border: '1px solid rgba(71, 85, 105, 0.5)' }}
+                  >
+                    <p className="text-slate-200 leading-snug">{infoNote}</p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Value ──────────────────────────────────────────────────────── */}

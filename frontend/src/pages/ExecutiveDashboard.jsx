@@ -253,22 +253,28 @@ const ExecutiveSummary = () => {
         if (s.label === 'Equipment Sold' && (!value || value === 0) && equipmentSoldFromTable > 0) {
           value = equipmentSoldFromTable;
         }
-        // Combined Total Revenue is now canonically the Total Revenue row
-        // from the TCP MAIN quarterly table, summed over quarters that
-        // overlap the centralised date range. This makes the scorecard
-        // match what leadership reports, and it reacts to the date picker.
+        // Combined Total Revenue is renamed "Total Revenue" and now
+        // canonically maps to the Total Revenue row in the TCP MAIN
+        // quarterly table, summed over the quarters that overlap the
+        // centralised date range. Matches what leadership reports and
+        // reacts to the date picker.
+        let label = s.label;
         let source = s.source;
+        let infoNote = null;
         if (s.label === 'Combined Total Revenue') {
+          label = 'Total Revenue';
           value = combinedTotalRevenueFromTable;
           source = 'Google Sheets · TCP MAIN · Total Revenue row';
+          infoNote = 'Amount from the quarterly datasheet (QB) — reported by Molly Quick. Summed across quarters that overlap the selected date range.';
         }
         return {
-          label: s.label,
+          label,
           value,
           change: s.change ?? 0,
           color: palette[idx % palette.length],
           format: s.format || 'currency',
           source,
+          infoNote,
         };
       });
     }
@@ -276,8 +282,9 @@ const ExecutiveSummary = () => {
     const spend = Object.values(mktByBrand).reduce((a, m) => a + (m?.scorecards?.totalSpend || 0), 0);
     const leads = Object.values(mktByBrand).reduce((a, m) => a + (m?.scorecards?.totalLeads || 0), 0);
     return [
-      { label: 'Combined Total Revenue', value: combinedTotalRevenueFromTable, change: null, color: 'blue',    format: 'currency',
-        source: 'Google Sheets · TCP MAIN · Total Revenue row' },
+      { label: 'Total Revenue', value: combinedTotalRevenueFromTable, change: null, color: 'blue',    format: 'currency',
+        source: 'Google Sheets · TCP MAIN · Total Revenue row',
+        infoNote: 'Amount from the quarterly datasheet (QB) — reported by Molly Quick. Summed across quarters that overlap the selected date range.' },
       { label: 'Marketing Spend',        value: spend,   change: 19.4, color: 'violet',  format: 'currency' },
       { label: 'Marketing Leads',        value: leads,   change: null, color: 'emerald', format: 'number'   },
       { label: 'Equipment Sold',         value: equipmentSoldFromTable, change: null, color: 'amber',  format: 'number'   },
