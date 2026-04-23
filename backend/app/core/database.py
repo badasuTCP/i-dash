@@ -115,6 +115,7 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _ensure_pipeline_schedules_schema(conn)
         await _ensure_meta_ad_metrics_schema(conn)
         await _ensure_meta_period_reach_schema(conn)
         await _ensure_google_ad_metrics_schema(conn)
@@ -122,6 +123,33 @@ async def init_db() -> None:
         await _ensure_shopify_customers_schema(conn)
         await _backfill_ad_metric_divisions(conn)
         await _reconcile_ga4_property_enabled(conn)
+
+
+async def _ensure_pipeline_schedules_schema(conn) -> None:
+    """Belt-and-suspenders: explicitly create pipeline_schedules.
+
+    Base.metadata.create_all appears to have skipped this table on a
+    recent deploy even though app.models.pipeline_schedule is imported
+    above. Running CREATE TABLE IF NOT EXISTS is cheap and idempotent;
+    it ensures the schedule API endpoints never hit UndefinedTableError.
+    """
+    try:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS pipeline_schedules (
+                id SERIAL PRIMARY KEY,
+                pipeline_name VARCHAR(64) NOT NULL UNIQUE,
+                interval_value VARCHAR(16) NOT NULL DEFAULT '4hrs',
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_pipeline_schedules_pipeline_name "
+            "ON pipeline_schedules (pipeline_name)"
+        ))
+        logger.info("ensure_schema: pipeline_schedules reconciled (idempotent)")
+    except Exception as exc:
+        logger.warning("ensure_schema: pipeline_schedules create failed: %s", exc)
 
 
 async def _ensure_meta_ad_metrics_schema(conn) -> None:
