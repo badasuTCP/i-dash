@@ -104,6 +104,28 @@ export const DashboardConfigProvider = ({ children }) => {
   // Full contractor list from server (includes GA4-discovered)
   const [serverContractors, setServerContractors] = useState(ALL_CONTRACTORS);
 
+  // Cross-tab / other-window sync: if the user toggles a pipeline on
+  // Pipeline Control in one tab, the dashboards in other tabs should
+  // update without a manual refresh. The browser emits the "storage"
+  // event on every tab EXCEPT the one that wrote — so this is strictly
+  // cross-tab. Within the same tab, React context already propagates.
+  useEffect(() => {
+    const onStorage = (ev) => {
+      if (ev.key !== PIPELINE_VIS_KEY) return;
+      try {
+        const next = ev.newValue ? JSON.parse(ev.newValue) : {};
+        setConfig((prev) => ({
+          ...prev,
+          pipelines: { ...prev.pipelines, ...next },
+        }));
+      } catch {
+        /* ignore bad payloads */
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   // ── Fetch contractor visibility from backend on mount ───────────────
   useEffect(() => {
     let cancelled = false;
