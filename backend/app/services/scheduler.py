@@ -210,10 +210,37 @@ class SchedulerService:
         """Ensure every pipeline has a row in ``pipeline_schedules``.
 
         Idempotent — only inserts rows for pipelines that don't already
-        have a stored schedule.
+        have a stored schedule. Runs its own CREATE TABLE IF NOT EXISTS
+        first so we don't lose the seed to a race where init_db's DDL
+        hasn't propagated to this session's connection yet.
         """
         try:
             async with async_session_maker() as session:
+                # Belt-and-suspenders: refresh this session's view of the
+                # schema before querying. Cheap; idempotent.
+                from sqlalchemy import text as _text
+                try:
+                    await session.execute(_text(
+                        """
+                        CREATE TABLE IF NOT EXISTS pipeline_schedules (
+                            id SERIAL PRIMARY KEY,
+                            pipeline_name VARCHAR(64) NOT NULL UNIQUE,
+                            interval_value VARCHAR(16) NOT NULL DEFAULT '4hrs',
+                            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                            updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                        )
+                        """
+                    ))
+                    await session.commit()
+                except Exception as ddl_exc:
+                    self.logger.warning(
+                        "seed DDL refresh failed (ignored): %s", ddl_exc
+                    )
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+
                 stmt = select(PipelineSchedule.pipeline_name)
                 existing = {
                     row for row in (await session.execute(stmt)).scalars()
