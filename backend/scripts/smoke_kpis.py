@@ -58,7 +58,8 @@ async def run_checks(days: int, strict: bool) -> list[CheckResult]:
     from sqlalchemy import and_, func, select
     from app.core.database import async_session_maker
     from app.models.metrics import (
-        AdMetric, WebAnalytic, HubSpotDeal, ShopifyOrder, WCOrder, GoogleSheetMetric,
+        MetaAdMetric, GoogleAdMetric, GA4Metric, HubSpotDeal,
+        ShopifyOrder, WCOrder, GoogleSheetMetric,
     )
 
     end = date.today()
@@ -118,38 +119,44 @@ async def run_checks(days: int, strict: bool) -> list[CheckResult]:
         except Exception as exc:
             _add("I-BOS Contractor Revenue (QB sheet)", 0, 0, f"error: {exc}")
 
-        # 4/5. Ad spend by platform
-        for platform in ("meta", "google"):
-            try:
-                q = await db.execute(
-                    select(func.coalesce(func.sum(AdMetric.spend), 0))
-                    .where(and_(
-                        AdMetric.platform == platform,
-                        AdMetric.date >= start,
-                        AdMetric.date <= end,
-                    ))
-                )
-                value = float(q.scalar() or 0)
-                _add(f"{platform.title()} Ad Spend", value, 0.01)
-            except Exception as exc:
-                _add(f"{platform.title()} Ad Spend", 0, 0, f"error: {exc}")
+        # 4. Meta Ad Spend
+        try:
+            q = await db.execute(
+                select(func.coalesce(func.sum(MetaAdMetric.spend), 0))
+                .where(and_(MetaAdMetric.date >= start, MetaAdMetric.date <= end))
+            )
+            value = float(q.scalar() or 0)
+            _add("Meta Ad Spend", value, 0.01)
+        except Exception as exc:
+            _add("Meta Ad Spend", 0, 0, f"error: {exc}")
+
+        # 5. Google Ad Spend
+        try:
+            q = await db.execute(
+                select(func.coalesce(func.sum(GoogleAdMetric.spend), 0))
+                .where(and_(GoogleAdMetric.date >= start, GoogleAdMetric.date <= end))
+            )
+            value = float(q.scalar() or 0)
+            _add("Google Ad Spend", value, 0.01)
+        except Exception as exc:
+            _add("Google Ad Spend", 0, 0, f"error: {exc}")
 
         # 6. GA4 Web Visits (total_users is the canonical "web visitors" metric)
         try:
             q = await db.execute(
-                select(func.coalesce(func.sum(WebAnalytic.total_users), 0))
-                .where(and_(WebAnalytic.date >= start, WebAnalytic.date <= end))
+                select(func.coalesce(func.sum(GA4Metric.total_users), 0))
+                .where(and_(GA4Metric.date >= start, GA4Metric.date <= end))
             )
             value = float(q.scalar() or 0)
             _add("GA4 Web Users", value, 1)
         except Exception as exc:
             _add("GA4 Web Users", 0, 0, f"error: {exc}")
 
-        # 7. HubSpot Deals Won
+        # 7. HubSpot Deals Won (HubSpotDeal.stage, not deal_stage)
         try:
             q = await db.execute(
                 select(func.count(HubSpotDeal.id))
-                .where(HubSpotDeal.deal_stage.ilike("%closed%won%"))
+                .where(HubSpotDeal.stage.ilike("%closed%won%"))
             )
             value = float(q.scalar() or 0)
             _add("HubSpot Closed-Won Deals (lifetime)", value, 1)
