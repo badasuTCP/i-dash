@@ -4716,7 +4716,11 @@ async def get_shopify_store(
             "regions": [],
         }
 
-    # Scorecards — date-filtered, with all-orders fallback
+    # Scorecards — strictly date-filtered. Previously had a
+    # "if zero orders in range, show all-time totals" fallback that
+    # made "today" quote the lifetime Shopify figure ($3,863 / 7
+    # orders). Same bug the WooCommerce handler had — removed for
+    # identical reasons. If the range is genuinely empty, return 0.
     totals = await db.execute(
         select(
             func.count(ShopifyOrder.id).label("total_orders"),
@@ -4734,24 +4738,6 @@ async def get_shopify_store(
     total_orders = int(t.total_orders or 0)
     total_revenue = float(t.total_revenue or 0)
     avg_order = float(t.avg_order_value or 0)
-
-    if total_orders == 0:
-        totals_all = await db.execute(
-            select(
-                func.count(ShopifyOrder.id).label("total_orders"),
-                func.coalesce(func.sum(ShopifyOrder.total), 0).label("total_revenue"),
-                func.coalesce(func.avg(ShopifyOrder.total), 0).label("avg_order_value"),
-                func.coalesce(func.sum(ShopifyOrder.discount), 0).label("total_discount"),
-                func.coalesce(func.sum(ShopifyOrder.shipping), 0).label("total_shipping"),
-                func.coalesce(func.sum(ShopifyOrder.tax), 0).label("total_tax"),
-            )
-        )
-        ta = totals_all.first()
-        if int(ta.total_orders or 0) > 0:
-            t = ta
-            total_orders = int(t.total_orders or 0)
-            total_revenue = float(t.total_revenue or 0)
-            avg_order = float(t.avg_order_value or 0)
 
     cust_count_q = await db.execute(select(func.count(ShopifyCustomer.id)))
     unique_customers = int(cust_count_q.scalar() or 0)
