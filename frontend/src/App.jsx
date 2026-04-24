@@ -39,6 +39,7 @@ import AccountManagement from './pages/AccountManagement';
 import SettingsPage from './pages/SettingsPage';
 import AdminControls from './pages/AdminControls';
 import DataIntelligence from './pages/DataIntelligence';
+import DocumentsPage from './pages/DocumentsPage';
 import AIInsights from './pages/AIInsights';
 import LoginPage from './components/auth/LoginPage';
 
@@ -115,6 +116,7 @@ const AppContent = () => {
       <Route path="/dashboard/accounts" element={<ProtectedPageRoute requiredRole="data-analyst"><AccountManagement /></ProtectedPageRoute>} />
       <Route path="/dashboard/admin-controls" element={<ProtectedPageRoute requiredRole="data-analyst"><AdminControls /></ProtectedPageRoute>} />
       <Route path="/dashboard/data-intelligence" element={<ProtectedPageRoute requiredRole="data-analyst"><DataIntelligence /></ProtectedPageRoute>} />
+      <Route path="/dashboard/documents" element={<ProtectedPageRoute requiredRole="data-analyst"><DocumentsPage /></ProtectedPageRoute>} />
 
       {/* AI Insights — both roles. Previously routed to ExecutiveDashboard
           which made the nav entry a duplicate of / (Executive Summary). Now

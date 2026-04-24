@@ -8,6 +8,7 @@ from app.api.ai import router as ai_router
 from app.api.auth import router as auth_router
 from app.api.contractors import router as contractors_router
 from app.api.dashboard import router as dashboard_router
+from app.api.documents import router as documents_router
 from app.api.pipelines import router as pipelines_router
 from app.api.shopify_oauth import router as shopify_oauth_router
 from app.api.users import router as users_router
@@ -19,5 +20,6 @@ __all__ = [
     "pipelines_router",
     "ai_router",
     "contractors_router",
+    "documents_router",
     "shopify_oauth_router",
 ]

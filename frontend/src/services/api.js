@@ -199,6 +199,16 @@ export const aiAPI = {
     }),
 };
 
+// Documents / Google Sheets viewer — admin-only raw source access
+export const documentsAPI = {
+  listSheets: () => apiClient.get('/documents/sheets'),
+  // sheet_name may contain '::' and spaces — encode it once for the URL
+  getSheetRows: (sheetName, { limit = 500, offset = 0 } = {}) =>
+    apiClient.get(`/documents/sheets/${encodeURIComponent(sheetName)}`, {
+      params: { limit, offset },
+    }),
+};
+
 // Contractor endpoints — server-persisted visibility + auto-discovery
 export const contractorsAPI = {
   getAll: () => apiClient.get('/contractors'),

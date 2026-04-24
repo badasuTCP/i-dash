@@ -39,6 +39,7 @@ from app.api import (
     auth_router,
     contractors_router,
     dashboard_router,
+    documents_router,
     pipelines_router,
     shopify_oauth_router,
     users_router,
@@ -374,6 +375,11 @@ app.include_router(
 
 app.include_router(
     shopify_oauth_router,
+    prefix="/api",
+)
+
+app.include_router(
+    documents_router,
     prefix="/api",
 )
 
