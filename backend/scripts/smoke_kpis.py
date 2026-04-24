@@ -68,12 +68,25 @@ async def run_checks(days: int, strict: bool) -> list[CheckResult]:
     results: list[CheckResult] = []
 
     def _add(name: str, value: float, threshold: float, reason: str = "") -> None:
-        passed = (value >= threshold) or (threshold == 0 and reason.startswith("skipped"))
+        # Classification:
+        #   skipped:X   → pass-through (no data to check)
+        #   error:Y     → FAIL (broken query / missing table)
+        #   otherwise   → pass iff value meets threshold
+        if reason.startswith("skipped"):
+            passed = True
+        elif reason.startswith("error"):
+            passed = False
+        else:
+            passed = value >= threshold
         results.append(CheckResult(name=name, value=value, threshold=threshold, passed=passed, reason=reason))
 
-    async with async_session_maker() as db:
-        # 1. CP Store Revenue
-        try:
+    # Each check opens its own session so one UndefinedTable / schema
+    # error doesn't poison the transaction and cascade false passes into
+    # every subsequent check.
+
+    # 1. CP Store Revenue
+    try:
+        async with async_session_maker() as db:
             q = await db.execute(
                 select(func.coalesce(func.sum(ShopifyOrder.total), 0))
                 .where(and_(ShopifyOrder.date_created >= start, ShopifyOrder.date_created <= end))
@@ -81,15 +94,16 @@ async def run_checks(days: int, strict: bool) -> list[CheckResult]:
             row_count_q = await db.execute(select(func.count(ShopifyOrder.id)))
             total_rows = int(row_count_q.scalar() or 0)
             value = float(q.scalar() or 0)
-            if total_rows == 0:
-                _add("CP Store Revenue (Shopify)", 0, 0, "skipped: no ShopifyOrder rows exist in this env")
-            else:
-                _add("CP Store Revenue (Shopify)", value, 0.01)
-        except Exception as exc:
-            _add("CP Store Revenue (Shopify)", 0, 0, f"error: {exc}")
+        if total_rows == 0:
+            _add("CP Store Revenue (Shopify)", 0, 0, "skipped: no ShopifyOrder rows exist in this env")
+        else:
+            _add("CP Store Revenue (Shopify)", value, 0.01)
+    except Exception as exc:
+        _add("CP Store Revenue (Shopify)", 0, 0, f"error: {exc}")
 
-        # 2. Sani-Tred Retail Revenue
-        try:
+    # 2. Sani-Tred Retail Revenue
+    try:
+        async with async_session_maker() as db:
             q = await db.execute(
                 select(func.coalesce(func.sum(WCOrder.total), 0))
                 .where(and_(WCOrder.date_created >= start, WCOrder.date_created <= end, WCOrder.division == "sanitred"))
@@ -97,15 +111,16 @@ async def run_checks(days: int, strict: bool) -> list[CheckResult]:
             row_count_q = await db.execute(select(func.count(WCOrder.id)))
             total_rows = int(row_count_q.scalar() or 0)
             value = float(q.scalar() or 0)
-            if total_rows == 0:
-                _add("Sani-Tred Retail Revenue (WooCommerce)", 0, 0, "skipped: no WCOrder rows exist in this env")
-            else:
-                _add("Sani-Tred Retail Revenue (WooCommerce)", value, 0.01)
-        except Exception as exc:
-            _add("Sani-Tred Retail Revenue (WooCommerce)", 0, 0, f"error: {exc}")
+        if total_rows == 0:
+            _add("Sani-Tred Retail Revenue (WooCommerce)", 0, 0, "skipped: no WCOrder rows exist in this env")
+        else:
+            _add("Sani-Tred Retail Revenue (WooCommerce)", value, 0.01)
+    except Exception as exc:
+        _add("Sani-Tred Retail Revenue (WooCommerce)", 0, 0, f"error: {exc}")
 
-        # 3. I-BOS Contractor Revenue (qb_revenue:: sheet)
-        try:
+    # 3. I-BOS Contractor Revenue (qb_revenue:: sheet)
+    try:
+        async with async_session_maker() as db:
             q = await db.execute(
                 select(func.coalesce(func.sum(GoogleSheetMetric.metric_value), 0))
                 .where(and_(
@@ -115,53 +130,57 @@ async def run_checks(days: int, strict: bool) -> list[CheckResult]:
                 ))
             )
             value = float(q.scalar() or 0)
-            _add("I-BOS Contractor Revenue (QB sheet)", value, 0.01)
-        except Exception as exc:
-            _add("I-BOS Contractor Revenue (QB sheet)", 0, 0, f"error: {exc}")
+        _add("I-BOS Contractor Revenue (QB sheet)", value, 0.01)
+    except Exception as exc:
+        _add("I-BOS Contractor Revenue (QB sheet)", 0, 0, f"error: {exc}")
 
-        # 4. Meta Ad Spend
-        try:
+    # 4. Meta Ad Spend
+    try:
+        async with async_session_maker() as db:
             q = await db.execute(
                 select(func.coalesce(func.sum(MetaAdMetric.spend), 0))
                 .where(and_(MetaAdMetric.date >= start, MetaAdMetric.date <= end))
             )
             value = float(q.scalar() or 0)
-            _add("Meta Ad Spend", value, 0.01)
-        except Exception as exc:
-            _add("Meta Ad Spend", 0, 0, f"error: {exc}")
+        _add("Meta Ad Spend", value, 0.01)
+    except Exception as exc:
+        _add("Meta Ad Spend", 0, 0, f"error: {exc}")
 
-        # 5. Google Ad Spend
-        try:
+    # 5. Google Ad Spend
+    try:
+        async with async_session_maker() as db:
             q = await db.execute(
                 select(func.coalesce(func.sum(GoogleAdMetric.spend), 0))
                 .where(and_(GoogleAdMetric.date >= start, GoogleAdMetric.date <= end))
             )
             value = float(q.scalar() or 0)
-            _add("Google Ad Spend", value, 0.01)
-        except Exception as exc:
-            _add("Google Ad Spend", 0, 0, f"error: {exc}")
+        _add("Google Ad Spend", value, 0.01)
+    except Exception as exc:
+        _add("Google Ad Spend", 0, 0, f"error: {exc}")
 
-        # 6. GA4 Web Visits (total_users is the canonical "web visitors" metric)
-        try:
+    # 6. GA4 Web Visits (total_users is the canonical "web visitors" metric)
+    try:
+        async with async_session_maker() as db:
             q = await db.execute(
                 select(func.coalesce(func.sum(GA4Metric.total_users), 0))
                 .where(and_(GA4Metric.date >= start, GA4Metric.date <= end))
             )
             value = float(q.scalar() or 0)
-            _add("GA4 Web Users", value, 1)
-        except Exception as exc:
-            _add("GA4 Web Users", 0, 0, f"error: {exc}")
+        _add("GA4 Web Users", value, 1)
+    except Exception as exc:
+        _add("GA4 Web Users", 0, 0, f"error: {exc}")
 
-        # 7. HubSpot Deals Won (HubSpotDeal.stage, not deal_stage)
-        try:
+    # 7. HubSpot Deals Won (HubSpotDeal.stage, not deal_stage)
+    try:
+        async with async_session_maker() as db:
             q = await db.execute(
                 select(func.count(HubSpotDeal.id))
                 .where(HubSpotDeal.stage.ilike("%closed%won%"))
             )
             value = float(q.scalar() or 0)
-            _add("HubSpot Closed-Won Deals (lifetime)", value, 1)
-        except Exception as exc:
-            _add("HubSpot Closed-Won Deals (lifetime)", 0, 0, f"error: {exc}")
+        _add("HubSpot Closed-Won Deals (lifetime)", value, 1)
+    except Exception as exc:
+        _add("HubSpot Closed-Won Deals (lifetime)", 0, 0, f"error: {exc}")
 
     return results
 

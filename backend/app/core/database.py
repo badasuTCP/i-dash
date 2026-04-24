@@ -116,6 +116,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_pipeline_schedules_schema(conn)
+        await _ensure_wc_orders_schema(conn)
         await _ensure_meta_ad_metrics_schema(conn)
         await _ensure_meta_period_reach_schema(conn)
         await _ensure_google_ad_metrics_schema(conn)
@@ -150,6 +151,70 @@ async def _ensure_pipeline_schedules_schema(conn) -> None:
         logger.info("ensure_schema: pipeline_schedules reconciled (idempotent)")
     except Exception as exc:
         logger.warning("ensure_schema: pipeline_schedules create failed: %s", exc)
+
+
+async def _ensure_wc_orders_schema(conn) -> None:
+    """Belt-and-suspenders: explicitly create wc_orders + wc_products.
+
+    Same class of bug as pipeline_schedules — Base.metadata.create_all
+    silently skipped this table on Railway even though app.models.metrics
+    is force-imported above. Confirmed by the smoke-test probe running
+    `SELECT ... FROM wc_orders` and getting UndefinedTableError, which
+    left Sani-Tred Retail Revenue pinned at $0 regardless of how many
+    times the WooCommerce pipeline ran (INSERT was failing silently).
+    """
+    try:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS wc_orders (
+                id SERIAL PRIMARY KEY,
+                order_id VARCHAR(64) UNIQUE NOT NULL,
+                order_number VARCHAR(64),
+                status VARCHAR(32) NOT NULL DEFAULT 'completed',
+                total DOUBLE PRECISION NOT NULL DEFAULT 0,
+                subtotal DOUBLE PRECISION NOT NULL DEFAULT 0,
+                tax DOUBLE PRECISION NOT NULL DEFAULT 0,
+                shipping DOUBLE PRECISION NOT NULL DEFAULT 0,
+                discount DOUBLE PRECISION NOT NULL DEFAULT 0,
+                currency VARCHAR(8) NOT NULL DEFAULT 'USD',
+                payment_method VARCHAR(64),
+                customer_email VARCHAR(256),
+                billing_state VARCHAR(64),
+                billing_country VARCHAR(8),
+                items_count INTEGER NOT NULL DEFAULT 0,
+                date_created DATE,
+                date_completed DATE,
+                division VARCHAR(32) NOT NULL DEFAULT 'sanitred',
+                fetched_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_wc_orders_date_created "
+            "ON wc_orders (date_created)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_wc_orders_order_id "
+            "ON wc_orders (order_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS wc_products (
+                id SERIAL PRIMARY KEY,
+                product_id VARCHAR(64) UNIQUE NOT NULL,
+                sku VARCHAR(128),
+                name VARCHAR(256) NOT NULL,
+                price DOUBLE PRECISION NOT NULL DEFAULT 0,
+                regular_price DOUBLE PRECISION,
+                sale_price DOUBLE PRECISION,
+                stock_quantity INTEGER,
+                stock_status VARCHAR(32),
+                total_sales INTEGER NOT NULL DEFAULT 0,
+                categories VARCHAR(512),
+                division VARCHAR(32) NOT NULL DEFAULT 'sanitred',
+                fetched_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """))
+        logger.info("ensure_schema: wc_orders + wc_products reconciled (idempotent)")
+    except Exception as exc:
+        logger.warning("ensure_schema: wc_orders create failed: %s", exc)
 
 
 async def _ensure_meta_ad_metrics_schema(conn) -> None:
