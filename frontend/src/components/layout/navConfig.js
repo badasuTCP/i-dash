@@ -103,5 +103,5 @@ export const adminLinks = [
   { to: '/dashboard/admin-controls',    label: 'Admin Controls',     icon: ShieldCheck,   roles: ['data-analyst'] },
   { to: '/dashboard/ai',               label: 'AI Insights',        icon: Sparkles,      roles: ['data-analyst', 'executive'] },
   { to: '/dashboard/accounts',         label: 'Account Management', icon: Users,         roles: ['data-analyst'] },
-  { to: '/settings',                   label: 'Settings',           icon: Settings,      roles: ['data-analyst'] },
+  { to: '/settings',                   label: 'Settings',           icon: Settings,      roles: ['data-analyst', 'executive'] },
 ];

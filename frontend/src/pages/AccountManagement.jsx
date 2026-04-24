@@ -16,19 +16,9 @@ const ROLE_MAP = {
   viewer:   { label: 'Viewer',      color: 'slate',   bg: 'bg-slate-500/15 text-slate-400 border-slate-500/20' },
 };
 
-// Modules that super admin can grant/revoke per user
-const ALL_MODULES = [
-  { key: 'dashboards',    label: 'Dashboards' },
-  { key: 'web-analytics', label: 'Web Analytics' },
-  { key: 'marketing',     label: 'Marketing Campaign' },
-  { key: 'contractors',   label: 'Contractor Breakdown' },
-  { key: 'pipelines',     label: 'Data Pipelines' },
-  { key: 'data-intel',    label: 'Data Intelligence' },
-  { key: 'admin-controls',label: 'Admin Controls' },
-  { key: 'ai-insights',   label: 'AI Insights' },
-  { key: 'accounts',      label: 'Account Management' },
-  { key: 'settings',      label: 'Settings' },
-];
+// Module access is role-based — Super Admins see everything, Executives
+// see Executive Summary + CP/Sani-Tred/I-BOS dashboards. There is no
+// per-user module grant system.
 
 // ── Helper: detect demo mode ─────────────────────────────────────────────────
 const isDemoMode = (() => {
@@ -52,7 +42,7 @@ const AccountManagement = () => {
   const [toast, setToast] = useState(null);
 
   // Form state for add/edit
-  const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'director', department: 'all', modules: [] });
+  const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'director', department: 'all' });
   const [showPassword, setShowPassword] = useState(false);
 
   // Style helpers
@@ -70,19 +60,14 @@ const AccountManagement = () => {
     try {
       const res = await usersAPI.getAll();
       const list = Array.isArray(res.data) ? res.data : res.data?.users || [];
-      // Attach saved module access (from localStorage for now — backend can persist later)
-      const moduleMap = JSON.parse(localStorage.getItem('idash_user_modules') || '{}');
-      setUsers(list.map((u) => ({
-        ...u,
-        modules: moduleMap[u.id] || (u.role === 'admin' ? ALL_MODULES.map((m) => m.key) : ['dashboards', 'web-analytics', 'marketing', 'contractors', 'ai-insights']),
-      })));
+      setUsers(list);
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || 'Failed to load users';
       setError(msg);
       // Fallback — if in demo mode, show placeholder
       if (isDemoMode) {
         setUsers([
-          { id: 1, full_name: 'Daniel Badasu', email: 'daniel@theconcreteprotector.com', role: 'admin', department: 'all', is_active: true, created_at: '2024-01-15', modules: ALL_MODULES.map((m) => m.key) },
+          { id: 1, full_name: 'Daniel Badasu', email: 'daniel@theconcreteprotector.com', role: 'admin', department: 'all', is_active: true, created_at: '2024-01-15' },
         ]);
         setError('Demo mode — showing local data. Sign in to manage real accounts.');
       }
@@ -108,7 +93,7 @@ const AccountManagement = () => {
 
   // ── Open Add User modal ──────────────────────────────────────────────────
   const openAdd = () => {
-    setForm({ full_name: '', email: '', password: '', role: 'director', department: 'all', modules: ['dashboards', 'web-analytics', 'marketing', 'contractors', 'ai-insights'] });
+    setForm({ full_name: '', email: '', password: '', role: 'director', department: 'all' });
     setShowPassword(false);
     setModal({ type: 'add' });
   };
@@ -121,7 +106,6 @@ const AccountManagement = () => {
       password: '',
       role: user.role || 'director',
       department: user.department || 'all',
-      modules: user.modules || [],
     });
     setModal({ type: 'edit', user });
   };
@@ -146,10 +130,6 @@ const AccountManagement = () => {
           department: form.department,
           is_active: modal.user.is_active,
         });
-        // Save module access locally
-        const moduleMap = JSON.parse(localStorage.getItem('idash_user_modules') || '{}');
-        moduleMap[modal.user.id] = form.modules;
-        localStorage.setItem('idash_user_modules', JSON.stringify(moduleMap));
         showToast(`User ${form.full_name} updated`);
       }
       setModal(null);
@@ -195,16 +175,6 @@ const AccountManagement = () => {
     }
   };
 
-  // ── Toggle module access ─────────────────────────────────────────────────
-  const toggleModule = (key) => {
-    setForm((prev) => ({
-      ...prev,
-      modules: prev.modules.includes(key)
-        ? prev.modules.filter((m) => m !== key)
-        : [...prev.modules, key],
-    }));
-  };
-
   // ── Stats ────────────────────────────────────────────────────────────────
   const activeCount = users.filter((u) => u.is_active).length;
   const suspendedCount = users.filter((u) => !u.is_active).length;
@@ -235,7 +205,7 @@ const AccountManagement = () => {
         <div>
           <h2 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Account Management</h2>
           <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Manage users, roles, and module access
+            Manage users, roles, and account status
           </p>
         </div>
         <motion.button
@@ -294,7 +264,7 @@ const AccountManagement = () => {
             <table className="w-full">
               <thead>
                 <tr className={isDark ? 'bg-[#0f1117]/50' : 'bg-slate-50'}>
-                  {['User', 'Role', 'Status', 'Modules', 'Actions'].map((h) => (
+                  {['User', 'Role', 'Status', 'Actions'].map((h) => (
                     <th key={h} className={`px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{h}</th>
                   ))}
                 </tr>
@@ -325,11 +295,6 @@ const AccountManagement = () => {
                             : 'bg-amber-500/15 text-amber-400 border-amber-500/20'
                         }`}>
                           {u.is_active ? 'Active' : 'Suspended'}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                          {u.role === 'admin' ? 'All modules' : `${(u.modules || []).length} modules`}
                         </span>
                       </td>
                       <td className="px-5 py-4">
@@ -453,43 +418,12 @@ const AccountManagement = () => {
                       </select>
                     </div>
 
-                    {/* Module Access Toggles (only for non-admin) */}
-                    {form.role !== 'admin' && (
-                      <div>
-                        <label className={`text-xs font-medium uppercase tracking-wider mb-2 block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                          Module Access
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {ALL_MODULES.map((mod) => {
-                            const enabled = form.modules.includes(mod.key);
-                            return (
-                              <button key={mod.key} type="button" onClick={() => toggleModule(mod.key)}
-                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
-                                  enabled
-                                    ? isDark
-                                      ? 'bg-[#265AA9]/20 border-[#265AA9]/40 text-[#55A8C3]'
-                                      : 'bg-[#265AA9]/10 border-[#265AA9]/30 text-[#265AA9]'
-                                    : isDark
-                                      ? 'bg-slate-800/50 border-slate-700/30 text-slate-500'
-                                      : 'bg-slate-50 border-slate-200 text-slate-400'
-                                }`}>
-                                <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${
-                                  enabled ? 'bg-[#265AA9] border-[#265AA9]' : isDark ? 'border-slate-600' : 'border-slate-300'
-                                }`}>
-                                  {enabled && <CheckCircle size={10} className="text-white" />}
-                                </div>
-                                {mod.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                    {form.role === 'admin' && (
-                      <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        Super Admins have access to all modules automatically.
-                      </p>
-                    )}
+                    {/* Role-based access summary — module access is derived from role, not toggled per user. */}
+                    <div className={`p-3 rounded-lg text-xs ${isDark ? 'bg-slate-800/40 text-slate-400' : 'bg-slate-50 text-slate-500'}`}>
+                      {form.role === 'admin'
+                        ? 'Super Admins see every module: Dashboards, Pipelines, Data Intelligence, Admin Controls, Account Management, Settings, AI Insights.'
+                        : 'Executive users see: Executive Summary and every dashboard under CP, Sani-Tred, I-BOS, plus Sales Intelligence, AI Insights, and personal Settings.'}
+                    </div>
                   </div>
 
                   {/* Save / Cancel */}

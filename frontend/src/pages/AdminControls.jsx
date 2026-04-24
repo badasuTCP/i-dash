@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Shield, Eye, EyeOff, RotateCcw, Database, LayoutDashboard, Building2, Users, ExternalLink } from 'lucide-react';
+import { Shield, RotateCcw, Database, Users, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useDashboardConfig, ALL_CONTRACTORS as SEED_CONTRACTORS } from '../context/DashboardConfigContext';
@@ -64,7 +64,7 @@ const ControlRow = ({ label, description, enabled, onChange, isDark }) => {
 
 const AdminControls = () => {
   const { isDark } = useTheme();
-  const { config, updatePipeline, updateSection, updateDivision, updateContractor, setAllContractors, resetToDefaults, allContractors } = useDashboardConfig();
+  const { config, updatePipeline, updateContractor, setAllContractors, resetToDefaults, allContractors } = useDashboardConfig();
   // Use server-merged list (includes GA4-discovered) with fallback to seed data
   const ALL_CONTRACTORS = allContractors || SEED_CONTRACTORS;
 
@@ -77,38 +77,12 @@ const AdminControls = () => {
     { key: 'googleAds', label: 'Google Ads', description: 'Search, display, and video campaign data' },
     { key: 'ga4', label: 'Google Analytics 4', description: 'Website traffic, sessions, and user behavior' },
     { key: 'googleSheets', label: 'Google Sheets', description: 'Custom data imports and manual entries' },
-  ];
-
-  const sectionItems = [
-    { key: 'scorecards', label: 'Scorecards (KPI Cards)', description: 'Top-level metric summaries' },
-    { key: 'revenueTrend', label: 'Revenue Trend Chart', description: 'Revenue over time visualization' },
-    { key: 'salesByCategory', label: 'Sales by Category', description: 'Category distribution pie chart' },
-    { key: 'topProducts', label: 'Top Products & Services', description: 'Product revenue rankings' },
-    { key: 'quarterlyPerformance', label: 'Quarterly Performance Table', description: 'Quarter-over-quarter KPI comparison' },
-    { key: 'marketingFunnel', label: 'Marketing Funnel', description: 'Impressions to conversions funnel' },
-    { key: 'spendVsRevenue', label: 'Spend vs Revenue', description: 'Marketing spend efficiency chart' },
-    { key: 'ctrAnalysis', label: 'CTR Analysis', description: 'Click-through rate by platform' },
-    { key: 'visitorTrend', label: 'Visitor Trend', description: 'Website visitor trends over time' },
-    { key: 'websiteBreakdown', label: 'Website Breakdown', description: 'User distribution across websites' },
-    { key: 'deviceBreakdown', label: 'Device Breakdown', description: 'Desktop, mobile, tablet split' },
-    { key: 'trafficSources', label: 'Traffic Sources Table', description: 'Source/medium traffic analysis' },
-    { key: 'contractorRankings', label: 'Contractor Rankings', description: 'I-BOS contractor performance rankings' },
-    { key: 'contractorRadar', label: 'Contractor Radar Chart', description: 'Multi-dimensional contractor comparison' },
-    { key: 'retailChannels', label: 'Retail Channel Analysis', description: 'Sani-Tred retail channel breakdown' },
-    { key: 'regionAnalysis', label: 'Regional Analysis', description: 'Geographic revenue distribution' },
-    { key: 'aiInsights', label: 'AI Insights', description: 'AI-powered data analysis and recommendations' },
-  ];
-
-  const divisionItems = [
-    { key: 'executive', label: 'Executive Summary', description: 'Combined cross-division overview' },
-    { key: 'cp', label: 'The Concrete Protector', description: 'Main company division' },
-    { key: 'sanitred', label: 'Sani-Tred', description: 'Retail waterproofing division' },
-    { key: 'ibos', label: 'I-BOS', description: 'Contractor network division' },
+    { key: 'woocommerce', label: 'WooCommerce (Sani-Tred)', description: 'Sani-Tred retail store orders & revenue' },
+    { key: 'shopify', label: 'Shopify (CP Store)', description: 'CP Store orders, products, customers' },
+    { key: 'snapshot', label: 'Snapshot Aggregator', description: 'Post-pipeline aggregated snapshots' },
   ];
 
   const enabledPipelines   = Object.values(config.pipelines).filter(Boolean).length;
-  const enabledSections    = Object.values(config.sections).filter(Boolean).length;
-  const enabledDivisions   = Object.values(config.divisions).filter(Boolean).length;
   const enabledContractors = ALL_CONTRACTORS.filter((c) => config.contractors?.[c.id] !== false).length;
 
   return (
@@ -137,12 +111,10 @@ const AdminControls = () => {
         </motion.div>
 
         {/* Quick Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 gap-4 mb-8">
           {[
-            { label: 'Pipelines Active',    value: `${enabledPipelines}/${pipelineItems.length}`,    color: '#3B82F6' },
-            { label: 'Sections Visible',    value: `${enabledSections}/${sectionItems.length}`,      color: '#10B981' },
-            { label: 'Divisions Shown',     value: `${enabledDivisions}/${divisionItems.length}`,    color: '#F59E0B' },
-            { label: 'Contractors Active',  value: `${enabledContractors}/${ALL_CONTRACTORS.length}`, color: '#F97066' },
+            { label: 'Pipelines Visible',   value: `${enabledPipelines}/${pipelineItems.length}`,      color: '#3B82F6' },
+            { label: 'Contractors Active',  value: `${enabledContractors}/${ALL_CONTRACTORS.length}`,  color: '#F97066' },
           ].map((stat, idx) => (
             <motion.div key={idx} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }}
               className={`rounded-xl p-4 text-center ${isDark ? 'bg-[#1e2235] border border-slate-700/30' : 'bg-white border border-slate-200 shadow-sm'}`}>
@@ -153,27 +125,19 @@ const AdminControls = () => {
         </div>
 
         {/* Data Pipelines */}
-        <ControlSection icon={Database} title="Data Pipelines" description="Toggle which data sources are active and pull data into the platform" isDark={isDark}>
+        <ControlSection icon={Database} title="Pipeline Dashboard Visibility"
+          description="Hide a pipeline's data from every dashboard that reads it. This does NOT stop the scheduled sync — use Pipeline Control for cadence + run."
+          isDark={isDark}>
           {pipelineItems.map((item) => (
             <ControlRow key={item.key} label={item.label} description={item.description}
-              enabled={config.pipelines[item.key]} onChange={(v) => updatePipeline(item.key, v)} isDark={isDark} />
+              enabled={config.pipelines[item.key] !== false} onChange={(v) => updatePipeline(item.key, v)} isDark={isDark} />
           ))}
-        </ControlSection>
-
-        {/* Dashboard Sections */}
-        <ControlSection icon={LayoutDashboard} title="Dashboard Sections" description="Control which chart and data sections appear on dashboard pages" isDark={isDark}>
-          {sectionItems.map((item) => (
-            <ControlRow key={item.key} label={item.label} description={item.description}
-              enabled={config.sections[item.key]} onChange={(v) => updateSection(item.key, v)} isDark={isDark} />
-          ))}
-        </ControlSection>
-
-        {/* Division Visibility */}
-        <ControlSection icon={Building2} title="Division Visibility" description="Control which business divisions appear in the sidebar navigation" isDark={isDark}>
-          {divisionItems.map((item) => (
-            <ControlRow key={item.key} label={item.label} description={item.description}
-              enabled={config.divisions[item.key]} onChange={(v) => updateDivision(item.key, v)} isDark={isDark} />
-          ))}
+          <div className={`mt-4 pt-4 border-t ${isDark ? 'border-slate-700/30' : 'border-slate-200'}`}>
+            <Link to="/dashboard/pipelines"
+              className={`inline-flex items-center gap-1.5 text-xs font-medium ${textSecondary} hover:text-[#F97066] transition-colors`}>
+              <ExternalLink size={13} /> Open Pipeline Control (cadence · Run Now · history)
+            </Link>
+          </div>
         </ControlSection>
 
         {/* Contractor Management */}

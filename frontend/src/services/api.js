@@ -216,11 +216,16 @@ export const contractorsAPI = {
 };
 
 // Users endpoints
+// Note: profile GET/PUT/change-password live under /api/auth/* on the
+// backend (not /api/users/*). The /api/users/* routes are for admin
+// user CRUD only.
 export const usersAPI = {
-  getProfile: () => apiClient.get('/users/me'),
-  updateProfile: (data) => apiClient.put('/users/me', data),
+  getProfile: () => apiClient.get('/auth/me'),
+  updateProfile: (data) => apiClient.put('/auth/me', data),
   changePassword: (oldPassword, newPassword) =>
-    apiClient.post('/users/change-password', { old_password: oldPassword, new_password: newPassword }),
+    apiClient.post('/auth/change-password', null, {
+      params: { old_password: oldPassword, new_password: newPassword },
+    }),
   getAll: () => apiClient.get('/users'),
   getById: (id) => apiClient.get(`/users/${id}`),
   create: (data) => apiClient.post('/auth/register', data),

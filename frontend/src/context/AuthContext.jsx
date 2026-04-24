@@ -276,6 +276,20 @@ export const AuthProvider = ({ children }) => {
     return perms?.canManage?.includes(feature) || false;
   }, [user]);
 
+  // Re-pull the current user from /auth/me and update cached state so the
+  // sidebar / header reflect a fresh profile after SettingsPage edits it.
+  const refreshUser = useCallback(async () => {
+    if (!token || authMode === 'demo') return;
+    try {
+      const { data } = await authAPI.me();
+      const normalised = normaliseUser(data);
+      setUser(normalised);
+      localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(normalised));
+    } catch {
+      // Leave cached user in place; the next hard refresh will re-sync.
+    }
+  }, [token, authMode]);
+
   const value = {
     user,
     token,
@@ -285,6 +299,7 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
+    refreshUser,
     isAuthenticated: !!token,
     userRole:       user?.role,
     userDepartment: user?.department,

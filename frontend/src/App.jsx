@@ -105,10 +105,13 @@ const AppContent = () => {
       {/* Sales Intelligence — both roles */}
       <Route path="/dashboard/sales-intelligence" element={<ProtectedPageRoute><SalesIntelligence /></ProtectedPageRoute>} />
 
+      {/* Settings is per-user (profile, password, theme) — every authenticated
+          role can reach it. Pages below it stay super-admin only. */}
+      <Route path="/settings" element={<ProtectedPageRoute><SettingsPage /></ProtectedPageRoute>} />
+
       {/* Data Analyst Only Pages */}
       <Route path="/dashboard/pipelines" element={<ProtectedPageRoute requiredRole="data-analyst"><PipelinesPage /></ProtectedPageRoute>} />
       <Route path="/dashboard/accounts" element={<ProtectedPageRoute requiredRole="data-analyst"><AccountManagement /></ProtectedPageRoute>} />
-      <Route path="/settings" element={<ProtectedPageRoute requiredRole="data-analyst"><SettingsPage /></ProtectedPageRoute>} />
       <Route path="/dashboard/admin-controls" element={<ProtectedPageRoute requiredRole="data-analyst"><AdminControls /></ProtectedPageRoute>} />
       <Route path="/dashboard/data-intelligence" element={<ProtectedPageRoute requiredRole="data-analyst"><DataIntelligence /></ProtectedPageRoute>} />
 

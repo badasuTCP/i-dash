@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Bell, Shield, Key, Palette, LogOut, Save, X } from 'lucide-react';
+import { Settings, Shield, Key, Palette, LogOut, Save, Moon, Sun, Eye, EyeOff } from 'lucide-react';
 import Layout from '../components/layout/Layout';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import { usersAPI } from '../services/api';
 import toast from 'react-hot-toast';
 
 const SettingsSection = ({ icon: Icon, title, description, children }) => (
@@ -45,45 +47,93 @@ const SettingToggle = ({ label, description, enabled, onChange }) => (
 );
 
 export const SettingsPage = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
+  const { theme, toggleTheme, isDark } = useTheme();
   const [activeTab, setActiveTab] = useState('profile');
-  const [showModal, setShowModal] = useState(null);
 
+  // ── Profile ──────────────────────────────────────────────────────────
   const [profile, setProfile] = useState({
     firstName: user?.first_name || '',
     lastName: user?.last_name || '',
     email: user?.email || '',
-    phone: '+1 (555) 123-4567',
   });
+  const [savingProfile, setSavingProfile] = useState(false);
 
-  const [preferences, setPreferences] = useState({
-    emailNotifications: true,
-    pushNotifications: true,
-    marketingEmails: false,
-    darkMode: true,
-    autoRefresh: true,
-    soundAlerts: false,
-  });
+  // ── Password ─────────────────────────────────────────────────────────
+  const [pwd, setPwd] = useState({ current: '', next: '', confirm: '' });
+  const [showPwd, setShowPwd] = useState({ current: false, next: false, confirm: false });
+  const [savingPwd, setSavingPwd] = useState(false);
 
-  const [security, setSecurity] = useState({
-    twoFactorAuth: false,
-    sessionTimeout: '30',
+  // ── Preferences ──────────────────────────────────────────────────────
+  // Auto-refresh interval lives in localStorage so dashboards that poll
+  // can opt into a user-controlled cadence later.
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(() => {
+    try { return localStorage.getItem('idash_auto_refresh') !== '0'; } catch { return true; }
   });
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: Settings },
-    { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'appearance', label: 'Appearance', icon: Palette },
   ];
 
-  const handleSaveProfile = () => {
-    toast.success('Profile updated successfully');
+  // ── Actions ──────────────────────────────────────────────────────────
+  const handleSaveProfile = async () => {
+    const fullName = `${profile.firstName.trim()} ${profile.lastName.trim()}`.trim();
+    if (!fullName) {
+      toast.error('First or last name is required');
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      await usersAPI.updateProfile({ full_name: fullName });
+      toast.success('Profile updated');
+      // Refresh cached user so the sidebar / header pick up the new name
+      if (typeof refreshUser === 'function') {
+        await refreshUser();
+      }
+    } catch (err) {
+      const detail = err?.response?.data?.detail || err?.message || 'Failed to update profile';
+      toast.error(detail);
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!pwd.current || !pwd.next) {
+      toast.error('Current and new password are required');
+      return;
+    }
+    if (pwd.next.length < 8) {
+      toast.error('New password must be at least 8 characters');
+      return;
+    }
+    if (pwd.next !== pwd.confirm) {
+      toast.error("New password and confirmation don't match");
+      return;
+    }
+    setSavingPwd(true);
+    try {
+      await usersAPI.changePassword(pwd.current, pwd.next);
+      toast.success('Password changed');
+      setPwd({ current: '', next: '', confirm: '' });
+    } catch (err) {
+      const detail = err?.response?.data?.detail || err?.message || 'Failed to change password';
+      toast.error(detail);
+    } finally {
+      setSavingPwd(false);
+    }
+  };
+
+  const handleAutoRefreshToggle = (val) => {
+    setAutoRefreshEnabled(val);
+    try { localStorage.setItem('idash_auto_refresh', val ? '1' : '0'); } catch { /* noop */ }
   };
 
   const handleLogout = () => {
     logout();
-    toast.success('Logged out successfully');
+    toast.success('Logged out');
   };
 
   return (
@@ -132,7 +182,7 @@ export const SettingsPage = () => {
             <SettingsSection
               icon={Settings}
               title="Personal Information"
-              description="Update your profile details"
+              description="Your display name and account email"
             >
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -143,9 +193,7 @@ export const SettingsPage = () => {
                     <input
                       type="text"
                       value={profile.firstName}
-                      onChange={(e) =>
-                        setProfile({ ...profile, firstName: e.target.value })
-                      }
+                      onChange={(e) => setProfile({ ...profile, firstName: e.target.value })}
                       className="input-field"
                     />
                   </div>
@@ -156,9 +204,7 @@ export const SettingsPage = () => {
                     <input
                       type="text"
                       value={profile.lastName}
-                      onChange={(e) =>
-                        setProfile({ ...profile, lastName: e.target.value })
-                      }
+                      onChange={(e) => setProfile({ ...profile, lastName: e.target.value })}
                       className="input-field"
                     />
                   </div>
@@ -170,29 +216,22 @@ export const SettingsPage = () => {
                   <input
                     type="email"
                     value={profile.email}
-                    onChange={(e) =>
-                      setProfile({ ...profile, email: e.target.value })
-                    }
-                    className="input-field"
+                    disabled
+                    title="Email changes must be done by a super-admin in Account Management"
+                    className="input-field opacity-60 cursor-not-allowed"
                   />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Phone Number
-                  </label>
-                  <input
-                    type="tel"
-                    value={profile.phone}
-                    onChange={(e) =>
-                      setProfile({ ...profile, phone: e.target.value })
-                    }
-                    className="input-field"
-                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Email is managed by your super-admin
+                  </p>
                 </div>
                 <div className="flex justify-end pt-4 border-t border-slate-700/30">
-                  <button onClick={handleSaveProfile} className="btn-primary flex items-center gap-2">
+                  <button
+                    onClick={handleSaveProfile}
+                    disabled={savingProfile}
+                    className="btn-primary flex items-center gap-2 disabled:opacity-60"
+                  >
                     <Save size={18} />
-                    Save Changes
+                    {savingProfile ? 'Saving…' : 'Save Changes'}
                   </button>
                 </div>
               </div>
@@ -214,119 +253,52 @@ export const SettingsPage = () => {
           </div>
         )}
 
-        {/* Notifications Tab */}
-        {activeTab === 'notifications' && (
-          <SettingsSection
-            icon={Bell}
-            title="Notification Preferences"
-            description="Control how you receive notifications"
-          >
-            <SettingToggle
-              label="Email Notifications"
-              description="Receive notifications via email"
-              enabled={preferences.emailNotifications}
-              onChange={(val) =>
-                setPreferences({ ...preferences, emailNotifications: val })
-              }
-            />
-            <SettingToggle
-              label="Push Notifications"
-              description="Receive browser push notifications"
-              enabled={preferences.pushNotifications}
-              onChange={(val) =>
-                setPreferences({ ...preferences, pushNotifications: val })
-              }
-            />
-            <SettingToggle
-              label="Marketing Emails"
-              description="Receive marketing and promotional emails"
-              enabled={preferences.marketingEmails}
-              onChange={(val) =>
-                setPreferences({ ...preferences, marketingEmails: val })
-              }
-            />
-            <SettingToggle
-              label="Sound Alerts"
-              description="Play sounds for important alerts"
-              enabled={preferences.soundAlerts}
-              onChange={(val) =>
-                setPreferences({ ...preferences, soundAlerts: val })
-              }
-            />
-          </SettingsSection>
-        )}
-
         {/* Security Tab */}
         {activeTab === 'security' && (
-          <div>
-            <SettingsSection
-              icon={Key}
-              title="Password & Authentication"
-              description="Secure your account"
-            >
-              <div className="space-y-4">
-                <button className="w-full px-4 py-3 rounded-lg bg-slate-800/30 border border-slate-700/30 text-slate-300 hover:text-slate-200 hover:border-slate-600/50 transition-all text-left font-medium">
-                  Change Password
+          <SettingsSection
+            icon={Key}
+            title="Change Password"
+            description="Rotate your password. Minimum 8 characters."
+          >
+            <div className="space-y-4">
+              {[
+                { key: 'current', label: 'Current Password' },
+                { key: 'next', label: 'New Password' },
+                { key: 'confirm', label: 'Confirm New Password' },
+              ].map(({ key, label }) => (
+                <div key={key}>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">{label}</label>
+                  <div className="relative">
+                    <input
+                      type={showPwd[key] ? 'text' : 'password'}
+                      value={pwd[key]}
+                      onChange={(e) => setPwd({ ...pwd, [key]: e.target.value })}
+                      className="input-field pr-10"
+                      autoComplete={key === 'current' ? 'current-password' : 'new-password'}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPwd({ ...showPwd, [key]: !showPwd[key] })}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                      title={showPwd[key] ? 'Hide' : 'Show'}
+                    >
+                      {showPwd[key] ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <div className="flex justify-end pt-4 border-t border-slate-700/30">
+                <button
+                  onClick={handleChangePassword}
+                  disabled={savingPwd}
+                  className="btn-primary flex items-center gap-2 disabled:opacity-60"
+                >
+                  <Key size={18} />
+                  {savingPwd ? 'Updating…' : 'Update Password'}
                 </button>
               </div>
-            </SettingsSection>
-
-            <SettingsSection
-              icon={Shield}
-              title="Two-Factor Authentication"
-              description="Add an extra layer of security"
-            >
-              <SettingToggle
-                label="Two-Factor Authentication"
-                description="Require a code in addition to your password"
-                enabled={security.twoFactorAuth}
-                onChange={(val) => setSecurity({ ...security, twoFactorAuth: val })}
-              />
-              {security.twoFactorAuth && (
-                <div className="mt-4 p-4 rounded-lg bg-slate-800/30 border border-primary-500/30">
-                  <p className="text-sm text-slate-300 mb-3">
-                    Backup codes for account recovery. Keep these safe.
-                  </p>
-                  <div className="space-y-2 mb-4">
-                    {['1234-5678', '9012-3456', '7890-1234'].map((code, idx) => (
-                      <code key={idx} className="block text-sm font-mono text-slate-400">
-                        {code}
-                      </code>
-                    ))}
-                  </div>
-                  <button className="text-sm text-primary-400 hover:text-primary-300">
-                    Generate new backup codes
-                  </button>
-                </div>
-              )}
-            </SettingsSection>
-
-            <SettingsSection
-              icon={Shield}
-              title="Session Management"
-              description="Control session timeout duration"
-            >
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Session Timeout (minutes)
-                  </label>
-                  <select
-                    value={security.sessionTimeout}
-                    onChange={(e) =>
-                      setSecurity({ ...security, sessionTimeout: e.target.value })
-                    }
-                    className="input-field"
-                  >
-                    <option value="15">15 minutes</option>
-                    <option value="30">30 minutes</option>
-                    <option value="60">1 hour</option>
-                    <option value="120">2 hours</option>
-                  </select>
-                </div>
-              </div>
-            </SettingsSection>
-          </div>
+            </div>
+          </SettingsSection>
         )}
 
         {/* Appearance Tab */}
@@ -334,23 +306,26 @@ export const SettingsPage = () => {
           <SettingsSection
             icon={Palette}
             title="Theme & Display"
-            description="Customize how I-Dash looks"
+            description="Customise how I-Dash looks on this device"
           >
+            <div className="flex items-center justify-between py-4 border-b border-slate-700/30">
+              <div>
+                <p className="font-medium text-slate-100">Theme</p>
+                <p className="text-sm text-slate-400 mt-1">Toggle between light and dark</p>
+              </div>
+              <button
+                onClick={toggleTheme}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-700/40 text-slate-200 hover:bg-slate-800/40 transition-colors"
+              >
+                {isDark ? <Moon size={16} /> : <Sun size={16} />}
+                {isDark ? 'Dark' : 'Light'}
+              </button>
+            </div>
             <SettingToggle
-              label="Dark Mode"
-              description="Use dark theme for the dashboard"
-              enabled={preferences.darkMode}
-              onChange={(val) =>
-                setPreferences({ ...preferences, darkMode: val })
-              }
-            />
-            <SettingToggle
-              label="Auto-Refresh"
-              description="Automatically refresh data every 5 minutes"
-              enabled={preferences.autoRefresh}
-              onChange={(val) =>
-                setPreferences({ ...preferences, autoRefresh: val })
-              }
+              label="Auto-Refresh Dashboards"
+              description="Let dashboards re-fetch data periodically so numbers stay fresh without a manual reload"
+              enabled={autoRefreshEnabled}
+              onChange={handleAutoRefreshToggle}
             />
           </SettingsSection>
         )}
