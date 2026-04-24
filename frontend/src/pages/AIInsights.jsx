@@ -26,14 +26,16 @@ import { aiAPI } from '../services/api';
 import toast from 'react-hot-toast';
 
 // Compute days-of-lookback from the centralised date range so the
-// insights endpoint matches what the user asked for.
+// insights endpoint matches what the user asked for. Backend accepts
+// 1-1095d (~3 years) so a full-year pick lands as 365, not silently
+// clamped down to 90.
 function rangeToDays(dateRange) {
   if (!dateRange?.start || !dateRange?.end) return 7;
   const start = new Date(dateRange.start);
   const end = new Date(dateRange.end);
   const ms = end - start;
   const days = Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)) + 1);
-  return Math.min(days, 90); // backend caps at 90
+  return Math.min(days, 1095);
 }
 
 const AIInsights = () => {

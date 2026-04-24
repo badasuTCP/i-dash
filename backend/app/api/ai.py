@@ -571,7 +571,7 @@ async def get_insights(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     ai_service: AIService = Depends(get_ai_service),
-    days: int = Query(7, ge=1, le=90, description="Days to analyze (1-90)"),
+    days: int = Query(7, ge=1, le=1095, description="Days to analyze (1-1095, ~3 years)"),
 ) -> Dict[str, Any]:
     """
     Get automatically generated insights about recent data trends.
