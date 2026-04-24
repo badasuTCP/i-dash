@@ -270,12 +270,13 @@ const AnalystChat = ({ isDark, pipelines }) => {
 
   return (
     <>
-      {/* Floating launcher */}
+      {/* Floating launcher — positioned bottom-LEFT so it doesn't collide
+          with the main AI chatbot that lives at bottom-right on every page. */}
       {!open && (
         <motion.button
           initial={{ scale: 0 }} animate={{ scale: 1 }}
           onClick={() => setOpen(true)}
-          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg hover:shadow-indigo-500/30"
+          className="fixed bottom-6 left-6 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg hover:shadow-indigo-500/30"
         >
           <Sparkles size={16} />
           <span className="text-sm font-semibold">Ask the Analyst</span>
@@ -289,7 +290,7 @@ const AnalystChat = ({ isDark, pipelines }) => {
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className={`fixed bottom-6 right-6 z-40 w-[min(420px,calc(100vw-2rem))] h-[min(640px,calc(100vh-6rem))] rounded-2xl ${panelBg} flex flex-col overflow-hidden`}
+            className={`fixed bottom-6 left-6 z-40 w-[min(420px,calc(100vw-2rem))] h-[min(640px,calc(100vh-6rem))] rounded-2xl ${panelBg} flex flex-col overflow-hidden`}
           >
             {/* Header */}
             <div className={`flex items-center justify-between px-4 py-3 border-b ${isDark ? 'border-slate-700/40' : 'border-slate-200'}`}>

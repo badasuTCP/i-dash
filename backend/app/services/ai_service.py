@@ -62,6 +62,10 @@ class AIService:
         self.api_key = api_key
         self.client = None
         self.model = "llama-3.3-70b-versatile"  # Best free model on Groq
+        # Smaller, cheaper model we fall back to on 429 (rate-limit)
+        # errors. Much lower quality but keeps the UI alive instead of
+        # erroring out to the executive when the daily TPD quota is hit.
+        self.fallback_model = "llama-3.1-8b-instant"
         self.logger = logging.getLogger(f"{__name__}.AIService")
 
         if not api_key:
@@ -89,6 +93,51 @@ class AIService:
     def is_available(self) -> bool:
         """Check if AI service is available."""
         return self.client is not None
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        """Detect Groq 429 / rate-limit errors across SDK versions."""
+        # openai SDK raises RateLimitError, but Groq also surfaces the
+        # same 429 via APIStatusError + error payload — so match on
+        # status code or message text, not class only.
+        status = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+        if status == 429:
+            return True
+        msg = str(exc).lower()
+        return (
+            "rate_limit_exceeded" in msg
+            or "rate limit reached" in msg
+            or "rate limit exceeded" in msg
+            or "429" in msg and "rate" in msg
+        )
+
+    @staticmethod
+    def _rate_limit_retry_after(exc: Exception) -> Optional[str]:
+        """Pull a human-readable 'try again in X' hint out of the error."""
+        msg = str(exc)
+        import re
+        m = re.search(r"try again in ([0-9]+m[0-9.]+s|[0-9.]+s|[0-9]+ minutes?|[0-9]+ seconds?)", msg, re.IGNORECASE)
+        return m.group(1) if m else None
+
+    def _call_chat_completions(self, **kwargs) -> Any:
+        """
+        Call Groq chat.completions with auto-fallback on rate limits.
+
+        When the primary model hits its daily TPD cap, retry the exact
+        same request against self.fallback_model so the UI doesn't die
+        for the rest of the day.
+        """
+        try:
+            return self.client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            if self._is_rate_limit_error(exc) and kwargs.get("model") != self.fallback_model:
+                self.logger.warning(
+                    "Primary model %s hit rate limit, retrying with %s",
+                    kwargs.get("model"), self.fallback_model,
+                )
+                kwargs["model"] = self.fallback_model
+                return self.client.chat.completions.create(**kwargs)
+            raise
 
     def _build_metrics_prompt(self, context: Dict[str, Any]) -> str:
         """
@@ -404,6 +453,17 @@ Your role:
   how things are going
 - Be concise but concrete
 
+CONVERSATIONAL HANDLING:
+- If the user sends a casual acknowledgment ("thanks", "thank you",
+  "ok", "got it", "cool", "nice", "great", "hi", "hello", "hey",
+  "sup", "thx"), respond briefly and naturally like a colleague
+  would — "You're welcome!" / "Anytime — let me know if you want to
+  dig into anything else." — and DO NOT quote data or numbers.
+- Same for small talk or meta-questions about you ("who are you?",
+  "what can you do?") — answer naturally in one or two sentences.
+- Only pull numbers from the data when the user actually asks an
+  analytical question.
+
 RULES:
 - If the data shows $0 or N/A, do NOT fabricate. Say "no activity
   recorded" or "not tracked in this window" and suggest a next step.
@@ -418,7 +478,7 @@ Current Data:
 
 Lead with the most decision-relevant number. Numbers > adjectives."""
 
-            response = self.client.chat.completions.create(
+            response = self._call_chat_completions(
                 model=self.model,
                 max_tokens=1024,
                 messages=[
@@ -437,6 +497,15 @@ Lead with the most decision-relevant number. Numbers > adjectives."""
 
         except Exception as e:
             self.logger.error(f"Error in AI chat: {str(e)}")
+            if self._is_rate_limit_error(e):
+                retry = self._rate_limit_retry_after(e)
+                tail = f" Try again in {retry}." if retry else " Try again in a few minutes."
+                return (
+                    "I've hit the AI daily usage cap for today — the fallback "
+                    "model also maxed out."
+                    + tail
+                    + " (If this keeps happening, upgrade the Groq plan in Settings.)"
+                )
             return f"Sorry, I encountered an error processing your question. Please try again. ({type(e).__name__})"
 
     async def generate_insights(
@@ -544,17 +613,22 @@ Current Data:
                 ],
             )
             try:
-                response = self.client.chat.completions.create(
+                response = self._call_chat_completions(
                     response_format={"type": "json_object"},
                     **call_kwargs,
                 )
             except Exception as json_mode_exc:
+                # If we blew through quota (even the fallback model)
+                # propagate so the outer handler can show a clean
+                # message instead of retrying without json_object.
+                if self._is_rate_limit_error(json_mode_exc):
+                    raise
                 # Model may not support response_format; retry without.
                 self.logger.warning(
                     "Groq json_object mode unavailable, falling back: %s",
                     json_mode_exc,
                 )
-                response = self.client.chat.completions.create(**call_kwargs)
+                response = self._call_chat_completions(**call_kwargs)
 
             response_text = response.choices[0].message.content or ""
 
@@ -614,11 +688,31 @@ Current Data:
 
         except Exception as e:
             self.logger.error(f"Error generating insights: {str(e)}")
+            if self._is_rate_limit_error(e):
+                retry = self._rate_limit_retry_after(e)
+                tail = f" Try again in {retry}." if retry else " Try again in a few minutes."
+                return {
+                    "summary": (
+                        "We've hit the AI daily usage cap for today. "
+                        "Both the main and fallback models are maxed out."
+                        + tail
+                        + " (Narrow the date range to use fewer tokens, or "
+                        "upgrade the Groq plan in Settings.)"
+                    ),
+                    "key_findings": [],
+                    "anomalies": [],
+                    "recommendations": [],
+                    "_rate_limited": True,
+                }
             return {
-                "summary": f"Error generating insights: {str(e)}",
+                "summary": (
+                    "I couldn't generate insights right now. "
+                    "The AI service returned an error — please try again in a moment."
+                ),
                 "key_findings": [],
                 "anomalies": [],
                 "recommendations": [],
+                "_error": type(e).__name__,
             }
 
     async def generate_report(
@@ -686,7 +780,7 @@ Department Access: {user_department}
 Current Data:
 {metrics_context}"""
 
-            response = self.client.chat.completions.create(
+            response = self._call_chat_completions(
                 model=self.model,
                 max_tokens=2048,
                 messages=[
@@ -708,4 +802,12 @@ Current Data:
 
         except Exception as e:
             self.logger.error(f"Error generating report: {str(e)}")
-            return f"Error generating report: {str(e)}"
+            if self._is_rate_limit_error(e):
+                retry = self._rate_limit_retry_after(e)
+                tail = f" Try again in {retry}." if retry else " Try again in a few minutes."
+                return (
+                    "The AI has hit today's usage cap and the fallback model "
+                    "is also exhausted." + tail +
+                    " Try narrowing the date range, or upgrade the Groq plan in Settings."
+                )
+            return "Could not generate the report right now — the AI service returned an error. Please try again in a moment."
