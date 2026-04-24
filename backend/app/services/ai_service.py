@@ -475,26 +475,36 @@ opinionated where the data supports it. Never write generic observations.
 
 Department Access: {user_department}
 
-Return a JSON object with EXACTLY these keys (no markdown, no code blocks,
-pure JSON):
-- "summary": 2-3 sentence lead. Start with the headline read (momentum, top
-  division, or top risk). Cite at least one specific dollar figure or percent.
-- "key_findings": 3-5 concrete findings, each a full sentence with numbers.
-  Cover these angles at minimum:
-    1. Division-level performance — name CP, Sani-Tred, and I-BOS by name.
-       Which one is pulling the weight, which is lagging.
-    2. Contractor standout — by name — top by ROAS or by revenue.
-       Use the ROAS ranking in the context.
-    3. Period-over-period momentum — use the PRIOR PERIOD COMPARISON block
-       to say whether spend/leads/deals are up or down vs the prior window.
-    4. CRM conversion health — deals_created vs deals_won, pipeline_value.
-    5. Web / traffic signal if unusual.
-- "anomalies": 1-4 outliers worth flagging. Use numbers. Examples:
-  "CPL on {{brand}} is $X vs cohort average $Y." NOT "CPL might be high."
-  Skip this section if nothing stands out — don't invent problems.
-- "recommendations": 2-4 actionable next steps tied to findings. Each must
-  name the specific lever (pause/scale a campaign, reallocate to a named
-  contractor, investigate a specific metric). NO generic "optimise marketing."
+Return a VALID JSON object with EXACTLY these four keys and no others:
+
+  {{
+    "summary": "<string>",
+    "key_findings": ["<string>", ...],
+    "anomalies": ["<string>", ...],
+    "recommendations": ["<string>", ...]
+  }}
+
+Schema strict rules:
+- ALL four keys MUST be present. Use [] for empty arrays, never omit.
+- Array items are STRINGS only — no nested objects, no extra fields.
+- Keep each array to MAX 5 items. Stop cleanly inside the closing "]".
+- No trailing commas. No extra text outside the JSON. No markdown fences.
+- Total output must fit in 1500 tokens — be concise so the JSON closes.
+
+Content guidance:
+- summary: 2-3 sentence lead. Headline read (momentum, top division,
+  top risk). At least one specific dollar figure or percent.
+- key_findings: 3-5 concrete findings, each a full sentence with numbers.
+  Cover at minimum: (1) division-level performance by name,
+  (2) a contractor standout by name with its ROAS/CPL,
+  (3) period-over-period momentum (up/down %),
+  (4) CRM conversion health (deals_created vs deals_won),
+  (5) an unusual web signal if present.
+- anomalies: 1-4 outliers with specific numbers, or [] if nothing
+  stands out. Example: "CPL on Sani-Tred is $55 vs CP $16." Do NOT
+  invent problems.
+- recommendations: 2-4 actionable next steps, each naming a specific
+  lever (pause/scale/reallocate/investigate X). No generic advice.
 
 HARD RULES:
 - You have per-brand breakdown in the "PAID MARKETING BREAKDOWN BY DIVISION"
@@ -513,35 +523,91 @@ HARD RULES:
 Current Data:
 {metrics_context}"""
 
-            response = self.client.chat.completions.create(
+            # Groq supports strict JSON mode on most current models — it
+            # guarantees the response is a valid JSON object and lets us
+            # trust json.loads. Fall back to plain chat completion if the
+            # model refuses json_object (older Llama instances, etc.).
+            call_kwargs = dict(
                 model=self.model,
-                max_tokens=1024,
+                max_tokens=1500,
+                temperature=0.3,  # lower temp → more disciplined schema compliance
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {
                         "role": "user",
-                        "content": "Analyze these metrics and provide insights as JSON.",
+                        "content": (
+                            "Analyze these metrics and return ONLY the JSON "
+                            "object described above — nothing before, nothing "
+                            "after. Stop immediately after the closing }."
+                        ),
                     },
                 ],
             )
-
-            response_text = response.choices[0].message.content
-
-            # Try to parse as JSON
             try:
-                # Strip any markdown code blocks if present
-                clean = response_text.strip()
-                if clean.startswith("```"):
-                    clean = clean.split("\n", 1)[1]
-                    clean = clean.rsplit("```", 1)[0]
-                insights = json.loads(clean)
-            except json.JSONDecodeError:
+                response = self.client.chat.completions.create(
+                    response_format={"type": "json_object"},
+                    **call_kwargs,
+                )
+            except Exception as json_mode_exc:
+                # Model may not support response_format; retry without.
+                self.logger.warning(
+                    "Groq json_object mode unavailable, falling back: %s",
+                    json_mode_exc,
+                )
+                response = self.client.chat.completions.create(**call_kwargs)
+
+            response_text = response.choices[0].message.content or ""
+
+            # Tolerant JSON extraction — strip markdown fences and keep only
+            # the outermost {...} block so trailing LLM chatter doesn't
+            # break json.loads.
+            insights = None
+            clean = response_text.strip()
+            if clean.startswith("```"):
+                # ```json\n{...}\n```  → keep the body
+                clean = clean.split("\n", 1)[-1]
+                clean = clean.rsplit("```", 1)[0]
+            first_brace = clean.find("{")
+            last_brace = clean.rfind("}")
+            if first_brace >= 0 and last_brace > first_brace:
+                candidate = clean[first_brace : last_brace + 1]
+                try:
+                    insights = json.loads(candidate)
+                except json.JSONDecodeError as parse_exc:
+                    self.logger.warning(
+                        "AI insights JSON parse failed (%s). Raw head: %s",
+                        parse_exc, candidate[:200],
+                    )
+
+            if insights is None or not isinstance(insights, dict):
+                # Graceful failure: surface a clear message to the UI
+                # instead of dumping unparsable text into the panel.
                 insights = {
-                    "summary": response_text[:300],
-                    "key_findings": [response_text],
+                    "summary": (
+                        "I couldn't structure the findings into a clean "
+                        "format this time — try clicking Refresh, or widen "
+                        "the date range. If this persists, the AI service "
+                        "may need a retry."
+                    ),
+                    "key_findings": [],
                     "anomalies": [],
                     "recommendations": [],
+                    "_parse_failed": True,
                 }
+
+            # Normalise shape — ensure every expected key exists and all
+            # list fields are actually lists of strings.
+            for k in ("key_findings", "anomalies", "recommendations"):
+                v = insights.get(k)
+                if not isinstance(v, list):
+                    insights[k] = []
+                else:
+                    insights[k] = [
+                        (item if isinstance(item, str) else str(item))
+                        for item in v
+                    ]
+            if not isinstance(insights.get("summary"), str):
+                insights["summary"] = str(insights.get("summary") or "")
 
             self.logger.info("AI insights generated successfully")
             return insights
