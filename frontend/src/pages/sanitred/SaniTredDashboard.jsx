@@ -54,7 +54,7 @@ const SaniTredDashboard = () => {
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Sani-Tred Overview</h1>
-          <p className={textSec}>Sani-Tred Retail — YTD revenue, web performance & marketing pulse</p>
+          <p className={textSec}>Sani-Tred Retail — revenue, web performance & marketing pulse for the selected date range</p>
         </motion.div>
 
         {data?.hasLiveData ? (
@@ -74,7 +74,7 @@ const SaniTredDashboard = () => {
           const revenue = sc.find(s => /revenue|sales/i.test(s.label))?.value || 0;
           const spend = data?.ads?.spend || 0;
           const orders = data?.ecom?.orders || 0;
-          if (revenue) out.push(`Sani-Tred retail revenue: $${Number(revenue).toLocaleString()} YTD.`);
+          if (revenue) out.push(`Sani-Tred retail revenue: $${Number(revenue).toLocaleString()} in the selected range.`);
           if (orders) out.push(`${orders} WooCommerce orders processed.`);
           if (visits) out.push(`Retail traffic: ${Number(visits).toLocaleString()} visits.`);
           if (spend) out.push(`Ad spend: $${Number(spend).toLocaleString()}.`);

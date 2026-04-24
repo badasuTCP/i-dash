@@ -62,7 +62,7 @@ const IBOSSDashboard = () => {
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>I-BOS Overview</h1>
-          <p className={textSec}>I-BOS Contractor Division — YTD contractor performance, training & marketing</p>
+          <p className={textSec}>I-BOS Contractor Division — performance, training & marketing for the selected date range</p>
         </motion.div>
 
         {data?.hasLiveData ? (

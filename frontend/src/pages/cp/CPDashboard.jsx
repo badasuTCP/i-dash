@@ -89,7 +89,7 @@ const CPDashboard = () => {
           if (storeCard && (storeCard.value || 0) > 0) {
             out.push(`CP Store Revenue = Shopify order totals only. HubSpot deals, QB contractor revenue, and Sani-Tred retail are intentionally excluded from this tile.`);
           }
-          if (visits) out.push(`CP traffic: ${Number(visits).toLocaleString()} visits year-to-date.`);
+          if (visits) out.push(`CP traffic: ${Number(visits).toLocaleString()} visits in the selected range.`);
           if (spend) out.push(`CP marketing spend: $${Number(spend).toLocaleString()} · ${Number(leads).toLocaleString()} ad leads.`);
           if (storeOrders) out.push(`CP Store: $${Number(storeRev).toLocaleString()} across ${storeOrders.toLocaleString()} orders.`);
           if (deals) out.push(`${deals} active deals in HubSpot CRM.`);

@@ -1645,19 +1645,28 @@ async def get_brand_summary(
     except Exception as e:
         logger.warning("Brand summary CRM query failed: %s", e)
 
-    # ── Sheets revenue (retail) ───────────────────────────────────────
+    # ── Sheets revenue (retail, pre-2026 historical) ──────────────────
+    # Same cutoff as the marketing sheets fallback: the TCP MAIN sheet
+    # holds Sani-Tred retail revenue for 2024/2025 (pre-WooCommerce
+    # pipeline). After 2026-01-01 we have real WooCommerce data, so the
+    # sheet row must NOT leak into recent windows. Previously a sheet
+    # row dated "today" from a historical import aggregated into $28M
+    # whenever the user picked today-only — now capped to the cutoff.
     sheets_revenue = 0
-    try:
-        from app.models.metrics import GoogleSheetMetric
-        sheets_q = await db.execute(
-            select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
-                GoogleSheetMetric.category == "Revenue",
-                GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
-            ))
-        )
-        sheets_revenue = float(sheets_q.scalar() or 0)
-    except Exception:
-        pass
+    _SHEETS_HISTORICAL_CUTOFF = date(2026, 1, 1)
+    if start_date < _SHEETS_HISTORICAL_CUTOFF:
+        sheet_end = min(end_date, _SHEETS_HISTORICAL_CUTOFF)
+        try:
+            from app.models.metrics import GoogleSheetMetric
+            sheets_q = await db.execute(
+                select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
+                    GoogleSheetMetric.category == "Revenue",
+                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= sheet_end,
+                ))
+            )
+            sheets_revenue = float(sheets_q.scalar() or 0)
+        except Exception:
+            pass
 
     # ── Shopify retail (CP Store — CP brand only) ─────────────────────
     shopify_stats = {"revenue": 0.0, "orders": 0, "avg_order": 0.0}
@@ -1711,15 +1720,66 @@ async def get_brand_summary(
             {"label": "Ad Clicks", "value": ads["clicks"], "format": "number", "color": "amber"},
         ]
     else:  # ibos
+        # Training signups: count hubspot_contacts flagged as training leads
+        # within the selected date range. Previously this ran an
+        # unfiltered COUNT(*) which returned every training lead ever
+        # recorded — so "today" showed the same 153 as YTD.
         training = 0
         try:
-            t_q = await db.execute(text("SELECT COUNT(*) FROM hubspot_contacts WHERE is_training_lead = 1"))
+            t_q = await db.execute(
+                text("""
+                    SELECT COUNT(*) FROM hubspot_contacts
+                    WHERE is_training_lead = 1
+                      AND created_at IS NOT NULL
+                      AND DATE(created_at) >= :start
+                      AND DATE(created_at) <= :end
+                """),
+                {"start": start_date, "end": end_date},
+            )
             training = t_q.scalar() or 0
         except Exception:
+            # Fallback: if the is_training_lead column or created_at
+            # timestamp isn't there, leave training=0 rather than
+            # unfiltered count.
             pass
+
+        # Active contractors: real count from the contractors table
+        # (division = i-bos, active = true), NOT GA4 visits.
+        active_contractors = 0
+        try:
+            ac_q = await db.execute(
+                text("""
+                    SELECT COUNT(*) FROM contractors
+                    WHERE active = TRUE
+                      AND status = 'active'
+                      AND division IN ('i-bos', 'ibos')
+                """)
+            )
+            active_contractors = ac_q.scalar() or 0
+        except Exception:
+            pass
+
+        # Contractor revenue: real QB revenue from the TCP QB revenue
+        # sheet, filtered to the period. NOT ads_spend × 4.2. Rows live
+        # in google_sheet_metrics with sheet_name prefix 'qb_revenue::'.
+        contractor_revenue = 0.0
+        try:
+            from app.models.metrics import GoogleSheetMetric as _GSM
+            cr_q = await db.execute(
+                select(func.coalesce(func.sum(_GSM.metric_value), 0))
+                .where(and_(
+                    _GSM.sheet_name.like("qb_revenue::%"),
+                    _GSM.date >= start_date,
+                    _GSM.date <= end_date,
+                ))
+            )
+            contractor_revenue = float(cr_q.scalar() or 0)
+        except Exception:
+            contractor_revenue = 0.0
+
         scorecards = [
-            {"label": "Contractor Revenue", "value": ads["spend"] * 4.2, "format": "currency", "color": "amber"},
-            {"label": "Active Contractors", "value": web["visits"], "format": "number", "color": "blue"},
+            {"label": "Contractor Revenue", "value": contractor_revenue, "format": "currency", "color": "amber"},
+            {"label": "Active Contractors", "value": active_contractors, "format": "number", "color": "blue"},
             {"label": "Training Signups", "value": training, "format": "number", "color": "emerald"},
             {"label": "Marketing Spend", "value": ads["spend"], "format": "currency", "color": "violet"},
         ]

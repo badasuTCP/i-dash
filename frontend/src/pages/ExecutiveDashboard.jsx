@@ -172,27 +172,45 @@ const ExecutiveSummary = () => {
   // ── Derived view-model ─────────────────────────────────────────────────
   const hasExecData = !!(summary?.has_live_data && summary?.quarterly_kpis?.rows?.length);
 
-  // Compute Equipment Sold from whichever quarterly source is active (live
-  // TCP MAIN if populated, otherwise the curated fallback). This ensures
-  // the scorecard matches the Quarterly KPI Summary table below.
+  // Equipment Sold — quarter-overlap filter like Combined Total Revenue.
+  // Previously summed every quarter in the table, so picking "today"
+  // showed 59 (sum of Q1 2025 + Q2 2025 + Q3 2025 + Q4 2025 + Q1 2026)
+  // instead of ~3 (the quarter that overlaps Apr 24 2026).
   const equipmentSoldFromTable = useMemo(() => {
-    const rows = summary?.quarterly_kpis?.rows?.length
-      ? summary.quarterly_kpis.rows
-      : null;
-    if (rows) {
-      const row = rows.find(r => (r.metric || '').toLowerCase() === 'equipment sold');
+    const liveRows = summary?.quarterly_kpis?.rows;
+    const liveQuarters = summary?.quarterly_kpis?.quarters;
+
+    let quartersList, rowValue;
+    if (liveRows?.length && liveQuarters?.length) {
+      const row = liveRows.find((r) => (r.metric || '').toLowerCase() === 'equipment sold');
       if (!row) return 0;
-      const quarters = summary.quarterly_kpis.quarters || [];
-      return quarters.reduce((sum, q) => sum + (Number(row[q]) || 0), 0);
+      quartersList = liveQuarters;
+      rowValue = (q) => Number(row[q]) || 0;
+    } else {
+      const fbRow = FALLBACK_QUARTERLY.find((r) => r.metric.toLowerCase() === 'equipment sold');
+      if (!fbRow) return 0;
+      quartersList = FALLBACK_QUARTERS;
+      rowValue = (q) => {
+        const v = fbRow.values[quartersList.indexOf(q)];
+        const n = parseInt(String(v).replace(/[^\d-]/g, ''), 10);
+        return isNaN(n) ? 0 : n;
+      };
     }
-    // Fallback: parse values from the hardcoded curated quarterly snapshot
-    const fallbackRow = FALLBACK_QUARTERLY.find(r => r.metric.toLowerCase() === 'equipment sold');
-    if (!fallbackRow) return 0;
-    return fallbackRow.values.reduce((sum, v) => {
-      const n = parseInt(String(v).replace(/[^\d-]/g, ''), 10);
-      return sum + (isNaN(n) ? 0 : n);
-    }, 0);
-  }, [summary]);
+
+    // Restrict to quarters that overlap the centralised date picker.
+    // No picker range → include every quarter (matches legacy behavior
+    // only when the user truly wants an all-time view).
+    const filterStart = dateRange?.start ? new Date(dateRange.start) : null;
+    const filterEnd   = dateRange?.end   ? new Date(dateRange.end)   : null;
+    const included = quartersList.filter((q) => {
+      if (!filterStart || !filterEnd) return true;
+      const qRange = parseLabel(q);
+      if (!qRange) return true;
+      return qRange.start <= filterEnd && qRange.end >= filterStart;
+    });
+
+    return included.reduce((sum, q) => sum + rowValue(q), 0);
+  }, [summary, dateRange]);
 
   // Combined Total Revenue is the sum of the "Total Revenue" row from the
   // TCP MAIN Quarterly KPI table, restricted to the quarters that overlap
