@@ -37,10 +37,16 @@ const DateRangePicker = ({ onApply, onClear }) => {
   const presets = useMemo(() => [
     { id: 'today',       label: 'Today',         getRange: () => ({ start: today, end: today }) },
     { id: 'yesterday',   label: 'Yesterday',     getRange: () => ({ start: subDays(today, 1), end: subDays(today, 1) }) },
-    { id: 'thisWeek',    label: 'This Week',     getRange: () => ({ start: startOfWeek(today, { weekStartsOn: 1 }), end: today }) },
+    // weekStartsOn: 0 = Sunday. Matches Meta Ads Manager, Google Ads,
+    // and GA4 — all of which use Sunday-start weeks (US convention).
+    // Previously we used 1 (Monday/ISO) and "Last Week" covered a
+    // different 7-day window than Meta's "Last Week", so cross-
+    // referencing the dashboard against Meta Ads Manager always drifted
+    // by a day.
+    { id: 'thisWeek',    label: 'This Week',     getRange: () => ({ start: startOfWeek(today, { weekStartsOn: 0 }), end: today }) },
     { id: 'lastWeek',    label: 'Last Week',     getRange: () => {
-      const s = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 });
-      return { start: s, end: endOfWeek(s, { weekStartsOn: 1 }) };
+      const s = startOfWeek(subWeeks(today, 1), { weekStartsOn: 0 });
+      return { start: s, end: endOfWeek(s, { weekStartsOn: 0 }) };
     }},
     { id: 'last7',       label: 'Last 7 Days',   getRange: () => ({ start: subDays(today, 6), end: today }) },
     { id: 'last30',      label: 'Last 30 Days',  getRange: () => ({ start: subDays(today, 29), end: today }) },
