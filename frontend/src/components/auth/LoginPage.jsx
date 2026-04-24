@@ -81,8 +81,11 @@ export const LoginPage = () => {
             }}
           />
           <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white">
-            I-Dash
+            I-DASH
           </h1>
+          <p className="mt-2 text-[11px] sm:text-xs font-light uppercase tracking-[0.35em] text-slate-500">
+            Incredible Dashboard
+          </p>
         </div>
 
         {/* Login card — glassmorphism on deep charcoal */}
