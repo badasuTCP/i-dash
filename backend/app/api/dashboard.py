@@ -4190,6 +4190,11 @@ async def get_executive_summary(
         for q in quarter_order
     )
 
+    # Marketing Spend/Leads are live from the ads pipelines and are
+    # already filtered by the requested date range. Do NOT fall back
+    # to the latest-quarter sheet value when live = 0 — that leaks
+    # pre-period numbers into narrow windows ("today" with no ads
+    # would show last quarter's total).
     scorecards = [
         {
             "label": "Combined Total Revenue",
@@ -4200,14 +4205,14 @@ async def get_executive_summary(
         },
         {
             "label": "Marketing Spend",
-            "value": round(live_ads_spend or (marketing_spend_sheet_cur or 0), 2),
+            "value": round(live_ads_spend or 0, 2),
             "change": _pct_change(live_ads_spend, marketing_spend_sheet_cur),
             "format": "currency",
             "source": "Meta + Google Ads (live)",
         },
         {
             "label": "Marketing Leads",
-            "value": int(live_ads_leads or (marketing_leads_cur or 0)),
+            "value": int(live_ads_leads or 0),
             "change": _pct_change(marketing_leads_cur, marketing_leads_prev),
             "format": "number",
             "source": "Ads pipelines",

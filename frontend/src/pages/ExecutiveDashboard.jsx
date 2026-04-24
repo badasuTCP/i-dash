@@ -265,20 +265,21 @@ const ExecutiveSummary = () => {
     if (summary?.scorecards?.length) {
       const palette = ['blue', 'violet', 'emerald', 'amber'];
       return summary.scorecards.map((s, idx) => {
-        // Override Equipment Sold if backend returned 0 but we have
-        // quarterly data (live or curated) that sums to > 0.
+        // The backend currently returns YTD totals on the quarterly
+        // scorecards (sums every quarter in the TCP MAIN sheet
+        // unconditionally). That ignores the date picker. Override
+        // both Total Revenue and Equipment Sold with frontend-computed
+        // values that apply quarter-overlap filtering against the
+        // active date range.
         let value = s.value ?? 0;
-        if (s.label === 'Equipment Sold' && (!value || value === 0) && equipmentSoldFromTable > 0) {
-          value = equipmentSoldFromTable;
-        }
-        // Combined Total Revenue is renamed "Total Revenue" and now
-        // canonically maps to the Total Revenue row in the TCP MAIN
-        // quarterly table, summed over the quarters that overlap the
-        // centralised date range. Matches what leadership reports and
-        // reacts to the date picker.
         let label = s.label;
         let source = s.source;
         let infoNote = null;
+        if (s.label === 'Equipment Sold') {
+          value = equipmentSoldFromTable;
+          source = 'Google Sheets · TCP MAIN · Equipment Sold row';
+          infoNote = 'Total from the quarterly datasheet. Summed across quarters that overlap the selected date range (quarters are the smallest unit on this sheet).';
+        }
         if (s.label === 'Combined Total Revenue') {
           label = 'Total Revenue';
           value = combinedTotalRevenueFromTable;
