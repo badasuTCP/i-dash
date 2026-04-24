@@ -1596,12 +1596,26 @@ async def get_brand_summary(
         logger.warning("Brand summary web query failed: %s", e)
 
     # ── Ad spend (Meta + Google) ──────────────────────────────────────
+    # Scoped to the requested brand via the `division` column on each
+    # ad-metric row (stamped at ingest by the pipeline + the
+    # _backfill_ad_metric_divisions pass on startup). Without this
+    # filter, the I-BOS overview summed every brand's ads and showed
+    # 13 leads / $507 spend while the Contractor Breakdown (properly
+    # scoped) showed 3 leads / $209 — same date, different answer.
     ads = {"spend": 0, "clicks": 0, "impressions": 0, "leads": 0}
+    # The DB uses 'ibos' consistently; accept the legacy 'i-bos' too
+    # in case any row was stamped the old way.
+    division_values = [brand]
+    if brand == "ibos":
+        division_values.append("i-bos")
     try:
         from app.models.metrics import MetaAdMetric, GoogleAdMetric
         meta_q = await db.execute(
             select(func.sum(MetaAdMetric.spend), func.sum(MetaAdMetric.clicks), func.sum(MetaAdMetric.impressions), func.sum(MetaAdMetric.conversions))
-            .where(and_(MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date))
+            .where(and_(
+                MetaAdMetric.date >= start_date, MetaAdMetric.date <= end_date,
+                MetaAdMetric.division.in_(division_values),
+            ))
         )
         m = meta_q.one_or_none()
         if m:
@@ -1612,7 +1626,10 @@ async def get_brand_summary(
 
         gads_q = await db.execute(
             select(func.sum(GoogleAdMetric.spend), func.sum(GoogleAdMetric.clicks), func.sum(GoogleAdMetric.impressions), func.sum(GoogleAdMetric.conversions))
-            .where(and_(GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date))
+            .where(and_(
+                GoogleAdMetric.date >= start_date, GoogleAdMetric.date <= end_date,
+                GoogleAdMetric.division.in_(division_values),
+            ))
         )
         g = gads_q.one_or_none()
         if g:
