@@ -327,21 +327,33 @@ const ExecutiveSummary = () => {
     return isNaN(n) ? null : n * mult;
   };
 
+  // Manual-only metrics: rows Molly keys into TCP MAIN that do NOT have
+  // a live API source. Every other row in the sheet (Contractor Revenue,
+  // Retail Sales, Marketing Leads / Spend, Total Revenue, Training Sign
+  // Ups, etc.) is now ingested live from QB / WC / Shopify / Meta /
+  // Google / HubSpot and rendered by the live scorecards above. Showing
+  // them again here creates drift between what Molly keys monthly vs the
+  // live feeds. The full sheet data is still preserved in the database
+  // and is viewable on the admin Documents page.
+  const MANUAL_ONLY_METRICS = ['cost of mistakes', 'equipment sold'];
+
   const quarterlyRowsRaw = useMemo(() => {
     if (hasExecData) {
-      return summary.quarterly_kpis.rows.map((row) => ({
-        metric: row.metric,
-        values: summary.quarterly_kpis.quarters.map((q) => {
-          const v = row[q];
-          if (v === null || v === undefined) return '—';
-          const m = row.metric.toLowerCase();
-          if (m.includes('yoy') || m.includes('growth')) return fmtPct(v);
-          if (m.includes('revenue') || m.includes('sales') || m.includes('spend') || m.includes('cost')) return fmtCurrency(v);
-          return fmtNumber(v);
-        }),
-      }));
+      return summary.quarterly_kpis.rows
+        .filter((row) => MANUAL_ONLY_METRICS.includes((row.metric || '').trim().toLowerCase()))
+        .map((row) => ({
+          metric: row.metric,
+          values: summary.quarterly_kpis.quarters.map((q) => {
+            const v = row[q];
+            if (v === null || v === undefined) return '—';
+            const m = row.metric.toLowerCase();
+            if (m.includes('yoy') || m.includes('growth')) return fmtPct(v);
+            if (m.includes('revenue') || m.includes('sales') || m.includes('spend') || m.includes('cost')) return fmtCurrency(v);
+            return fmtNumber(v);
+          }),
+        }));
     }
-    return FALLBACK_QUARTERLY;
+    return FALLBACK_QUARTERLY.filter((row) => MANUAL_ONLY_METRICS.includes((row.metric || '').trim().toLowerCase()));
   }, [hasExecData, summary]);
 
   // Register the Quarterly KPI table for CSV export
@@ -637,7 +649,10 @@ const ExecutiveSummary = () => {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
           className={`rounded-xl p-6 mb-8 ${cardBg}`}>
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <h3 className={`text-lg font-semibold ${textPrimary}`}>Quarterly KPI Summary</h3>
+            <div>
+              <h3 className={`text-lg font-semibold ${textPrimary}`}>Manual Operational Metrics</h3>
+              <p className={`text-xs mt-0.5 ${textSecondary}`}>Entered by finance (Molly Quick) monthly — no live API equivalent</p>
+            </div>
             <span className="text-xs px-2.5 py-1 rounded-full bg-slate-500/15 text-slate-400 border border-slate-500/20">
               Source: Google Sheets · TCP MAIN · {hasExecData ? 'Live' : 'Curated'} · ⚠ = data flag
             </span>
