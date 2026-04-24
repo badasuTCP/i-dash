@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.metrics import DashboardSnapshot, HubSpotMetric, MetaAdMetric
+from app.models.metrics import HubSpotMetric, MetaAdMetric
 from app.models.user import User, UserDepartment
 from app.schemas.user import UserResponse
 from app.services.ai_service import AIService
@@ -58,42 +58,159 @@ async def _fetch_metrics_context(
     """
     Fetch ALL available metrics to give the AI maximum context.
 
-    Pulls from every live pipeline (Meta, Google Ads, GA4, HubSpot,
-    WooCommerce, Google Sheets) across the FULL data range — not
-    just the last 30 days. The AI needs to answer questions like
-    "what were our best months in 2024?" which requires all-time data.
+    Source of truth — DO NOT use DashboardSnapshot (empty/unreliable).
+    Every aggregate is pulled live from the underlying pipelines so the
+    AI can't contradict the dashboards it's explaining.
+
+    Revenue composition (all recorded in dollars):
+      - HubSpot `revenue_won` — CRM closed-won deals (training + B2B)
+      - Shopify orders        — CP Store
+      - WooCommerce orders    — Sani-Tred retail
+      - QB contractor revenue — i-bos division (google_sheet_metrics qb_revenue::)
+      - TCP MAIN Total Revenue — the canonical executive figure, quarterly
+
+    Revenue from these sources is reported BOTH individually and as a
+    `composite` total so the AI can explain breakdowns. Ad spend is
+    pulled live from Meta + Google Ads. Blended ROAS is ONLY returned
+    when ad-attributable revenue is measurable; otherwise we emit a
+    string "N/A — ad-attributable revenue not tracked separately" so
+    the AI doesn't invent a number.
     """
     # Use a wide window: 2 years back to today (covers 2024-2026 backfill)
     start_date = date.today() - timedelta(days=days)
     end_date = date.today()
 
-    # Also compute YTD (current year)
-    ytd_start = date(date.today().year, 1, 1)
-
-    # ── Snapshot totals (all-time) ────────────────────────────────────
-    snapshot_stmt = select(
-        func.sum(DashboardSnapshot.total_revenue).label("revenue"),
-        func.sum(DashboardSnapshot.total_ad_spend).label("ad_spend"),
-        func.sum(DashboardSnapshot.total_leads).label("leads"),
-        func.sum(DashboardSnapshot.total_deals_won).label("deals_won"),
-        func.avg(DashboardSnapshot.blended_roas).label("roas"),
-    ).where(and_(
-        DashboardSnapshot.date >= start_date,
-        DashboardSnapshot.date <= end_date,
-    ))
-    snapshot_result = await db.execute(snapshot_stmt)
-    snapshot_data = snapshot_result.first()
-
     context = {
         "period_days": days,
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
-        "total_revenue": float(snapshot_data[0] or 0),
-        "total_ad_spend": float(snapshot_data[1] or 0),
-        "total_leads": int(snapshot_data[2] or 0),
-        "total_deals_won": int(snapshot_data[3] or 0),
-        "blended_roas": float(snapshot_data[4] or 0),
     }
+
+    # ── Revenue by source ─────────────────────────────────────────────
+    revenue_sources = {}
+
+    # HubSpot revenue_won (deals actually closed in the period)
+    try:
+        hs_rev = await db.execute(
+            select(func.coalesce(func.sum(HubSpotMetric.revenue_won), 0))
+            .where(HubSpotMetric.date >= start_date)
+        )
+        v = float(hs_rev.scalar() or 0)
+        if v > 0:
+            revenue_sources["hubspot_deals_won"] = round(v, 2)
+    except Exception:
+        pass
+
+    # Shopify revenue (CP Store)
+    try:
+        from app.models.metrics import ShopifyOrder as _SO
+        sh_rev = await db.execute(
+            select(func.coalesce(func.sum(_SO.total), 0))
+            .where(and_(_SO.date_created >= start_date, _SO.date_created <= end_date))
+        )
+        v = float(sh_rev.scalar() or 0)
+        if v > 0:
+            revenue_sources["shopify_cp_store"] = round(v, 2)
+    except Exception:
+        pass
+
+    # WooCommerce revenue (Sani-Tred)
+    try:
+        from app.models.metrics import WCOrder as _WC
+        wc_rev = await db.execute(
+            select(func.coalesce(func.sum(_WC.total), 0))
+            .where(and_(_WC.date_created >= start_date, _WC.date_created <= end_date))
+        )
+        v = float(wc_rev.scalar() or 0)
+        if v > 0:
+            revenue_sources["woocommerce_sanitred"] = round(v, 2)
+    except Exception:
+        pass
+
+    # QB contractor revenue (i-bos division)
+    try:
+        from app.models.metrics import GoogleSheetMetric as _GSM
+        qb_rev = await db.execute(
+            select(func.coalesce(func.sum(_GSM.metric_value), 0))
+            .where(and_(
+                _GSM.sheet_name.like("qb_revenue::%"),
+                _GSM.date >= start_date, _GSM.date <= end_date,
+            ))
+        )
+        v = float(qb_rev.scalar() or 0)
+        if v > 0:
+            revenue_sources["qb_contractors_ibos"] = round(v, 2)
+    except Exception:
+        pass
+
+    # TCP MAIN Total Revenue (canonical executive figure, quarterly)
+    try:
+        from app.models.metrics import GoogleSheetMetric as _GSM
+        tcp_rev = await db.execute(
+            select(func.coalesce(func.sum(_GSM.metric_value), 0))
+            .where(and_(
+                _GSM.sheet_name.like("exec::%"),
+                _GSM.metric_name == "Total Revenue",
+                _GSM.date >= start_date, _GSM.date <= end_date,
+            ))
+        )
+        v = float(tcp_rev.scalar() or 0)
+        if v > 0:
+            revenue_sources["tcp_main_total_revenue"] = round(v, 2)
+    except Exception:
+        pass
+
+    context["revenue_sources"] = revenue_sources
+    # Composite = sum of everything EXCEPT TCP MAIN (which is already
+    # an aggregate of the other sources at the quarterly level). The
+    # AI should quote tcp_main_total_revenue as the "official" figure
+    # and the others as drill-downs.
+    composite = sum(v for k, v in revenue_sources.items() if k != "tcp_main_total_revenue")
+    context["composite_revenue_ex_tcp"] = round(composite, 2)
+    context["total_revenue_tcp_main"] = revenue_sources.get("tcp_main_total_revenue", 0)
+
+    # ── Ad spend + leads (live, division-aware) ───────────────────────
+    total_ad_spend = 0.0
+    total_ad_leads = 0
+    try:
+        ads_row = (await db.execute(select(
+            func.coalesce(func.sum(MetaAdMetric.spend), 0),
+            func.coalesce(func.sum(MetaAdMetric.conversions), 0),
+        ).where(MetaAdMetric.date >= start_date))).first()
+        total_ad_spend += float(ads_row[0] or 0)
+        total_ad_leads += int(ads_row[1] or 0)
+    except Exception:
+        pass
+    try:
+        from app.models.metrics import GoogleAdMetric as _GAM
+        gads_row = (await db.execute(select(
+            func.coalesce(func.sum(_GAM.spend), 0),
+            func.coalesce(func.sum(_GAM.conversions), 0),
+        ).where(_GAM.date >= start_date))).first()
+        total_ad_spend += float(gads_row[0] or 0)
+        total_ad_leads += int(gads_row[1] or 0)
+    except Exception:
+        pass
+    context["total_ad_spend"] = round(total_ad_spend, 2)
+    context["total_leads"] = total_ad_leads
+
+    # HubSpot deals for blended metrics
+    deals_won = 0
+    try:
+        dw = await db.execute(
+            select(func.coalesce(func.sum(HubSpotMetric.deals_won), 0))
+            .where(HubSpotMetric.date >= start_date)
+        )
+        deals_won = int(dw.scalar() or 0)
+    except Exception:
+        pass
+    context["total_deals_won"] = deals_won
+
+    # Blended ROAS — only compute if ad-attributable revenue is
+    # identifiable. We don't pretend to know how much of HubSpot /
+    # Shopify / WC revenue was ad-driven; pass an honest string so
+    # the AI doesn't invent a number.
+    context["blended_roas"] = "N/A — ad-attributable revenue is not tracked separately from organic/direct. Do NOT compute or claim a ROAS figure from total revenue / ad spend."
 
     # ── Meta Ads (all-time + per-contractor) ──────────────────────────
     try:

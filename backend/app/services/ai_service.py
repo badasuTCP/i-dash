@@ -100,15 +100,48 @@ class AIService:
         Returns:
             Formatted prompt string with metrics context.
         """
-        metrics_text = f"""
-=== FULL SYSTEM DATA (All pipelines, {context.get('start_date')} to {context.get('end_date')}) ===
+        # Revenue composition — pulled live from each source. The context
+        # includes both individual sources and a composite. Important: NEVER
+        # invent a ROAS figure from total revenue / ad spend; the revenue
+        # sources mix ad-attributable and organic/direct/B2B.
+        rev_sources = context.get("revenue_sources", {}) or {}
+        tcp_total = context.get("total_revenue_tcp_main", 0) or 0
+        composite = context.get("composite_revenue_ex_tcp", 0) or 0
 
-DASHBOARD SNAPSHOT:
-- Total Revenue: ${context.get('total_revenue', 0):,.2f}
+        metrics_text = f"""
+=== FULL SYSTEM DATA ({context.get('start_date')} to {context.get('end_date')}) ===
+
+REVENUE COMPOSITION (live from each pipeline):
+- TCP MAIN Total Revenue (canonical exec figure, quarterly): ${tcp_total:,.2f}
+- Composite of live sources (excluding TCP MAIN to avoid double-counting): ${composite:,.2f}
+- Breakdown by source:
+"""
+        if rev_sources:
+            for k, v in rev_sources.items():
+                label = {
+                    "hubspot_deals_won":    "HubSpot revenue_won (CRM deals — training + B2B)",
+                    "shopify_cp_store":     "Shopify CP Store orders",
+                    "woocommerce_sanitred": "WooCommerce Sani-Tred orders",
+                    "qb_contractors_ibos":  "QB contractor revenue (I-BOS)",
+                    "tcp_main_total_revenue": "TCP MAIN Total Revenue (quarterly rollup)",
+                }.get(k, k)
+                metrics_text += f"  - {label}: ${v:,.2f}\n"
+        else:
+            metrics_text += "  - (no revenue recorded in any source for this window)\n"
+
+        metrics_text += f"""
+PAID MARKETING (Meta + Google Ads, live, date-filtered):
 - Total Ad Spend: ${context.get('total_ad_spend', 0):,.2f}
-- Total Leads Generated: {context.get('total_leads', 0):,}
-- Deals Won: {context.get('total_deals_won', 0):,}
-- Blended ROAS: {context.get('blended_roas', 0):.2f}x
+- Total Ad Leads: {context.get('total_leads', 0):,}
+- HubSpot Deals Won in period: {context.get('total_deals_won', 0):,}
+- Blended ROAS: {context.get('blended_roas', 'N/A')}
+
+CRITICAL RULES WHEN ANSWERING:
+1. When a revenue number is zero and ad spend is non-zero, do NOT invent a ROAS. State plainly that ad-attributable revenue is not tracked and explain what revenue IS recorded.
+2. The "total revenue" the executive team reports = TCP MAIN Total Revenue. Quote that figure, not the composite, unless the user asks for a breakdown.
+3. If TCP MAIN shows zero for a short window (e.g. today), that's because TCP MAIN is quarterly — don't claim "no revenue"; drill into the live sources (HubSpot / Shopify / WC / QB) for daily/weekly answers.
+4. Training Signups is a CP-brand metric (HubSpot contacts flagged as training leads). It is NOT an I-BOS contractor metric.
+5. Active Contractors counts rows in the `contractors` table with active=true and division='i-bos'. It is NOT GA4 visits.
 
 """
         if "meta_ads" in context:
