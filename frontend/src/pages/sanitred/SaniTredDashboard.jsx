@@ -124,7 +124,7 @@ const SaniTredDashboard = () => {
             <div className="space-y-4">
               {showGoogleSheets && (
               <div>
-                <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Sheets Revenue</p>
+                <p className={`text-[10px] uppercase tracking-wide font-semibold ${textSec}`}>Retail Revenue</p>
                 <p className={`text-2xl font-bold ${textPri}`}>${((data?.sheets_revenue || 0) / 1000000).toFixed(2)}M</p>
               </div>
               )}

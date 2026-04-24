@@ -1710,6 +1710,44 @@ async def get_brand_summary(
         except Exception as exc:
             logger.warning("Brand summary Shopify query failed: %s", exc)
 
+    # ── WooCommerce retail (Sani-Tred — sanitred brand only) ──────────
+    # Post-2026 the Google Sheet historical revenue is capped to zero
+    # (see _SHEETS_HISTORICAL_CUTOFF block above). WooCommerce is now
+    # the authoritative retail source for Sani-Tred. If we don't query
+    # it, the Retail Revenue tile shows $0 even when orders exist.
+    wc_stats = {"revenue": 0.0, "orders": 0, "avg_order": 0.0}
+    if brand == "sanitred":
+        try:
+            from app.models.metrics import WCOrder
+            wc_q = await db.execute(
+                select(
+                    func.coalesce(func.sum(WCOrder.total), 0),
+                    func.count(WCOrder.id),
+                    func.coalesce(func.avg(WCOrder.total), 0),
+                ).where(and_(
+                    WCOrder.date_created >= start_date,
+                    WCOrder.date_created <= end_date,
+                    WCOrder.division == "sanitred",
+                ))
+            )
+            row = wc_q.one_or_none()
+            if row:
+                wc_stats = {
+                    "revenue": float(row[0] or 0),
+                    "orders": int(row[1] or 0),
+                    "avg_order": float(row[2] or 0),
+                }
+        except Exception as exc:
+            logger.warning("Brand summary WooCommerce query failed: %s", exc)
+
+    # Canonical Sani-Tred retail figure: WooCommerce for current
+    # windows, pre-2026 sheet rows for historical. Keeps the
+    # `sheets_revenue` response field populated (frontend still reads
+    # that name) without requiring coordinated frontend changes.
+    sanitred_retail_revenue = (
+        wc_stats["revenue"] if start_date >= _SHEETS_HISTORICAL_CUTOFF else sheets_revenue
+    )
+
     # ── Brand-specific KPIs ───────────────────────────────────────────
     if brand == "cp":
         # Headline revenue for the CP brand page is CP Store (Shopify) ONLY.
@@ -1731,7 +1769,17 @@ async def get_brand_summary(
         ]
     elif brand == "sanitred":
         scorecards = [
-            {"label": "Retail Revenue", "value": sheets_revenue, "format": "currency", "color": "emerald"},
+            {
+                "label": "Retail Revenue",
+                "value": round(sanitred_retail_revenue, 2),
+                "format": "currency",
+                "color": "emerald",
+                "source": (
+                    "WooCommerce — Sani-Tred orders"
+                    if start_date >= _SHEETS_HISTORICAL_CUTOFF
+                    else "TCP MAIN sheet (historical)"
+                ),
+            },
             {"label": "Web Visitors", "value": web["users"], "format": "number", "color": "blue"},
             {"label": "Returning Rate", "value": web["bounce_rate"], "format": "percent", "color": "violet"},
             {"label": "Ad Clicks", "value": ads["clicks"], "format": "number", "color": "amber"},
@@ -1851,16 +1899,31 @@ async def get_brand_summary(
     except Exception:
         pass
 
+    # sheets_revenue is a legacy field name the frontend still reads
+    # for the Sani-Tred Revenue Summary card. For sanitred we return
+    # the WC figure under that name when we're past the historical
+    # cutoff so the card doesn't display $0 while orders exist.
+    response_sheets_revenue = (
+        sanitred_retail_revenue if brand == "sanitred" else sheets_revenue
+    )
+
     return {
         "brand": brand,
         "period": f"{start_date} to {end_date}",
-        "hasLiveData": web["visits"] > 0 or ads["spend"] > 0 or crm["deals"] > 0 or shopify_stats["orders"] > 0,
+        "hasLiveData": (
+            web["visits"] > 0
+            or ads["spend"] > 0
+            or crm["deals"] > 0
+            or shopify_stats["orders"] > 0
+            or wc_stats["orders"] > 0
+        ),
         "scorecards": scorecards,
         "web": web,
         "ads": ads,
         "crm": crm,
-        "sheets_revenue": sheets_revenue,
+        "sheets_revenue": response_sheets_revenue,
         "shopify": shopify_stats,
+        "woocommerce": wc_stats,
         "top_websites": top_websites,
         "traffic_trend": traffic_trend,
         "top_reps": top_reps,
