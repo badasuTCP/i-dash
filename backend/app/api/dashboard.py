@@ -682,12 +682,11 @@ async def get_sales_intelligence(
     """
     from app.services.hubspot_owners import get_hubspot_owners
 
-    # Allow admin and data-analyst roles
-    if current_user.role.value not in ("admin", "data-analyst", "viewer"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Sales Intelligence requires at least viewer access",
-        )
+    # Any authenticated user can read sales intelligence — the frontend
+    # route is unrestricted and the underlying data is HubSpot CRM which
+    # every executive-level role needs access to. The old role gate
+    # rejected director/manager/analyst roles which broke the Executive
+    # account's Sales Intelligence page.
 
     start_date, end_date = _get_date_range(date_from, date_to)
 
@@ -2077,32 +2076,47 @@ async def get_marketing_data(
         })
 
     # ── 6. Google Sheets fallback for historical periods (2024/2025) ────
-    # When Meta/Google Ads have no data, check Sheets for campaign spend/leads
-    if total_spend == 0 and total_clicks == 0:
+    # Meta + Google Ads pipelines only carry real data from 2026-01-01
+    # onward; before that we fall back to marketing figures manually
+    # logged in the TCP MAIN sheet. The fallback must ONLY trigger for
+    # ranges that actually precede the ads pipeline cutoff — otherwise
+    # a user picking "today" with empty same-day ads data would see
+    # lifetime historical totals (a stored aggregate row dated today
+    # from an old import) masquerading as the current day. That broke
+    # trust in the date picker across Sani-Tred and I-BOS marketing.
+    ADS_PIPELINE_CUTOFF = date(2026, 1, 1)
+    sheets_fallback_eligible = (
+        total_spend == 0 and total_clicks == 0 and start_date < ADS_PIPELINE_CUTOFF
+    )
+    if sheets_fallback_eligible:
         try:
+            # Cap the sheet query to the historical window — never blend
+            # sheet rows with recent dates even if the caller's range
+            # extends past the cutoff.
+            sheet_end = min(end_date, ADS_PIPELINE_CUTOFF)
             from app.models.metrics import GoogleSheetMetric
             sheets_spend = await db.execute(
                 select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
                     GoogleSheetMetric.category == "Cost",
-                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
+                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= sheet_end,
                 ))
             )
             sheets_clicks = await db.execute(
                 select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
                     GoogleSheetMetric.category == "Engagement",
-                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
+                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= sheet_end,
                 ))
             )
             sheets_leads = await db.execute(
                 select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
                     GoogleSheetMetric.category == "Lead",
-                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
+                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= sheet_end,
                 ))
             )
             sheets_conv = await db.execute(
                 select(func.sum(GoogleSheetMetric.metric_value)).where(and_(
                     GoogleSheetMetric.category == "Conversion",
-                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= end_date,
+                    GoogleSheetMetric.date >= start_date, GoogleSheetMetric.date <= sheet_end,
                 ))
             )
             s_spend = float(sheets_spend.scalar() or 0)
@@ -4406,29 +4420,10 @@ async def get_wc_store(
     total_revenue = float(t.total_revenue or 0)
     avg_order = float(t.avg_order_value or 0)
 
-    # If date-filtered returns 0 orders, show all orders as a fallback
-    # so the page isn't empty after a successful pipeline run.
-    if total_orders == 0:
-        totals_all = await db.execute(
-            select(
-                func.count(WCOrder.id).label("total_orders"),
-                func.coalesce(func.sum(WCOrder.total), 0).label("total_revenue"),
-                func.coalesce(func.avg(WCOrder.total), 0).label("avg_order_value"),
-                func.coalesce(func.sum(WCOrder.discount), 0).label("total_discount"),
-                func.coalesce(func.sum(WCOrder.shipping), 0).label("total_shipping"),
-                func.coalesce(func.sum(WCOrder.tax), 0).label("total_tax"),
-            )
-        )
-        ta = totals_all.first()
-        if int(ta.total_orders or 0) > 0:
-            t = ta
-            total_orders = int(t.total_orders or 0)
-            total_revenue = float(t.total_revenue or 0)
-            avg_order = float(t.avg_order_value or 0)
-            logger.info(
-                "WC store: date-filtered returned 0, showing all %d orders",
-                total_orders,
-            )
+    # If the date filter returns no orders, honour it — do NOT silently
+    # swap in all-time totals. Previously this fell back to every order
+    # in the table, which made "today" show lifetime revenue and broke
+    # trust in the date picker across the CEO dashboard.
 
     # Completed vs refunded for refund rate
     completed_q = await db.execute(
