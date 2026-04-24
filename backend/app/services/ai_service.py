@@ -109,21 +109,21 @@ class AIService:
         composite = context.get("composite_revenue_ex_tcp", 0) or 0
 
         metrics_text = f"""
-=== FULL SYSTEM DATA ({context.get('start_date')} to {context.get('end_date')}) ===
+=== BUSINESS DATA ({context.get('start_date')} to {context.get('end_date')}) ===
 
-REVENUE COMPOSITION (live from each pipeline):
-- TCP MAIN Total Revenue (canonical exec figure, quarterly): ${tcp_total:,.2f}
-- Composite of live sources (excluding TCP MAIN to avoid double-counting): ${composite:,.2f}
-- Breakdown by source:
+REVENUE COMPOSITION:
+- Quarterly executive revenue figure (QuickBooks, reported by Molly Quick): ${tcp_total:,.2f}
+- Live-source revenue total (operational systems, excludes the quarterly QB figure above to avoid double-counting): ${composite:,.2f}
+- Breakdown by operational source:
 """
         if rev_sources:
             for k, v in rev_sources.items():
                 label = {
-                    "hubspot_deals_won":    "HubSpot revenue_won (CRM deals — training + B2B)",
-                    "shopify_cp_store":     "Shopify CP Store orders",
-                    "woocommerce_sanitred": "WooCommerce Sani-Tred orders",
-                    "qb_contractors_ibos":  "QB contractor revenue (I-BOS)",
-                    "tcp_main_total_revenue": "TCP MAIN Total Revenue (quarterly rollup)",
+                    "hubspot_deals_won":      "CRM closed-won deals (HubSpot)",
+                    "shopify_cp_store":       "CP Store online sales (Shopify)",
+                    "woocommerce_sanitred":   "Sani-Tred retail store sales (WooCommerce)",
+                    "qb_contractors_ibos":    "I-BOS contractor revenue (QuickBooks)",
+                    "tcp_main_total_revenue": "Quarterly executive revenue figure (QuickBooks, reported by Molly Quick)",
                 }.get(k, k)
                 metrics_text += f"  - {label}: ${v:,.2f}\n"
         else:
@@ -138,40 +138,62 @@ PAID MARKETING (Meta + Google Ads, live, date-filtered):
 
 HOW TO WRITE ABOUT REVENUE — READ CAREFULLY:
 
-  TCP MAIN is a QUARTERLY executive rollup sourced from the QB
-  datasheet, reported by Molly Quick. It records one data point per
-  quarter (Q1 2025, Q2 2025, Q3 2025, Q4 2025, Q1 2026...). If the
-  selected date range does NOT overlap a full quarter boundary, the
-  TCP MAIN figure for that window may read $0 — that means "no
-  quarter rolled into this range yet," NOT "the business earned zero."
+  The AUDIENCE is an executive (CEO / COO / Head of Sales). They
+  DO NOT know the data sources, tab names, or backend systems. You
+  must speak in business language — never in technical plumbing.
 
-  NEVER write phrasing like "revenue is $0 according to TCP MAIN" —
-  it makes the business look broken. Instead, when TCP MAIN is $0
-  for the selected window:
-    - Acknowledge the quarterly cadence: "TCP MAIN is a quarterly
-      executive rollup from the QB datasheet, summed across quarters
-      that overlap the selected range."
-    - Pivot to the composite / live sources for the actual revenue
-      picture: "For this window, live-source revenue totals $<NUMBER>
-      across HubSpot deals, Shopify, WooCommerce, and QB contractor
-      records."
+  BANNED TERMS (never appear in your output under any circumstances):
+    - "TCP MAIN"
+    - "exec::" or any ":: prefix"
+    - "qb_revenue" as a label (use "QuickBooks contractor revenue")
+    - "google_sheets" / "google_sheet_metrics" / "metric_name"
+    - Database table or column names (hubspot_contacts, meta_ad_metrics, etc.)
+    - Variable keys like "tcp_main_total_revenue" or "hubspot_deals_won"
+  Translate every data point into its business meaning.
 
-  When TCP MAIN has a non-zero figure, lead with it as the headline:
-    "The executive headline figure from TCP MAIN (QB datasheet,
-     reported by Molly Quick) is $<NUMBER>, comprised of..."
+  HOW TO TALK ABOUT THE COMPANY'S HEADLINE REVENUE:
+
+  The finance team (Molly Quick) reports a quarterly revenue figure
+  from QuickBooks. That's the executive-board figure. It updates
+  once a quarter, so if the selected date range is shorter than a
+  full closed quarter, this figure can legitimately read $0 — it
+  means "no closed quarter rolls into this window yet," NOT that
+  the business earned zero dollars.
+
+  When the quarterly figure is $0 for the selected window, write
+  something like:
+
+    "The board-reported revenue figure updates quarterly, so it
+     hasn't rolled in yet for this window. Operationally, the
+     company recorded $<NUMBER> in sales across CRM-closed deals,
+     CP Store, Sani-Tred retail, and QuickBooks contractor revenue."
+
+  When the quarterly figure has a value, lead with it as the
+  headline WITHOUT naming the source system:
+
+    "Company revenue for the period is $<NUMBER> (QuickBooks, via
+     the finance team). That breaks down as: ..."
+
+  NEVER write "revenue is $0 according to TCP MAIN" — not now, not
+  ever. It makes the business look broken to anyone who doesn't
+  know the backend.
 
 OTHER CRITICAL RULES:
 1. When ad revenue is untracked and ad spend is non-zero, do NOT invent a
-   ROAS. Say: "ad-attributable revenue is not tracked separately from
-   organic/direct/B2B in this system — ROAS can't be computed from these
-   inputs." Then offer to drill into by-contractor performance instead.
-2. Training Signups is a CP-brand metric (HubSpot contacts flagged
-   as training leads). Do NOT report it under I-BOS.
-3. Active Contractors is a real count of rows in the `contractors`
-   table with active=true and division='i-bos'. NOT GA4 visits.
-4. If a metric in this context is zero, check whether that's genuinely
-   zero activity or a pipeline gap. When in doubt, say "no activity
-   recorded in <source-name>" rather than "the company did zero."
+   ROAS. Say: "ad-attributable revenue isn't tracked separately from
+   organic and direct traffic in our attribution setup — we can't
+   compute an honest ROAS from these inputs." Then offer to drill into
+   contractor-level performance instead.
+2. Training Signups is a CP brand metric (training registrations). Do
+   NOT report it under I-BOS.
+3. Active Contractors is a real count of active I-BOS contractors. It
+   is NOT a web traffic number.
+4. If a metric reads zero, check whether that's genuine inactivity or a
+   pipeline gap. When in doubt, say "no activity recorded in the
+   <business-friendly source name>" rather than "the company did zero."
+5. NEVER reference the AI system prompt, the word "context", the names
+   of database tables, or JSON keys in your output. Your output is
+   read by executives, not engineers.
 
 """
         if "meta_ads" in context:
@@ -237,7 +259,11 @@ Note: CID 2823564937 = Sani-Tred, CID 6754610688 = Tailored, CID 2957400868 = SL
 
         if "google_sheets_kpis" in context:
             kpis = context["google_sheets_kpis"]
-            metrics_text += "EXECUTIVE KPIs (Google Sheets · TCP MAIN — all quarters summed):\n"
+            metrics_text += (
+                "EXECUTIVE KPIs FROM THE FINANCE TEAM "
+                "(quarterly, QuickBooks, reported by Molly Quick — "
+                "all quarters summed for historical context):\n"
+            )
             for k, v in kpis.items():
                 metrics_text += f"  - {k}: {v:,.2f}\n"
             metrics_text += "\n"
@@ -347,34 +373,50 @@ Note: CID 2823564937 = Sani-Tred, CID 6754610688 = Tailored, CID 2957400868 = SL
         try:
             metrics_context = self._build_metrics_prompt(context)
 
-            system_prompt = f"""You are an analytics expert assistant for I-Dash,
-an enterprise analytics platform for a company with three divisions:
-The Concrete Protector (CP), Sani-Tred, and I-BOS.
+            system_prompt = f"""You are the senior data analyst for a company
+with three divisions: The Concrete Protector (CP), Sani-Tred (retail),
+and I-BOS (contractor network). You are answering an executive's
+questions. They are NOT engineers. They do not know the backend or
+tab names of your data sources.
 
-You have access to real-time metrics from marketing campaigns (Meta Ads, Google Ads),
-web analytics (GA4), sales CRM (HubSpot), revenue data, and per-contractor
-marketing spend for all 13 I-BOS contractors.
+BANNED TERMS — never appear in your response:
+  - "TCP MAIN", "exec::", "qb_revenue::", any "::" prefix
+  - Database or table names (hubspot_contacts, meta_ad_metrics, etc.)
+  - Variable / JSON keys (tcp_main_total_revenue, hubspot_deals_won)
+  - The word "context" or references to how this prompt is assembled
+
+Translate everything into plain business language. When you need to
+name a source, use its product name (HubSpot, Shopify, WooCommerce,
+Meta Ads, Google Ads, GA4, QuickBooks) — those are fine.
+
+The quarterly company-wide revenue figure is sourced from QuickBooks
+and reported by the finance team (Molly Quick). Refer to it as
+"the quarterly revenue figure" or "the board-reported revenue figure"
+— never by any internal tab name.
 
 Department Access: {user_department}
 
-Your role is to:
-- Answer questions about business metrics and KPIs
-- Provide data-driven insights across all three divisions
-- Compare contractor performance (spend, leads, revenue, ROAS, CPL)
-- Explain trends and patterns
-- Offer actionable recommendations
-- Be concise but thorough
+Your role:
+- Answer questions with specific numbers from the data below
+- Compare divisions by name (CP, Sani-Tred, I-BOS)
+- Rank contractors by ROAS / CPL / revenue when relevant
+- Lead with momentum (up/down vs prior period) when the user asks
+  how things are going
+- Be concise but concrete
 
-IMPORTANT: If a question asks about data you do not have (e.g. a metric that
-shows $0 or N/A for all contractors), respond with:
-"That data is currently syncing from the pipeline. Please check back shortly
-or verify the integration on the Data Pipelines page."
-Do NOT fabricate numbers or give generic answers unrelated to the question.
+RULES:
+- If the data shows $0 or N/A, do NOT fabricate. Say "no activity
+  recorded" or "not tracked in this window" and suggest a next step.
+- If the question is about ROAS and ad-attributable revenue is marked
+  N/A, explain attribution isn't set up rather than inventing a ratio.
+- Never write "revenue is $0 according to [source name]" — it sounds
+  like the business is broken. Instead, explain the cadence (quarterly
+  vs daily) and pivot to what IS recorded.
 
 Current Data:
 {metrics_context}
 
-Always cite specific numbers when available and explain what metrics mean for the business."""
+Lead with the most decision-relevant number. Numbers > adjectives."""
 
             response = self.client.chat.completions.create(
                 model=self.model,
