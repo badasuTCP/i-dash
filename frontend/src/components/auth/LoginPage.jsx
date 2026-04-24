@@ -66,7 +66,7 @@ export const LoginPage = () => {
 
   return (
     <div className={`min-h-screen flex items-center justify-center relative overflow-hidden px-4 py-8 sm:py-0 ${
-      isDark ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950' : 'bg-gradient-to-br from-white via-blue-50 to-white'
+      isDark ? 'bg-gradient-to-br from-[#0a0d14] via-[#0f1117] to-[#0a0d14]' : 'bg-gradient-to-br from-white via-blue-50 to-white'
     }`}>
       {/* Animated background orbs — hidden on small screens for performance */}
       <motion.div
@@ -94,26 +94,24 @@ export const LoginPage = () => {
         {/* Logo and branding */}
         <div className="text-center mb-6 sm:mb-8">
           <motion.div
-            className="inline-flex flex-col items-center gap-3 mb-4 sm:mb-6"
-            whileHover={{ scale: 1.03 }}
+            className="inline-flex flex-col items-center gap-4 mb-4 sm:mb-6"
+            whileHover={{ scale: 1.02 }}
           >
-            {/* Full CP Logo — large and prominent */}
+            {/* CP Simplified White — hero brand lockup (shield + wordmark) */}
             <img
-              src="/logo-full.svg"
+              src="/logo-cp-simplified-white.svg"
               alt="The Concrete Protector"
-              className="w-32 h-32 sm:w-40 sm:h-40 object-contain drop-shadow-lg"
+              className="h-16 sm:h-20 w-auto object-contain drop-shadow-[0_8px_24px_rgba(85,168,195,0.25)]"
               onError={(e) => {
-                // Fallback to shield if full logo missing
                 e.target.onerror = null;
-                e.target.src = '/logo-shield.svg';
-                e.target.className = 'w-16 h-16 sm:w-20 sm:h-20 object-contain';
+                e.target.src = '/logo-full.svg';
               }}
             />
-            <h1 className={`text-2xl sm:text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+            <h1 className={`text-2xl sm:text-3xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
               I-Dash
             </h1>
           </motion.div>
-          <p className={`text-base sm:text-lg font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+          <p className={`text-base sm:text-lg font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
             Enterprise Analytics Reimagined
           </p>
           <p className={`text-xs sm:text-sm mt-1.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
@@ -121,11 +119,11 @@ export const LoginPage = () => {
           </p>
         </div>
 
-        {/* Login card — responsive padding */}
+        {/* Login card — glassmorphism on dark charcoal */}
         <motion.div
-          className={`rounded-xl p-5 sm:p-8 ${
+          className={`rounded-2xl p-5 sm:p-8 ${
             isDark
-              ? 'bg-[#1e2235]/80 border border-slate-700/50 shadow-2xl backdrop-blur-sm'
+              ? 'bg-white/[0.03] border border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.5)] backdrop-blur-xl'
               : 'bg-white shadow-lg border border-slate-200'
           }`}
         >
@@ -298,6 +296,15 @@ export const LoginPage = () => {
           </div>
         </div>
       </motion.div>
+
+      {/* Build version — bottom-right, understated. Update this string on each release. */}
+      <div
+        className={`absolute bottom-3 right-4 z-10 text-[10px] font-mono tracking-wide select-none ${
+          isDark ? 'text-slate-600' : 'text-slate-400'
+        }`}
+      >
+        v1.0.4
+      </div>
     </div>
   );
 };

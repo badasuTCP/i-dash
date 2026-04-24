@@ -171,11 +171,19 @@ const Sidebar = () => {
       {/* ── Logo + Collapse Toggle ─────────────────────────────────── */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-white/5">
         <div className={`flex items-center gap-2.5 overflow-hidden ${collapsed ? 'justify-center w-full' : ''}`}>
-          <img
-            src="/logo-shield.svg"
-            alt="I-Dash"
-            className="w-7 h-9 flex-shrink-0"
-          />
+          {collapsed ? (
+            <img
+              src="/logo-shield.svg"
+              alt="I-Dash"
+              className="w-7 h-9 flex-shrink-0"
+            />
+          ) : (
+            <img
+              src="/logo-cp-simplified-white.svg"
+              alt="The Concrete Protector"
+              className="h-7 w-auto flex-shrink-0"
+            />
+          )}
           {!collapsed && (
             <span className="text-[#F97066] font-bold text-lg leading-tight whitespace-nowrap">
               I-Dash
