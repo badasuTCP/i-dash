@@ -362,6 +362,138 @@ async def _fetch_metrics_context(
     except Exception:
         pass
 
+    # ── Per-brand performance breakdown ───────────────────────────────
+    # Each brand's ad spend + leads, so the AI can rank brands and
+    # speak about them specifically without having to re-derive from
+    # account IDs. Mirrors the brand-summary endpoint's division gate.
+    brand_performance: Dict[str, Dict[str, float]] = {}
+    for brand_slug in ("cp", "sanitred", "ibos"):
+        div_values = [brand_slug]
+        if brand_slug == "ibos":
+            div_values.append("i-bos")
+        try:
+            m_row = (await db.execute(select(
+                func.coalesce(func.sum(MetaAdMetric.spend), 0),
+                func.coalesce(func.sum(MetaAdMetric.conversions), 0),
+                func.coalesce(func.sum(MetaAdMetric.clicks), 0),
+            ).where(and_(
+                MetaAdMetric.date >= start_date,
+                MetaAdMetric.division.in_(div_values),
+            )))).first()
+            from app.models.metrics import GoogleAdMetric as _GAM
+            g_row = (await db.execute(select(
+                func.coalesce(func.sum(_GAM.spend), 0),
+                func.coalesce(func.sum(_GAM.conversions), 0),
+                func.coalesce(func.sum(_GAM.clicks), 0),
+            ).where(and_(
+                _GAM.date >= start_date,
+                _GAM.division.in_(div_values),
+            )))).first()
+            spend = float(m_row[0] or 0) + float(g_row[0] or 0)
+            leads = int((m_row[1] or 0) + (g_row[1] or 0))
+            clicks = int((m_row[2] or 0) + (g_row[2] or 0))
+            brand_performance[brand_slug] = {
+                "ad_spend": round(spend, 2),
+                "ad_leads": leads,
+                "ad_clicks": clicks,
+                "cost_per_lead": round(spend / leads, 2) if leads > 0 else 0,
+            }
+        except Exception:
+            pass
+    if brand_performance:
+        context["by_brand"] = brand_performance
+
+    # ── Top + bottom contractors by ROAS (I-BOS only) ─────────────────
+    # Join Meta ad spend/leads by account against QB revenue by contractor
+    # name to rank marketing efficiency. Uses the same normalisation that
+    # /all-contractors-revenue uses.
+    try:
+        from app.models.metrics import GoogleSheetMetric as _GSM2
+        meta_by_acct = (await db.execute(select(
+            MetaAdMetric.account_name,
+            func.coalesce(func.sum(MetaAdMetric.spend), 0).label("spend"),
+            func.coalesce(func.sum(MetaAdMetric.conversions), 0).label("leads"),
+        ).where(and_(
+            MetaAdMetric.date >= start_date,
+            MetaAdMetric.division.in_(["ibos", "i-bos"]),
+            MetaAdMetric.account_name.isnot(None),
+        ))
+        .group_by(MetaAdMetric.account_name)
+        .having(func.sum(MetaAdMetric.spend) > 0))).all()
+
+        qb_by_name = (await db.execute(select(
+            _GSM2.metric_name,
+            func.coalesce(func.sum(_GSM2.metric_value), 0).label("rev"),
+        ).where(and_(
+            _GSM2.sheet_name.like("qb_revenue::%"),
+            _GSM2.date >= start_date, _GSM2.date <= end_date,
+        ))
+        .group_by(_GSM2.metric_name))).all()
+
+        def _nrm(s):
+            if not s: return ""
+            s = s.lower()
+            for tok in ("llc", "inc.", "inc", ".com", ".co", "[meta]"):
+                s = s.replace(tok, "")
+            return "".join(ch for ch in s if ch.isalnum())
+        qb_lookup = {_nrm(r[0]): float(r[1] or 0) for r in qb_by_name}
+
+        ranked = []
+        for name, spend, leads in meta_by_acct:
+            rev = qb_lookup.get(_nrm(name), 0.0)
+            roas = (rev / spend) if spend > 0 else 0
+            cpl = (spend / leads) if leads > 0 else 0
+            ranked.append({
+                "name": name,
+                "spend": round(float(spend), 2),
+                "leads": int(leads or 0),
+                "revenue": round(rev, 2),
+                "roas": round(roas, 2),
+                "cpl": round(cpl, 2),
+            })
+        ranked.sort(key=lambda c: c["roas"], reverse=True)
+        if ranked:
+            context["contractor_roas_ranking"] = {
+                "top_3": ranked[:3],
+                "bottom_3": [c for c in ranked if c["spend"] > 100][-3:][::-1],
+                "total_ranked": len(ranked),
+            }
+    except Exception:
+        pass
+
+    # ── Period-over-period comparison ─────────────────────────────────
+    # Same-length window immediately prior to the selected range, so the
+    # AI can say "spend is up 23% vs the prior period" instead of only
+    # citing the period total.
+    try:
+        prior_end = start_date - timedelta(days=1)
+        prior_start = prior_end - (end_date - start_date)
+        prior = {}
+        prior_ads_meta = (await db.execute(select(
+            func.coalesce(func.sum(MetaAdMetric.spend), 0),
+            func.coalesce(func.sum(MetaAdMetric.conversions), 0),
+        ).where(and_(MetaAdMetric.date >= prior_start, MetaAdMetric.date <= prior_end)))).first()
+        from app.models.metrics import GoogleAdMetric as _GAM2
+        prior_ads_gads = (await db.execute(select(
+            func.coalesce(func.sum(_GAM2.spend), 0),
+            func.coalesce(func.sum(_GAM2.conversions), 0),
+        ).where(and_(_GAM2.date >= prior_start, _GAM2.date <= prior_end)))).first()
+        prior["ad_spend"] = round(
+            float(prior_ads_meta[0] or 0) + float(prior_ads_gads[0] or 0), 2
+        )
+        prior["ad_leads"] = int((prior_ads_meta[1] or 0) + (prior_ads_gads[1] or 0))
+        prior_hs = (await db.execute(select(
+            func.coalesce(func.sum(HubSpotMetric.deals_won), 0),
+            func.coalesce(func.sum(HubSpotMetric.revenue_won), 0),
+        ).where(HubSpotMetric.date >= prior_start))).first()
+        prior["hubspot_deals_won"] = int(prior_hs[0] or 0)
+        prior["hubspot_revenue_won"] = round(float(prior_hs[1] or 0), 2)
+        prior["period_start"] = prior_start.isoformat()
+        prior["period_end"] = prior_end.isoformat()
+        context["prior_period"] = prior
+    except Exception:
+        pass
+
     return context
 
 

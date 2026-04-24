@@ -152,13 +152,13 @@ HOW TO WRITE ABOUT REVENUE — READ CAREFULLY:
       executive rollup from the QB datasheet, summed across quarters
       that overlap the selected range."
     - Pivot to the composite / live sources for the actual revenue
-      picture: "For this window, live-source revenue totals ${N}
+      picture: "For this window, live-source revenue totals $<NUMBER>
       across HubSpot deals, Shopify, WooCommerce, and QB contractor
       records."
 
   When TCP MAIN has a non-zero figure, lead with it as the headline:
     "The executive headline figure from TCP MAIN (QB datasheet,
-     reported by Molly Quick) is ${N}, comprised of..."
+     reported by Molly Quick) is $<NUMBER>, comprised of..."
 
 OTHER CRITICAL RULES:
 1. When ad revenue is untracked and ad spend is non-zero, do NOT invent a
@@ -249,6 +249,54 @@ Note: CID 2823564937 = Sani-Tred, CID 6754610688 = Tailored, CID 2957400868 = SL
                 status = f" [Ad: {c['ad_status']}]" if c.get("ad_status") else ""
                 metrics_text += f"  - {c['name']}{status}\n"
             metrics_text += "\n"
+
+        if "by_brand" in context:
+            by_brand = context["by_brand"]
+            metrics_text += "PAID MARKETING BREAKDOWN BY DIVISION (for the selected window):\n"
+            for slug, row in by_brand.items():
+                label = {"cp": "CP (The Concrete Protector)", "sanitred": "Sani-Tred (Retail)", "ibos": "I-BOS (Contractor network)"}.get(slug, slug)
+                metrics_text += (
+                    f"  - {label}: Spend ${row['ad_spend']:,.2f}, "
+                    f"Leads {row['ad_leads']:,}, Clicks {row['ad_clicks']:,}, "
+                    f"CPL ${row['cost_per_lead']:,.2f}\n"
+                )
+            metrics_text += "\n"
+
+        ranking = context.get("contractor_roas_ranking")
+        if ranking:
+            metrics_text += (
+                f"I-BOS CONTRACTOR ROAS RANKING (Meta ad spend vs QB revenue, "
+                f"{ranking.get('total_ranked', 0)} contractors ranked):\n"
+            )
+            if ranking.get("top_3"):
+                metrics_text += "  Top 3 by ROAS:\n"
+                for c in ranking["top_3"]:
+                    metrics_text += (
+                        f"    - {c['name']}: Spend ${c['spend']:,.2f}, "
+                        f"Leads {c['leads']}, Revenue ${c['revenue']:,.2f}, "
+                        f"ROAS {c['roas']}x, CPL ${c['cpl']:,.2f}\n"
+                    )
+            if ranking.get("bottom_3"):
+                metrics_text += "  Bottom 3 by ROAS (spend > $100 only):\n"
+                for c in ranking["bottom_3"]:
+                    metrics_text += (
+                        f"    - {c['name']}: Spend ${c['spend']:,.2f}, "
+                        f"Leads {c['leads']}, Revenue ${c['revenue']:,.2f}, "
+                        f"ROAS {c['roas']}x, CPL ${c['cpl']:,.2f}\n"
+                    )
+            metrics_text += "\n"
+
+        prior = context.get("prior_period")
+        if prior:
+            metrics_text += (
+                f"PRIOR PERIOD COMPARISON ({prior.get('period_start')} to "
+                f"{prior.get('period_end')}) — same length as the current window:\n"
+                f"  - Prior Ad Spend: ${prior.get('ad_spend', 0):,.2f}\n"
+                f"  - Prior Ad Leads: {prior.get('ad_leads', 0):,}\n"
+                f"  - Prior HubSpot Deals Won: {prior.get('hubspot_deals_won', 0):,}\n"
+                f"  - Prior HubSpot Revenue Won: ${prior.get('hubspot_revenue_won', 0):,.2f}\n"
+                "  → Use this to compute % change and lead with a momentum read.\n\n"
+            )
 
         # ── Per-contractor marketing spend (I-BOS division) ──────────
         contractors = context.get("contractors", CONTRACTOR_MARKETING_DATA)
@@ -375,19 +423,50 @@ Always cite specific numbers when available and explain what metrics mean for th
         try:
             metrics_context = self._build_metrics_prompt(context)
 
-            system_prompt = f"""You are an analytics expert for a company with three divisions:
-The Concrete Protector (CP), Sani-Tred, and I-BOS.
+            system_prompt = f"""You are the senior data analyst for a holding company
+with three divisions: The Concrete Protector (CP), Sani-Tred (retail), and
+I-BOS (contractor network).
 
-Analyze the provided metrics and generate insights in valid JSON format only.
-No markdown, no code blocks, just pure JSON.
+You are writing the Key Findings panel that an executive will read WITHOUT
+you being present. Talk like the analyst in the room — specific, numeric,
+opinionated where the data supports it. Never write generic observations.
 
 Department Access: {user_department}
 
-Return a JSON object with exactly these keys:
-- "summary": Brief 2-3 sentence summary of overall performance
-- "key_findings": Array of 3-5 important findings (strings)
-- "anomalies": Array of unusual patterns or concerning metrics (strings)
-- "recommendations": Array of 2-4 actionable recommendations (strings)
+Return a JSON object with EXACTLY these keys (no markdown, no code blocks,
+pure JSON):
+- "summary": 2-3 sentence lead. Start with the headline read (momentum, top
+  division, or top risk). Cite at least one specific dollar figure or percent.
+- "key_findings": 3-5 concrete findings, each a full sentence with numbers.
+  Cover these angles at minimum:
+    1. Division-level performance — name CP, Sani-Tred, and I-BOS by name.
+       Which one is pulling the weight, which is lagging.
+    2. Contractor standout — by name — top by ROAS or by revenue.
+       Use the ROAS ranking in the context.
+    3. Period-over-period momentum — use the PRIOR PERIOD COMPARISON block
+       to say whether spend/leads/deals are up or down vs the prior window.
+    4. CRM conversion health — deals_created vs deals_won, pipeline_value.
+    5. Web / traffic signal if unusual.
+- "anomalies": 1-4 outliers worth flagging. Use numbers. Examples:
+  "CPL on {{brand}} is $X vs cohort average $Y." NOT "CPL might be high."
+  Skip this section if nothing stands out — don't invent problems.
+- "recommendations": 2-4 actionable next steps tied to findings. Each must
+  name the specific lever (pause/scale a campaign, reallocate to a named
+  contractor, investigate a specific metric). NO generic "optimise marketing."
+
+HARD RULES:
+- You have per-brand breakdown in the "PAID MARKETING BREAKDOWN BY DIVISION"
+  block. Use it. Naming divisions without numbers is a fail.
+- You have prior-period numbers in the "PRIOR PERIOD COMPARISON" block.
+  Compute % change and say up or down.
+- You have contractor ROAS ranking. Use specific contractor names.
+- Never write "revenue is $0 according to TCP MAIN" — see the rules in
+  the metrics context.
+- If a field in the context says "N/A — ad-attributable revenue is not
+  tracked separately", do NOT compute a ROAS from total revenue / spend.
+  Say so and recommend investigating attribution.
+- Today's date context: this data window is {context.get('start_date')} to
+  {context.get('end_date')}. That's {context.get('period_days')} days.
 
 Current Data:
 {metrics_context}"""
