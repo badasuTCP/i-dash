@@ -4412,32 +4412,78 @@ async def get_executive_summary(
     except Exception as exc:
         logger.warning("Executive summary: Shopify retail query failed: %s", exc)
 
-    if qb_summary and qb_summary.get("grand_total"):
-        qb_total = float(qb_summary.get("grand_total") or 0)
-        # Sani-Tred retail (WooCommerce, via google_sheets retail:: rows)
-        retail_total = 0.0
-        try:
-            retail_q = await db.execute(
-                select(func.sum(GoogleSheetMetric.metric_value))
-                .where(and_(
-                    GoogleSheetMetric.sheet_name.like("retail::%"),
-                    GoogleSheetMetric.category == "Revenue",
-                    GoogleSheetMetric.date >= start_date,
-                    GoogleSheetMetric.date <= end_date,
-                ))
-            )
-            retail_total = float(retail_q.scalar() or 0)
-        except Exception:
-            pass
-        live_combined = qb_total + retail_total + shopify_total
-        # Override the Combined Total Revenue scorecard if TCP MAIN was empty
-        if scorecards and scorecards[0].get("label") == "Combined Total Revenue":
-            if not scorecards[0].get("value"):
-                scorecards[0]["value"] = round(live_combined, 2)
-                src = "QB contractor + Sani-Tred retail"
-                if shopify_total > 0:
-                    src += " + CP Shopify"
-                scorecards[0]["source"] = f"{src} (live)"
+    # Sani-Tred retail — two sources:
+    #   (a) WooCommerce orders for the selected window (current / post-2026)
+    #   (b) Historical retail:: sheet rows (pre-2026 archive)
+    # Previously we only read (b), which is gated to pre-2026-01-01 at
+    # extract time. That left the fallback at $0 whenever a live-period
+    # demo hit a fresh env where TCP MAIN hadn't synced yet.
+    wc_retail_total = 0.0
+    try:
+        from app.models.metrics import WCOrder
+        wc_q = await db.execute(
+            select(func.coalesce(func.sum(WCOrder.total), 0))
+            .where(and_(
+                WCOrder.date_created >= start_date,
+                WCOrder.date_created <= end_date,
+                WCOrder.division == "sanitred",
+            ))
+        )
+        wc_retail_total = float(wc_q.scalar() or 0)
+    except Exception as exc:
+        logger.warning("Executive summary: WooCommerce retail query failed: %s", exc)
+
+    sheet_retail_total = 0.0
+    try:
+        retail_q = await db.execute(
+            select(func.sum(GoogleSheetMetric.metric_value))
+            .where(and_(
+                GoogleSheetMetric.sheet_name.like("retail::%"),
+                GoogleSheetMetric.category == "Revenue",
+                GoogleSheetMetric.date >= start_date,
+                GoogleSheetMetric.date <= end_date,
+            ))
+        )
+        sheet_retail_total = float(retail_q.scalar() or 0)
+    except Exception:
+        pass
+
+    qb_total = float((qb_summary or {}).get("grand_total") or 0)
+    retail_total = wc_retail_total if wc_retail_total > 0 else sheet_retail_total
+    live_combined = qb_total + retail_total + shopify_total
+
+    # Fire the live-composition fallback whenever TCP MAIN hasn't given
+    # us a usable number AND at least one live source has data. Prior
+    # logic required QB to be populated, which masked valid Shopify /
+    # WC-only windows with a stale $0.
+    if (
+        scorecards
+        and scorecards[0].get("label") == "Combined Total Revenue"
+        and not scorecards[0].get("value")
+        and live_combined > 0
+    ):
+        scorecards[0]["value"] = round(live_combined, 2)
+        parts = []
+        if qb_total > 0:
+            parts.append("QB contractor")
+        if retail_total > 0:
+            parts.append("Sani-Tred retail")
+        if shopify_total > 0:
+            parts.append("CP Shopify")
+        scorecards[0]["source"] = " + ".join(parts) + " (live)" if parts else "Live sources"
+
+    # Equipment Sold: only the TCP MAIN sheet tracks this. If the pivot
+    # is empty there's no live equivalent, so render an em-dash ("—")
+    # rather than a misleading 0. Frontend treats null as "no data".
+    if (
+        scorecards
+        and len(scorecards) >= 4
+        and scorecards[3].get("label") == "Equipment Sold"
+        and not scorecards[3].get("value")
+        and not quarter_order
+    ):
+        scorecards[3]["value"] = None
+        scorecards[3]["source"] = "Awaiting Google Sheets sync"
 
     # ── 9. Final payload ──────────────────────────────────────────────
     return {
