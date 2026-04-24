@@ -45,12 +45,34 @@ const formatNumber = (v) => {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 };
 
+// Tab definition — groups the ingested sheets by the prefix bucket
+// assigned by the google_sheets pipeline at ingest time. The database
+// doesn't know which source file (SHEET_ID_A vs _B) a row came from,
+// so we group by content type instead — that's actually more useful
+// for audit work since Daniel + Molly think in terms of "the contractor
+// sheet" / "the retail sheet" rather than arbitrary A/B labels.
+const TABS = [
+  { id: 'all',         label: 'All Sheets',          prefixes: null },
+  { id: 'contractor',  label: 'Contractor & QB',     prefixes: ['contractor::', 'qb_revenue::'] },
+  { id: 'retail',      label: 'Retail & Executive',  prefixes: ['retail::', 'exec::'] },
+];
+
+const bucketForSheet = (name = '') => {
+  for (const tab of TABS) {
+    if (!tab.prefixes) continue;
+    if (tab.prefixes.some((p) => name.startsWith(p))) return tab.id;
+  }
+  return 'other';
+};
+
 const DocumentsPage = () => {
   const { isDark } = useTheme();
 
   const [sheets, setSheets] = useState([]);
   const [loadingSheets, setLoadingSheets] = useState(true);
   const [sheetsError, setSheetsError] = useState(null);
+
+  const [activeTab, setActiveTab] = useState('all');
 
   const [selected, setSelected] = useState(null);
   const [rows, setRows] = useState([]);
@@ -104,6 +126,23 @@ const DocumentsPage = () => {
     [sheets],
   );
 
+  // Per-tab counts so each tab can show a badge number. Anything that
+  // doesn't match a known prefix gets swept into the "All" tab only —
+  // never hidden from the user.
+  const tabCounts = useMemo(() => {
+    const counts = { all: sheets.length };
+    for (const tab of TABS) {
+      if (tab.id === 'all') continue;
+      counts[tab.id] = sheets.filter((sh) => bucketForSheet(sh.sheet_name) === tab.id).length;
+    }
+    return counts;
+  }, [sheets]);
+
+  const filteredSheets = useMemo(() => {
+    if (activeTab === 'all') return sheets;
+    return sheets.filter((sh) => bucketForSheet(sh.sheet_name) === activeTab);
+  }, [sheets, activeTab]);
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -147,9 +186,35 @@ const DocumentsPage = () => {
             <div className={`px-4 py-3 border-b ${border} flex items-center gap-2`}>
               <Database size={14} className="text-emerald-400" />
               <p className={`text-xs font-semibold uppercase tracking-wide ${textSec}`}>
-                Sheets ({sheets.length})
+                Sheets ({filteredSheets.length}{activeTab !== 'all' ? ` of ${sheets.length}` : ''})
               </p>
             </div>
+
+            {/* Tabs — group by content bucket. Zero backend change. */}
+            {!loadingSheets && !sheetsError && sheets.length > 0 && (
+              <div className={`flex border-b ${border}`}>
+                {TABS.map((tab) => {
+                  const isActive = activeTab === tab.id;
+                  const count = tabCounts[tab.id] ?? 0;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`flex-1 px-2 py-2 text-[11px] font-medium transition-colors border-b-2 ${
+                        isActive
+                          ? 'border-indigo-400 text-indigo-400'
+                          : `border-transparent ${textSec} ${rowHover}`
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span className={`ml-1 text-[10px] ${isActive ? 'text-indigo-400/70' : textSec}`}>
+                        ({count})
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {loadingSheets && (
               <div className="p-6 flex items-center gap-2 justify-center">
@@ -171,9 +236,15 @@ const DocumentsPage = () => {
               </div>
             )}
 
-            {!loadingSheets && !sheetsError && sheets.length > 0 && (
+            {!loadingSheets && !sheetsError && sheets.length > 0 && filteredSheets.length === 0 && (
+              <div className="p-6 text-center">
+                <p className={`text-xs ${textSec}`}>No sheets in this group.</p>
+              </div>
+            )}
+
+            {!loadingSheets && !sheetsError && filteredSheets.length > 0 && (
               <div className="max-h-[600px] overflow-y-auto">
-                {sheets.map((sh) => {
+                {filteredSheets.map((sh) => {
                   const isSel = selected === sh.sheet_name;
                   return (
                     <button
