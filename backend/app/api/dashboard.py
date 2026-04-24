@@ -1720,29 +1720,6 @@ async def get_brand_summary(
             {"label": "Ad Clicks", "value": ads["clicks"], "format": "number", "color": "amber"},
         ]
     else:  # ibos
-        # Training signups: count hubspot_contacts flagged as training leads
-        # within the selected date range. Previously this ran an
-        # unfiltered COUNT(*) which returned every training lead ever
-        # recorded — so "today" showed the same 153 as YTD.
-        training = 0
-        try:
-            t_q = await db.execute(
-                text("""
-                    SELECT COUNT(*) FROM hubspot_contacts
-                    WHERE is_training_lead = 1
-                      AND created_at IS NOT NULL
-                      AND DATE(created_at) >= :start
-                      AND DATE(created_at) <= :end
-                """),
-                {"start": start_date, "end": end_date},
-            )
-            training = t_q.scalar() or 0
-        except Exception:
-            # Fallback: if the is_training_lead column or created_at
-            # timestamp isn't there, leave training=0 rather than
-            # unfiltered count.
-            pass
-
         # Active contractors: real count from the contractors table
         # (division = i-bos, active = true), NOT GA4 visits.
         active_contractors = 0
@@ -1777,10 +1754,15 @@ async def get_brand_summary(
         except Exception:
             contractor_revenue = 0.0
 
+        # I-BOS Contractor Division is about spend → leads → QB revenue.
+        # Training Signups belongs to the CP brand (TCP training
+        # registrations) and was mislabeled here. Replaced with the
+        # date-filtered ad-leads figure already computed above, so this
+        # overview reflects contractor marketing performance end-to-end.
         scorecards = [
             {"label": "Contractor Revenue", "value": contractor_revenue, "format": "currency", "color": "amber"},
             {"label": "Active Contractors", "value": active_contractors, "format": "number", "color": "blue"},
-            {"label": "Training Signups", "value": training, "format": "number", "color": "emerald"},
+            {"label": "Leads", "value": int(ads["leads"] or 0), "format": "number", "color": "emerald"},
             {"label": "Marketing Spend", "value": ads["spend"], "format": "currency", "color": "violet"},
         ]
 
