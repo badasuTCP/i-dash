@@ -4485,6 +4485,38 @@ async def get_executive_summary(
         scorecards[3]["value"] = None
         scorecards[3]["source"] = "Awaiting Google Sheets sync"
 
+    # ── 8c. CP Store (Shopify) daily revenue series ──────────────────
+    # Feeds a small area chart on the Executive Summary so CP Store has
+    # visual parity with the division bars. Additive — nothing else
+    # depends on this field. Empty list if Shopify has no rows.
+    cp_shopify_daily: list = []
+    try:
+        from app.models.metrics import ShopifyOrder as _SO2
+        daily_q = await db.execute(
+            select(
+                _SO2.date_created,
+                func.coalesce(func.sum(_SO2.total), 0),
+                func.count(_SO2.id),
+            )
+            .where(and_(
+                _SO2.date_created >= start_date,
+                _SO2.date_created <= end_date,
+                _SO2.date_created.isnot(None),
+            ))
+            .group_by(_SO2.date_created)
+            .order_by(_SO2.date_created)
+        )
+        for d, rev, n in daily_q.all():
+            if d is None:
+                continue
+            cp_shopify_daily.append({
+                "date": d.isoformat(),
+                "revenue": round(float(rev or 0), 2),
+                "orders": int(n or 0),
+            })
+    except Exception as exc:
+        logger.warning("Executive summary: Shopify daily series failed: %s", exc)
+
     # ── 9. Final payload ──────────────────────────────────────────────
     return {
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
@@ -4500,6 +4532,7 @@ async def get_executive_summary(
         "yoy_sales": yoy_sales,
         "qb_revenue": qb_summary,
         "cp_shopify": {"revenue": shopify_total, "orders": shopify_orders},
+        "cp_shopify_daily": cp_shopify_daily,
         "pipeline_status": pipeline_status,
         "sources": {
             "quarterly_kpis": "google_sheets :: TCP MAIN",

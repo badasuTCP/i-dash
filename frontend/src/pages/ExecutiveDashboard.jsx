@@ -867,6 +867,43 @@ const ExecutiveSummary = () => {
         </div>
         )}
 
+        {/* ── ROW 2.5: CP Store (Shopify) — daily revenue trend ────────
+            Additive: backend ships cp_shopify_daily with one row per
+            day in the selected range. Empty array → don't render. */}
+        {showShopify && Array.isArray(summary?.cp_shopify_daily) && summary.cp_shopify_daily.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.44 }}
+            className={`rounded-xl p-6 mb-8 ${cardBg}`}>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🛍️</span>
+                <h3 className={`text-lg font-semibold ${textPrimary}`}>CP Store — Daily Revenue</h3>
+              </div>
+              <span className="text-xs px-2.5 py-1 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/20">
+                Source: Shopify · The Concrete Protector Store
+              </span>
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <ComposedChart data={summary.cp_shopify_daily}>
+                <defs>
+                  <linearGradient id="cpStoreGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#3B82F6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
+                <XAxis dataKey="date" stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tick={{ fontSize: 10 }} />
+                <YAxis stroke={isDark ? 'rgba(148,163,184,0.5)' : '#94a3b8'} tickFormatter={(v) => fmtCurrency(v)} />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(v, name) => (name === 'orders' ? v : fmtCurrency(v))}
+                  labelFormatter={(d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                />
+                <Area type="monotone" dataKey="revenue" stroke="#3B82F6" fill="url(#cpStoreGrad)" strokeWidth={2} name="Revenue" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </motion.div>
+        )}
+
         {/* ── ROW 3: Sani-Tred Store Revenue + HubSpot Summary ──────── */}
         {((showWooCommerce && wcStore?.monthly?.length > 0) || (showHubspot && hubspot)) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
