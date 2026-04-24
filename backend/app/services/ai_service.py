@@ -136,12 +136,42 @@ PAID MARKETING (Meta + Google Ads, live, date-filtered):
 - HubSpot Deals Won in period: {context.get('total_deals_won', 0):,}
 - Blended ROAS: {context.get('blended_roas', 'N/A')}
 
-CRITICAL RULES WHEN ANSWERING:
-1. When a revenue number is zero and ad spend is non-zero, do NOT invent a ROAS. State plainly that ad-attributable revenue is not tracked and explain what revenue IS recorded.
-2. The "total revenue" the executive team reports = TCP MAIN Total Revenue. Quote that figure, not the composite, unless the user asks for a breakdown.
-3. If TCP MAIN shows zero for a short window (e.g. today), that's because TCP MAIN is quarterly — don't claim "no revenue"; drill into the live sources (HubSpot / Shopify / WC / QB) for daily/weekly answers.
-4. Training Signups is a CP-brand metric (HubSpot contacts flagged as training leads). It is NOT an I-BOS contractor metric.
-5. Active Contractors counts rows in the `contractors` table with active=true and division='i-bos'. It is NOT GA4 visits.
+HOW TO WRITE ABOUT REVENUE — READ CAREFULLY:
+
+  TCP MAIN is a QUARTERLY executive rollup sourced from the QB
+  datasheet, reported by Molly Quick. It records one data point per
+  quarter (Q1 2025, Q2 2025, Q3 2025, Q4 2025, Q1 2026...). If the
+  selected date range does NOT overlap a full quarter boundary, the
+  TCP MAIN figure for that window may read $0 — that means "no
+  quarter rolled into this range yet," NOT "the business earned zero."
+
+  NEVER write phrasing like "revenue is $0 according to TCP MAIN" —
+  it makes the business look broken. Instead, when TCP MAIN is $0
+  for the selected window:
+    - Acknowledge the quarterly cadence: "TCP MAIN is a quarterly
+      executive rollup from the QB datasheet, summed across quarters
+      that overlap the selected range."
+    - Pivot to the composite / live sources for the actual revenue
+      picture: "For this window, live-source revenue totals ${N}
+      across HubSpot deals, Shopify, WooCommerce, and QB contractor
+      records."
+
+  When TCP MAIN has a non-zero figure, lead with it as the headline:
+    "The executive headline figure from TCP MAIN (QB datasheet,
+     reported by Molly Quick) is ${N}, comprised of..."
+
+OTHER CRITICAL RULES:
+1. When ad revenue is untracked and ad spend is non-zero, do NOT invent a
+   ROAS. Say: "ad-attributable revenue is not tracked separately from
+   organic/direct/B2B in this system — ROAS can't be computed from these
+   inputs." Then offer to drill into by-contractor performance instead.
+2. Training Signups is a CP-brand metric (HubSpot contacts flagged
+   as training leads). Do NOT report it under I-BOS.
+3. Active Contractors is a real count of rows in the `contractors`
+   table with active=true and division='i-bos'. NOT GA4 visits.
+4. If a metric in this context is zero, check whether that's genuinely
+   zero activity or a pipeline gap. When in doubt, say "no activity
+   recorded in {source}" rather than "the company did zero."
 
 """
         if "meta_ads" in context:

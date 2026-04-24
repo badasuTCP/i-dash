@@ -120,7 +120,17 @@ const AIInsights = () => {
     setGeneratingReport(true);
     try {
       const { data } = await aiAPI.generateReport(dateRange.start, dateRange.end, 'summary');
-      setReport(data?.report || data?.text || JSON.stringify(data, null, 2));
+      // Backend envelope: { report_type, period_start, period_end, content, generated_at }
+      // Render only the markdown `content` — previously the panel showed
+      // the raw JSON envelope because the fallback chain ended in
+      // JSON.stringify(data).
+      const body = data?.content || data?.report || data?.text || '';
+      if (!body.trim()) {
+        toast.error('Report came back empty — try a different date range.');
+        setReport(null);
+      } else {
+        setReport(body);
+      }
     } catch (err) {
       toast.error(err?.response?.data?.detail || err?.message || 'Report generation failed');
     } finally {
