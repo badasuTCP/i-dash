@@ -171,7 +171,7 @@ OTHER CRITICAL RULES:
    table with active=true and division='i-bos'. NOT GA4 visits.
 4. If a metric in this context is zero, check whether that's genuinely
    zero activity or a pipeline gap. When in doubt, say "no activity
-   recorded in {source}" rather than "the company did zero."
+   recorded in <source-name>" rather than "the company did zero."
 
 """
         if "meta_ads" in context:
