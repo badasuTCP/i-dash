@@ -347,6 +347,55 @@ class SchedulerService:
                     target["pipeline_name"], exc,
                 )
 
+        # ── Phase 2 background services ───────────────────────────────
+        # Forecasting + anomaly detection. Same leader-election lifecycle
+        # as pipeline jobs (only the leader fires them, removed on
+        # step-down) but they run at hardcoded cadences rather than via
+        # pipeline_schedules — they're system services, not data
+        # pipelines, so they don't belong in the user-tunable schedule
+        # table. Cadences chosen conservatively so the demo isn't
+        # affected: forecasting every 6h, anomaly every 4h.
+        phase2_jobs = {
+            "phase2__projections": {
+                "name": "Phase 2: Projection Engine",
+                "callable": _run_projection_job,
+                "trigger_kwargs": _interval_to_trigger_kwargs("6hrs"),
+            },
+            "phase2__anomalies": {
+                "name": "Phase 2: Anomaly Guard",
+                "callable": _run_anomaly_job,
+                "trigger_kwargs": _interval_to_trigger_kwargs("4hrs"),
+            },
+        }
+        for job_id, spec in phase2_jobs.items():
+            if job_id in self._applied:
+                continue
+            if not spec["trigger_kwargs"]:
+                continue
+            try:
+                self.scheduler.add_job(
+                    spec["callable"],
+                    id=job_id,
+                    name=spec["name"],
+                    replace_existing=True,
+                    coalesce=True,
+                    max_instances=1,
+                    misfire_grace_time=300,
+                    **spec["trigger_kwargs"],
+                )
+                # Mirror existing _applied shape so step-down cleanup
+                # treats Phase 2 jobs the same as pipeline jobs.
+                self._applied[job_id] = {
+                    "pipeline_name": job_id,
+                    "interval_value": (
+                        "6hrs" if "projections" in job_id else "4hrs"
+                    ),
+                    "trigger_kwargs": spec["trigger_kwargs"],
+                }
+                self.logger.info("Scheduled %s", spec["name"])
+            except Exception as exc:
+                self.logger.warning("Could not schedule %s: %s", spec["name"], exc)
+
     # ── Introspection ──────────────────────────────────────────────────
 
     async def get_status(self) -> dict:
@@ -417,6 +466,59 @@ async def _run_pipeline_job(name: str, pipeline_service: PipelineService) -> Non
     except Exception as exc:
         completed_at = datetime.now(timezone.utc)
         logger.exception("Scheduled pipeline '%s' crashed", name)
+        await _persist_scheduled_log(
+            name, PipelineStatus.FAILED, 0,
+            started_at, completed_at,
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
+async def _run_projection_job() -> None:
+    """Phase 2 — invoke the Projection Engine.
+
+    Wrapped in try/except so a failure here NEVER cascades into
+    APScheduler removing or pausing other jobs. Errors are logged and
+    a PipelineLog row is still persisted for the lineage view.
+    """
+    started_at = datetime.now(timezone.utc)
+    name = "phase2_projections"
+    logger.info("Phase 2: projection pass tick")
+    try:
+        from app.services.forecasting_service import run_projection_pass
+        result = await run_projection_pass()
+        completed_at = datetime.now(timezone.utc)
+        await _persist_scheduled_log(
+            name, PipelineStatus.SUCCESS,
+            int(result.get("rows_written", 0) or 0),
+            started_at, completed_at, None,
+        )
+    except Exception as exc:
+        completed_at = datetime.now(timezone.utc)
+        logger.exception("Phase 2 projection pass crashed")
+        await _persist_scheduled_log(
+            name, PipelineStatus.FAILED, 0,
+            started_at, completed_at,
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
+async def _run_anomaly_job() -> None:
+    """Phase 2 — invoke the Anomaly Guard. Same isolation pattern."""
+    started_at = datetime.now(timezone.utc)
+    name = "phase2_anomalies"
+    logger.info("Phase 2: anomaly pass tick")
+    try:
+        from app.services.anomaly_service import run_anomaly_pass
+        result = await run_anomaly_pass()
+        completed_at = datetime.now(timezone.utc)
+        await _persist_scheduled_log(
+            name, PipelineStatus.SUCCESS,
+            int(result.get("flagged", 0) or 0),
+            started_at, completed_at, None,
+        )
+    except Exception as exc:
+        completed_at = datetime.now(timezone.utc)
+        logger.exception("Phase 2 anomaly pass crashed")
         await _persist_scheduled_log(
             name, PipelineStatus.FAILED, 0,
             started_at, completed_at,

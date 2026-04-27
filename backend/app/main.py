@@ -36,11 +36,14 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
 
 from app.api import (
     ai_router,
+    anomalies_v2_router,
     auth_router,
     contractors_router,
     dashboard_router,
     documents_router,
+    lineage_v2_router,
     pipelines_router,
+    projections_v2_router,
     shopify_oauth_router,
     users_router,
 )
@@ -380,6 +383,20 @@ app.include_router(
 
 app.include_router(
     documents_router,
+    prefix="/api",
+)
+
+# ── Phase 2 — additive only, no /api/v1 surface touched ─────────────
+app.include_router(
+    projections_v2_router,
+    prefix="/api",
+)
+app.include_router(
+    anomalies_v2_router,
+    prefix="/api",
+)
+app.include_router(
+    lineage_v2_router,
     prefix="/api",
 )
 

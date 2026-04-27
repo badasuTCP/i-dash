@@ -104,13 +104,16 @@ async def init_db() -> None:
     # on a cold boot before any /shopify endpoint is called) silently miss
     # table creation — which is exactly how we shipped "shopify_orders does
     # not exist" on Railway.
+    import app.models.anomalies  # noqa: F401  Phase 2
     import app.models.brand_asset  # noqa: F401
     import app.models.contractor  # noqa: F401
     import app.models.discovery_audit  # noqa: F401
     import app.models.ga4_property  # noqa: F401
+    import app.models.lineage  # noqa: F401  Phase 2
     import app.models.metrics  # noqa: F401
     import app.models.pipeline_log  # noqa: F401
     import app.models.pipeline_schedule  # noqa: F401
+    import app.models.projections  # noqa: F401  Phase 2
     import app.models.user  # noqa: F401
 
     async with engine.begin() as conn:
@@ -122,6 +125,7 @@ async def init_db() -> None:
         await _ensure_google_ad_metrics_schema(conn)
         await _ensure_contractors_schema(conn)
         await _ensure_shopify_customers_schema(conn)
+        await _ensure_phase2_tables(conn)  # Phase 2: projections + anomalies + lineage
         await _backfill_ad_metric_divisions(conn)
         await _reconcile_ga4_property_enabled(conn)
 
@@ -151,6 +155,120 @@ async def _ensure_pipeline_schedules_schema(conn) -> None:
         logger.info("ensure_schema: pipeline_schedules reconciled (idempotent)")
     except Exception as exc:
         logger.warning("ensure_schema: pipeline_schedules create failed: %s", exc)
+
+
+async def _ensure_phase2_tables(conn) -> None:
+    """Belt-and-suspenders for the Phase 2 background-service tables.
+
+    Same pattern as _ensure_wc_orders_schema — explicit CREATE TABLE
+    IF NOT EXISTS so a Base.metadata.create_all silent skip can't leave
+    /api/v2 endpoints staring at UndefinedTableError. Idempotent on
+    every boot.
+
+    Tables:
+      - metrics_projections   (forecasting_service.py output)
+      - anomalies             (anomaly_service.py output)
+      - data_lineage_events   (Metadata Vault — complements pipeline_logs)
+    """
+    try:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS metrics_projections (
+                id SERIAL PRIMARY KEY,
+                metric_type VARCHAR(32) NOT NULL,
+                division VARCHAR(32) NOT NULL DEFAULT 'all',
+                period_start DATE NOT NULL,
+                period_end DATE NOT NULL,
+                as_of DATE NOT NULL,
+                mtd_actual DOUBLE PRECISION NOT NULL DEFAULT 0,
+                run_rate_daily DOUBLE PRECISION NOT NULL DEFAULT 0,
+                days_observed INTEGER NOT NULL DEFAULT 0,
+                projected_total DOUBLE PRECISION NOT NULL DEFAULT 0,
+                days_remaining INTEGER NOT NULL DEFAULT 0,
+                confidence VARCHAR(16) NOT NULL DEFAULT 'medium',
+                notes VARCHAR(512),
+                last_updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_metrics_projection_metric_div_period
+                    UNIQUE (metric_type, division, period_start)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_metrics_projections_metric_type "
+            "ON metrics_projections (metric_type)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_metrics_projections_division "
+            "ON metrics_projections (division)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_metrics_projections_period_start "
+            "ON metrics_projections (period_start)"
+        ))
+
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS anomalies (
+                id SERIAL PRIMARY KEY,
+                detected_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                source_type VARCHAR(32) NOT NULL,
+                source_id VARCHAR(255) NOT NULL,
+                source_label VARCHAR(255),
+                metric VARCHAR(32) NOT NULL,
+                last24h_value DOUBLE PRECISION NOT NULL DEFAULT 0,
+                baseline_7d_avg DOUBLE PRECISION NOT NULL DEFAULT 0,
+                deviation_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+                severity VARCHAR(16) NOT NULL DEFAULT 'warning',
+                status VARCHAR(16) NOT NULL DEFAULT 'open',
+                notes TEXT,
+                acknowledged_at TIMESTAMP WITH TIME ZONE,
+                acknowledged_by VARCHAR(255)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_anomalies_detected_at "
+            "ON anomalies (detected_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_anomalies_detected_status "
+            "ON anomalies (detected_at, status)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_anomalies_source_metric "
+            "ON anomalies (source_type, source_id, metric)"
+        ))
+
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS data_lineage_events (
+                id SERIAL PRIMARY KEY,
+                pipeline_log_id INTEGER,
+                pipeline_name VARCHAR(128) NOT NULL,
+                run_started_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                run_completed_at TIMESTAMP WITH TIME ZONE,
+                tables_read VARCHAR(512),
+                tables_written VARCHAR(512),
+                records_inserted INTEGER NOT NULL DEFAULT 0,
+                records_updated INTEGER NOT NULL DEFAULT 0,
+                records_skipped INTEGER NOT NULL DEFAULT 0,
+                schema_fingerprint VARCHAR(64),
+                downstream_impact VARCHAR(512),
+                extra TEXT,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_data_lineage_pipeline_name "
+            "ON data_lineage_events (pipeline_name)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_data_lineage_run_started_at "
+            "ON data_lineage_events (run_started_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_data_lineage_pipeline_log_id "
+            "ON data_lineage_events (pipeline_log_id)"
+        ))
+
+        logger.info("ensure_schema: phase2 tables reconciled (idempotent)")
+    except Exception as exc:
+        logger.warning("ensure_schema: phase2 tables create failed: %s", exc)
 
 
 async def _ensure_wc_orders_schema(conn) -> None:
