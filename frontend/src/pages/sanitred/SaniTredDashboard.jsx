@@ -109,7 +109,7 @@ const SaniTredDashboard = () => {
           const spend = data?.ads?.spend || 0;
           const orders = data?.ecom?.orders || 0;
           if (revenue) out.push(`Sani-Tred retail revenue: $${Number(revenue).toLocaleString()} in the selected range.`);
-          if (orders) out.push(`${orders} WooCommerce orders processed.`);
+          if (orders) out.push(`${orders} online store orders processed.`);
           if (visits) out.push(`Retail traffic: ${Number(visits).toLocaleString()} visits.`);
           if (spend) out.push(`Ad spend: $${Number(spend).toLocaleString()}.`);
           return out;
@@ -186,9 +186,9 @@ const SaniTredDashboard = () => {
               className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
               <div className="flex items-center gap-2 mb-1">
                 <ShoppingBag size={16} className="text-blue-400" />
-                <h3 className={`text-base font-semibold ${textPri}`}>WooCommerce Revenue by Month</h3>
+                <h3 className={`text-base font-semibold ${textPri}`}>Store Revenue by Month</h3>
               </div>
-              <p className={`text-[11px] mb-4 ${textSec}`}>From the Sani-Tred Store · same source as the Store page</p>
+              <p className={`text-[11px] mb-4 ${textSec}`}>Sani-Tred Store · same source as the Store page</p>
               <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={wcData.monthly || []}>
                   <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
@@ -206,7 +206,7 @@ const SaniTredDashboard = () => {
                 <Package size={16} className="text-violet-400" />
                 <h3 className={`text-base font-semibold ${textPri}`}>Orders by Status</h3>
               </div>
-              <p className={`text-[11px] mb-4 ${textSec}`}>Live WooCommerce mix</p>
+              <p className={`text-[11px] mb-4 ${textSec}`}>Live store order mix</p>
               {(wcData?.ordersByStatus?.length || 0) > 0 ? (
                 <ResponsiveContainer width="100%" height={240}>
                   <PieChart>
