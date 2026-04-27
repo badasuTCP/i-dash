@@ -420,6 +420,25 @@ class DashboardSnapshot(Base):
         )
 
 
+# ── Order status filtering ────────────────────────────────────────────
+# Statuses that count as "real revenue" — used by every dashboard
+# endpoint that surfaces Total Retail Revenue, Online Orders, and
+# Avg Order Value to keep the I-Dash KPIs in lockstep with what
+# WooCommerce considers a successful sale.
+#
+# 'completed'  — order paid + shipped (the bulk of revenue)
+# 'processing' — paid, awaiting fulfillment (counts as revenue)
+# 'on-hold'    — payment pending / under review (counts but flag-able)
+#
+# Excluded from KPIs (still visible in the per-status breakdown):
+#   'failed', 'cancelled', 'refunded', 'pending', 'trash'
+#
+# WooCommerce stores statuses without the 'wc-' prefix in its REST API
+# response and our ingestion mirrors that — so we match on bare values.
+SUCCESSFUL_WC_STATUSES: tuple[str, ...] = ("completed", "processing", "on-hold")
+SHOPIFY_NON_REVENUE_STATUSES: tuple[str, ...] = ("cancelled", "voided")
+
+
 class WCOrder(Base):
     """
     WooCommerce order from Sani-Tred retail store.

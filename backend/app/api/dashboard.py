@@ -1718,7 +1718,7 @@ async def get_brand_summary(
     wc_stats = {"revenue": 0.0, "orders": 0, "avg_order": 0.0}
     if brand == "sanitred":
         try:
-            from app.models.metrics import WCOrder
+            from app.models.metrics import WCOrder, SUCCESSFUL_WC_STATUSES
             wc_q = await db.execute(
                 select(
                     func.coalesce(func.sum(WCOrder.total), 0),
@@ -1728,6 +1728,7 @@ async def get_brand_summary(
                     WCOrder.date_created >= start_date,
                     WCOrder.date_created <= end_date,
                     WCOrder.division == "sanitred",
+                    WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
                 ))
             )
             row = wc_q.one_or_none()
@@ -4420,13 +4421,14 @@ async def get_executive_summary(
     # demo hit a fresh env where TCP MAIN hadn't synced yet.
     wc_retail_total = 0.0
     try:
-        from app.models.metrics import WCOrder
+        from app.models.metrics import WCOrder, SUCCESSFUL_WC_STATUSES
         wc_q = await db.execute(
             select(func.coalesce(func.sum(WCOrder.total), 0))
             .where(and_(
                 WCOrder.date_created >= start_date,
                 WCOrder.date_created <= end_date,
                 WCOrder.division == "sanitred",
+                WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
             ))
         )
         wc_retail_total = float(wc_q.scalar() or 0)
@@ -4565,7 +4567,7 @@ async def get_wc_store(
     by status, payment methods, and regional breakdown — all from
     wc_orders + wc_products tables.
     """
-    from app.models.metrics import WCOrder, WCProduct
+    from app.models.metrics import WCOrder, WCProduct, SUCCESSFUL_WC_STATUSES
 
     start_date, end_date = _get_date_range(date_from, date_to)
 
@@ -4608,6 +4610,11 @@ async def get_wc_store(
     # Try date-filtered first; fall back to all orders if none match
     # (handles cases where date_created is NULL or pipeline only fetched
     # the default 30-day window which doesn't overlap the date picker).
+    # Top KPIs (Total Retail Revenue / Online Orders / Avg Order Value)
+    # only count orders with a status in SUCCESSFUL_WC_STATUSES — the
+    # per-status breakdown lower on the page still shows Failed /
+    # Cancelled / etc. so revenue you see at the top equals revenue
+    # you'd see in WC admin filtered to those statuses.
     totals = await db.execute(
         select(
             func.count(WCOrder.id).label("total_orders"),
@@ -4619,6 +4626,7 @@ async def get_wc_store(
         ).where(and_(
             WCOrder.date_created >= start_date,
             WCOrder.date_created <= end_date,
+            WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
         ))
     )
     t = totals.first()
@@ -4658,6 +4666,9 @@ async def get_wc_store(
     try:
         year_col = extract("year", WCOrder.date_created)
         month_col = extract("month", WCOrder.date_created)
+        # Monthly trend reflects successful revenue only — same filter as
+        # the top KPIs. Refund count is counted separately so users can
+        # see refund volume per month without it inflating the line.
         monthly_q = await db.execute(
             select(
                 year_col.label("yr"),
@@ -4670,6 +4681,7 @@ async def get_wc_store(
                 WCOrder.date_created >= start_date,
                 WCOrder.date_created <= end_date,
                 WCOrder.date_created.isnot(None),
+                WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
             )).group_by(year_col, month_col)
             .order_by(year_col, month_col)
         )
@@ -4745,6 +4757,7 @@ async def get_wc_store(
                 WCOrder.date_created <= end_date,
                 WCOrder.payment_method.isnot(None),
                 WCOrder.payment_method != "",
+                WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
             )).group_by(WCOrder.payment_method)
             .order_by(func.sum(WCOrder.total).desc())
         )
@@ -4769,6 +4782,7 @@ async def get_wc_store(
                 WCOrder.date_created <= end_date,
                 WCOrder.billing_state.isnot(None),
                 WCOrder.billing_state != "",
+                WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
             )).group_by(WCOrder.billing_state)
             .order_by(func.sum(WCOrder.total).desc())
             .limit(20)

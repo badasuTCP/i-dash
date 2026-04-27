@@ -13,8 +13,16 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import httpx
+
+# Sani-Tred WordPress is configured for America/New_York. We parse the
+# UTC field (date_created_gmt) and convert into ET, then take the
+# calendar date — that way the dashboard's day boundaries line up with
+# how Molly + the storefront see orders, regardless of how WC ships the
+# naive timestamp on date_created.
+WC_LOCAL_TZ = ZoneInfo("America/New_York")
 
 from app.core.config import settings
 from app.models.metrics import WCOrder, WCProduct
@@ -175,26 +183,40 @@ class WooCommercePipeline(BasePipeline):
         records = []
 
         # Orders
+        def _to_local_date(o: dict, base: str) -> Optional[Any]:
+            """
+            Parse a WC date field and return its calendar date in the
+            store's local timezone (America/New_York).
+
+            WC REST API exposes two flavors per timestamp:
+              base       (e.g. 'date_created')        — store-local naive
+              base_gmt   (e.g. 'date_created_gmt')    — UTC
+
+            We prefer ``base_gmt`` because it's unambiguous, then convert
+            into ET. Falls back to the local naive field, treated as
+            already-ET, if the GMT field is missing.
+            """
+            gmt_val = o.get(f"{base}_gmt") or ""
+            if gmt_val:
+                try:
+                    dt_utc = datetime.fromisoformat(gmt_val.replace("Z", "+00:00"))
+                    if dt_utc.tzinfo is None:
+                        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+                    return dt_utc.astimezone(WC_LOCAL_TZ).date()
+                except Exception:
+                    pass
+            local_val = o.get(base) or ""
+            if local_val:
+                try:
+                    return datetime.fromisoformat(local_val.replace("Z", "+00:00")).date()
+                except Exception:
+                    pass
+            return None
+
         for o in raw_data.get("orders", []):
             try:
-                date_created = None
-                date_completed = None
-                try:
-                    dc = o.get("date_created", "")
-                    if dc:
-                        date_created = datetime.fromisoformat(
-                            dc.replace("Z", "+00:00")
-                        ).date()
-                except Exception:
-                    pass
-                try:
-                    dc = o.get("date_completed", "")
-                    if dc:
-                        date_completed = datetime.fromisoformat(
-                            dc.replace("Z", "+00:00")
-                        ).date()
-                except Exception:
-                    pass
+                date_created = _to_local_date(o, "date_created")
+                date_completed = _to_local_date(o, "date_completed")
 
                 # Count line items
                 line_items = o.get("line_items", [])

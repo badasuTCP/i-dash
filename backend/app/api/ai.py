@@ -114,12 +114,17 @@ async def _fetch_metrics_context(
     except Exception:
         pass
 
-    # WooCommerce revenue (Sani-Tred)
+    # WooCommerce revenue (Sani-Tred) — successful statuses only so the
+    # AI quotes match what the dashboards display.
     try:
-        from app.models.metrics import WCOrder as _WC
+        from app.models.metrics import WCOrder as _WC, SUCCESSFUL_WC_STATUSES as _OK
         wc_rev = await db.execute(
             select(func.coalesce(func.sum(_WC.total), 0))
-            .where(and_(_WC.date_created >= start_date, _WC.date_created <= end_date))
+            .where(and_(
+                _WC.date_created >= start_date,
+                _WC.date_created <= end_date,
+                _WC.status.in_(_OK),
+            ))
         )
         v = float(wc_rev.scalar() or 0)
         if v > 0:
@@ -314,12 +319,15 @@ async def _fetch_metrics_context(
 
     # ── WooCommerce (all-time) ────────────────────────────────────────
     try:
-        from app.models.metrics import WCOrder, WCProduct
+        from app.models.metrics import WCOrder, WCProduct, SUCCESSFUL_WC_STATUSES
         wc_q = await db.execute(select(
             func.count(WCOrder.id),
             func.coalesce(func.sum(WCOrder.total), 0),
             func.coalesce(func.avg(WCOrder.total), 0),
-        ).where(WCOrder.date_created >= start_date))
+        ).where(and_(
+            WCOrder.date_created >= start_date,
+            WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
+        )))
         wc = wc_q.first()
         prod_count = await db.execute(select(func.count()).select_from(WCProduct))
         context["woocommerce"] = {
