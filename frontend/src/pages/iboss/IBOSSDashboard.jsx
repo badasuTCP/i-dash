@@ -106,6 +106,23 @@ const IBOSSDashboard = () => {
           </div>
         )}
 
+        {/* ── Top Active Contractors by Revenue (QB) ──────────────── */}
+        {revenueData?.top_active?.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
+            className={`rounded-xl p-6 mb-8 ${cardBg}`}>
+            <div className="flex items-center gap-2 mb-4">
+              <TrendingUp size={16} className="text-blue-400" />
+              <h3 className={`text-base font-semibold ${textPri}`}>Top Active Contractors by Revenue</h3>
+              <span className={`ml-auto text-xs ${textSec}`}>{revenueData.active_count} total</span>
+            </div>
+            <SortableBarChart
+              data={revenueData.top_active}
+              nameKey="name"
+              metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#3B82F6', format: 'currency' }]}
+            />
+          </motion.div>
+        )}
+
         {/* ── Top In-Active Contractors (revenue-only, no ads) ────── */}
         {revenueData?.top_inactive?.length > 0 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
