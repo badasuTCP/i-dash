@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   Sun,
   Moon,
@@ -95,12 +95,15 @@ const Sidebar = () => {
   const { isDark, toggleTheme } = useTheme();
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const userRole = user?.role || 'executive';
 
   const [activeBrand, setActiveBrand] = useState('cp');
   const { collapsed, setCollapsed } = useSidebar();
 
-  // Auto-select the brand whose route the user is on
+  // Auto-select the brand whose route the user is on. This is the single
+  // source of truth — clicking a brand pill calls `navigate()`, which
+  // updates `location.pathname`, which fires this effect. No double-set.
   useEffect(() => {
     const path = location.pathname;
     for (const b of brands) {
@@ -110,6 +113,19 @@ const Sidebar = () => {
       }
     }
   }, [location.pathname]);
+
+  // Brand pill click → always jump to that brand's Overview page.
+  // If we're already on /dashboard/<brand>, skip the navigate to avoid
+  // a no-op re-render flash.
+  const handleBrandClick = useCallback(
+    (brandId) => {
+      const overviewPath = `/dashboard/${brandId}`;
+      if (location.pathname !== overviewPath) {
+        navigate(overviewPath);
+      }
+    },
+    [navigate, location.pathname],
+  );
 
   // Current brand object & its pages
   const currentBrand = useMemo(
@@ -240,7 +256,7 @@ const Sidebar = () => {
               brand={b}
               isActive={activeBrand === b.id}
               collapsed={collapsed}
-              onClick={() => setActiveBrand(b.id)}
+              onClick={() => handleBrandClick(b.id)}
             />
           ))}
         </div>
