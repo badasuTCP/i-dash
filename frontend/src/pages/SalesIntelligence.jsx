@@ -934,16 +934,21 @@ const SalesIntelligence = () => {
             transition={{ delay: 0.3 }}
             className={`rounded-2xl border p-6 xl:col-span-2 ${cardBg}`}
           >
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <Flame size={16} className="text-rose-400" />
                 <h3 className={`font-semibold ${textPri}`}>Stalled Deals Heatmap</h3>
+                {apiData?.period_end && (
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${isDark ? 'bg-slate-800 text-slate-300 border border-slate-700/60' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
+                    As of {new Date(apiData.period_end + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                )}
               </div>
               <span className={`text-xs px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/25`}>
                 {stalledDeals.length} deals &gt;72hr no touch
               </span>
             </div>
-            <p className={`text-xs mb-4 ${textSec}`}>Deals without a rep touch-point (call/email/meeting) in 72+ hours</p>
+            <p className={`text-xs mb-4 ${textSec}`}>Deals without a rep touch-point (call/email/meeting) in 72+ hours, measured against the selected end date</p>
 
             {stalledDeals.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">

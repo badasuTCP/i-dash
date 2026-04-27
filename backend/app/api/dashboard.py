@@ -875,11 +875,11 @@ async def get_sales_intelligence(
         {"name": "Ending Pipeline", "value": pipe, "fill": "#8B5CF6"},
     ]
 
-    # ── Stalled deals from DB (open-stage pipeline > 3 days old) ────────
-    # We don't sync HubSpot's `notes_last_updated` or `hs_lastmodifieddate`
-    # onto hubspot_deals, so `created_date` is the only age signal we have.
-    # Drop the dashboard date-window filter so deals opened before the
-    # selected period still surface as stalled.
+    # ── Stalled deals "Time Machine" — relative to selected end_date ────
+    # Aging is calculated against the date picker's END date, not today,
+    # so the heatmap acts as an audit tool: "which deals were neglected
+    # during the period we're looking at?". `created_date` is the only
+    # age signal we have (we don't sync hs_lastmodifieddate).
     stalled_deals = []
     try:
         stalled_q = await db.execute(text(f"""
@@ -890,7 +890,7 @@ async def get_sales_intelligence(
               AND stage != {PRE_LAUNCH}
               AND amount > 0
               AND created_date IS NOT NULL
-              AND created_date <= CURRENT_DATE - INTERVAL '3 days'
+              AND created_date <= DATE '{end_date}' - INTERVAL '3 days'
             ORDER BY created_date ASC
             LIMIT 12
         """))
@@ -898,7 +898,7 @@ async def get_sales_intelligence(
             oid = row[2]
             info = owners.get(oid, {}) if oid else {}
             rep_name = f"{info.get('first', '')} {info.get('last', '')}".strip() or "Unassigned"
-            days = (date.today() - row[5]).days if row[5] else 0
+            days = (end_date - row[5]).days if row[5] else 0
             stalled_deals.append({
                 "id": row[0], "name": row[1] or "Untitled",
                 "value": float(row[4] or 0), "rep": rep_name,
@@ -909,6 +909,8 @@ async def get_sales_intelligence(
 
     return {
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
+        "period_start": start_date.isoformat(),
+        "period_end": end_date.isoformat(),
         "daily_series": daily_series,
         "totals": totals,
         "reps": reps_data,
