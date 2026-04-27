@@ -794,6 +794,10 @@ async def get_sales_intelligence(
                     AND d.stage NOT IN ({','.join(LOST_STAGES)})
                     AND d.stage != {PRE_LAUNCH}
                     THEN GREATEST(d.amount, 500) ELSE 0 END), 0) AS pipeline_value,
+                AVG(CASE WHEN d.stage IN ({','.join(WON_STAGES)})
+                         AND d.close_date IS NOT NULL AND d.created_date IS NOT NULL
+                         AND d.close_date >= d.created_date
+                    THEN (d.close_date - d.created_date) END) AS avg_days_to_close,
                 c.total_contacts,
                 c.training_leads,
                 c.form_leads
@@ -817,7 +821,8 @@ async def get_sales_intelligence(
             oid = row[0]
             total_deals, won, lost, progressing = row[1], row[2], row[3], row[4]
             won_revenue, pipeline_val = float(row[5]), float(row[6])
-            contacts, training, forms = int(row[7] or 0), int(row[8] or 0), int(row[9] or 0)
+            avg_days_raw = row[7]
+            contacts, training, forms = int(row[8] or 0), int(row[9] or 0), int(row[10] or 0)
 
             info = owners.get(oid, {})
             name = f"{info.get('first', '')} {info.get('last', '')}".strip() or f"Rep {oid}"
@@ -825,6 +830,10 @@ async def get_sales_intelligence(
 
             total_rep_revenue += won_revenue
             total_rep_pipeline += pipeline_val
+
+            # Real average days-to-close from won deals; null when the rep
+            # has no won deals in the period (frontend will render as "—").
+            avg_days = round(float(avg_days_raw)) if avg_days_raw is not None else None
 
             reps_data.append({
                 "id": oid,
@@ -834,7 +843,7 @@ async def get_sales_intelligence(
                 "deals_lost": lost,
                 "deals_progressing": progressing,
                 "revenue": won_revenue,
-                "avg_days": 14,
+                "avg_days": avg_days,
                 "calls": total_deals // 10,
                 "emails": 0,
                 "meetings": total_deals // 20,

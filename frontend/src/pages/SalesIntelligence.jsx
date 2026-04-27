@@ -179,7 +179,7 @@ function generateInsights(reps, stalledDeals, selectedRep) {
       insights.unshift({
         icon: Filter,
         color: 'text-indigo-400',
-        text: `Filtered to ${rep.name}: ${winRate}% win rate, ${rep.avg_days}d avg close, $${(rep.revenue / 1000).toFixed(0)}K revenue`,
+        text: `Filtered to ${rep.name}: ${winRate}% win rate, ${rep.avg_days != null && rep.avg_days > 0 ? `${rep.avg_days}d avg close, ` : ''}$${(rep.revenue / 1000).toFixed(0)}K revenue`,
       });
     }
   }
@@ -287,9 +287,13 @@ const SalesIntelligence = () => {
   const totalLost    = reps.reduce((s, r) => s + (r.deals_lost || 0), 0);
   const winRate      = totalWon + totalLost > 0 ? Math.round(totalWon / (totalWon + totalLost) * 100) : 0;
   const quotaPct     = totalQuota > 0 ? Math.round(totalRevenue / totalQuota * 100) : 0;
-  const avgDaysClose = reps.length > 0
-    ? Math.round(reps.reduce((s, r) => s + (r.avg_days || 0), 0) / reps.length)
-    : 0;
+  // Only count reps that have a real avg_days from won deals; otherwise the
+  // team average gets dragged down by zero-deal reps reporting 0 days.
+  const avgDaysClose = (() => {
+    const withData = reps.filter(r => r.avg_days != null && r.avg_days > 0);
+    if (!withData.length) return null;
+    return Math.round(withData.reduce((s, r) => s + r.avg_days, 0) / withData.length);
+  })();
 
   // ── Leaderboard sort + filter ─────────────────────────────────────────────
   const leaderboard = useMemo(() => {
@@ -307,7 +311,12 @@ const SalesIntelligence = () => {
       switch (repSortKey) {
         case 'revenue':    return (b.revenue    || 0) - (a.revenue    || 0);
         case 'dealsWon':   return (b.deals_won  || 0) - (a.deals_won  || 0);
-        case 'avgDays':    return (a.avg_days   || 0) - (b.avg_days   || 0);
+        case 'avgDays': {
+          // Reps with no won-deal data sort to the bottom of "fastest close"
+          const av = a.avg_days != null && a.avg_days > 0 ? a.avg_days : Number.POSITIVE_INFINITY;
+          const bv = b.avg_days != null && b.avg_days > 0 ? b.avg_days : Number.POSITIVE_INFINITY;
+          return av - bv;
+        }
         case 'quotaPct':   return (b.quotaPct   || 0) - (a.quotaPct   || 0);
         case 'name':       return (a.name || '').localeCompare(b.name || '');
         case 'winRate':
@@ -494,7 +503,7 @@ const SalesIntelligence = () => {
           {[
             { label: 'Revenue Closed', value: `$${(totalRevenue / 1000).toFixed(0)}K`, sub: totalQuota > 0 ? `${quotaPct}% to quota` : `${totalWon} deals`, color: 'from-emerald-500 to-teal-600', icon: TrendingUp },
             { label: 'Win Rate', value: `${winRate}%`, sub: `${totalWon}W / ${totalLost}L`, color: 'from-cyan-500 to-blue-600', icon: Target },
-            { label: 'Avg Days to Close', value: `${avgDaysClose}d`, sub: 'Team average', color: 'from-violet-500 to-purple-600', icon: Clock },
+            { label: 'Avg Days to Close', value: avgDaysClose != null ? `${avgDaysClose}d` : '—', sub: avgDaysClose != null ? 'Team average' : 'No won deals in range', color: 'from-violet-500 to-purple-600', icon: Clock },
             { label: 'Stalled Deals', value: stalledDeals.length.toString(), sub: `$${(stalledDeals.reduce((s, d) => s + (d.value || 0), 0) / 1000).toFixed(0)}K at risk`, color: 'from-rose-500 to-red-600', icon: AlertTriangle },
           ].map((card, i) => (
             <motion.div
@@ -820,7 +829,7 @@ const SalesIntelligence = () => {
                           <p className={`text-[9px] ${textSec}`}>Revenue</p>
                         </div>
                         <div>
-                          <p className="text-xs font-bold text-violet-400">{rep.avg_days}d</p>
+                          <p className="text-xs font-bold text-violet-400">{rep.avg_days != null && rep.avg_days > 0 ? `${rep.avg_days}d` : '—'}</p>
                           <p className={`text-[9px] ${textSec}`}>Avg Close</p>
                         </div>
                         <div>

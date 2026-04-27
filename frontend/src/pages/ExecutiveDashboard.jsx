@@ -304,7 +304,7 @@ const ExecutiveSummary = () => {
       { label: 'Total Revenue', value: combinedTotalRevenueFromTable, change: null, color: 'blue',    format: 'currency',
         source: 'Google Sheets · TCP MAIN · Total Revenue row',
         infoNote: 'Amount from the quarterly datasheet (QB) — reported by Molly Quick. Summed across quarters that overlap the selected date range.' },
-      { label: 'Marketing Spend',        value: spend,   change: 19.4, color: 'violet',  format: 'currency' },
+      { label: 'Marketing Spend',        value: spend,   change: null, color: 'violet',  format: 'currency' },
       { label: 'Marketing Leads',        value: leads,   change: null, color: 'emerald', format: 'number'   },
       { label: 'Equipment Sold',         value: equipmentSoldFromTable, change: null, color: 'amber',  format: 'number'   },
     ];
@@ -401,10 +401,12 @@ const ExecutiveSummary = () => {
     return arr;
   }, [quarterlyRowsRaw, kpiSortBy, kpiSortDir, hasExecData, summary]);
 
-  const revenueByQuarter = hasExecData && summary?.revenue_by_quarter?.length
+  const revenueByQuarterIsLive = !!(hasExecData && summary?.revenue_by_quarter?.length);
+  const revenueByQuarter = revenueByQuarterIsLive
     ? summary.revenue_by_quarter
     : FALLBACK_REVENUE_BY_QUARTER;
-  const yoySales = hasExecData && summary?.yoy_sales?.length ? summary.yoy_sales : FALLBACK_YOY;
+  const yoySalesIsLive = !!(hasExecData && summary?.yoy_sales?.length);
+  const yoySales = yoySalesIsLive ? summary.yoy_sales : FALLBACK_YOY;
 
   // Revenue per division, computed from live sources:
   //   CP        → Shopify store revenue (canonical for the CP tile)
@@ -787,7 +789,14 @@ const ExecutiveSummary = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
             className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>Revenue by Quarter & Division</h3>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h3 className={`text-lg font-semibold ${textPrimary}`}>Revenue by Quarter & Division</h3>
+              {!revenueByQuarterIsLive && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/25 uppercase tracking-wider">
+                  Curated Snapshot
+                </span>
+              )}
+            </div>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={revenueByQuarter}>
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
@@ -804,7 +813,14 @@ const ExecutiveSummary = () => {
 
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
             className={`rounded-xl p-6 ${cardBg}`}>
-            <h3 className={`text-lg font-semibold mb-4 ${textPrimary}`}>YOY Sales Comparison</h3>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h3 className={`text-lg font-semibold ${textPrimary}`}>YOY Sales Comparison</h3>
+              {!yoySalesIsLive && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/25 uppercase tracking-wider">
+                  Curated Snapshot
+                </span>
+              )}
+            </div>
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart data={yoySales}>
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(148,163,184,0.1)' : 'rgba(203,213,225,0.5)'} />
