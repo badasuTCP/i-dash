@@ -40,6 +40,7 @@ from app.api import (
     auth_router,
     contractors_router,
     dashboard_router,
+    diagnostics_v2_router,
     documents_router,
     lineage_v2_router,
     pipelines_router,
@@ -397,6 +398,10 @@ app.include_router(
 )
 app.include_router(
     lineage_v2_router,
+    prefix="/api",
+)
+app.include_router(
+    diagnostics_v2_router,
     prefix="/api",
 )
 

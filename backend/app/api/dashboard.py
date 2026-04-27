@@ -1719,6 +1719,11 @@ async def get_brand_summary(
     if brand == "sanitred":
         try:
             from app.models.metrics import WCOrder, SUCCESSFUL_WC_STATUSES
+            # total > 0 keeps the order count in lockstep with WC's
+            # "Successful Orders" view, which excludes $0 transactions
+            # (refunds-to-zero, internal test orders, gift fulfillments
+            # with full discount). Without this we counted +1 phantom
+            # orders that contributed $0 to revenue but +1 to count.
             wc_q = await db.execute(
                 select(
                     func.coalesce(func.sum(WCOrder.total), 0),
@@ -1729,6 +1734,7 @@ async def get_brand_summary(
                     WCOrder.date_created <= end_date,
                     WCOrder.division == "sanitred",
                     WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
+                    WCOrder.total > 0,
                 ))
             )
             row = wc_q.one_or_none()
@@ -4429,6 +4435,7 @@ async def get_executive_summary(
                 WCOrder.date_created <= end_date,
                 WCOrder.division == "sanitred",
                 WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
+                WCOrder.total > 0,
             ))
         )
         wc_retail_total = float(wc_q.scalar() or 0)
@@ -4611,10 +4618,12 @@ async def get_wc_store(
     # (handles cases where date_created is NULL or pipeline only fetched
     # the default 30-day window which doesn't overlap the date picker).
     # Top KPIs (Total Retail Revenue / Online Orders / Avg Order Value)
-    # only count orders with a status in SUCCESSFUL_WC_STATUSES — the
-    # per-status breakdown lower on the page still shows Failed /
-    # Cancelled / etc. so revenue you see at the top equals revenue
-    # you'd see in WC admin filtered to those statuses.
+    # only count orders that actually generated revenue:
+    #   - status ∈ SUCCESSFUL_WC_STATUSES (completed / processing / on-hold)
+    #   - total > 0 (excludes $0 successful orders WC's view also excludes)
+    # The per-status breakdown lower on the page still shows Failed /
+    # Cancelled / etc. so revenue at the top matches WC admin filtered
+    # to those same conditions.
     totals = await db.execute(
         select(
             func.count(WCOrder.id).label("total_orders"),
@@ -4627,6 +4636,7 @@ async def get_wc_store(
             WCOrder.date_created >= start_date,
             WCOrder.date_created <= end_date,
             WCOrder.status.in_(SUCCESSFUL_WC_STATUSES),
+            WCOrder.total > 0,
         ))
     )
     t = totals.first()
