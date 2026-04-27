@@ -256,6 +256,16 @@ const SalesIntelligence = () => {
     }));
   }, [apiData]);
 
+  // If the daily series is all zeros (e.g. HubSpot sync lagging), the chart
+  // renders as a dead flat line. Detect that case and swap to a static
+  // period-snapshot card instead so the dashboard never looks broken.
+  const correlationIsFlat = useMemo(() => {
+    if (!dailyData.length) return false;
+    const totalActivities = dailyData.reduce((s, d) => s + (d.activities || 0), 0);
+    const totalDealsWon = dailyData.reduce((s, d) => s + (d.deals_won || 0), 0);
+    return totalActivities === 0 && totalDealsWon === 0;
+  }, [dailyData]);
+
   const stalledDeals = useMemo(() => {
     const deals = apiData?.stalled_deals || [];
     if (selectedRep) {
@@ -521,7 +531,7 @@ const SalesIntelligence = () => {
               <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-violet-500/15 text-violet-400' : 'bg-violet-100 text-violet-600'}`}>14-day lag</span>
             </div>
             <p className={`text-xs mb-4 ${textSec}`}>Do activity spikes today drive deal closings in 14 days?</p>
-            {dailyData.length > 0 ? (
+            {dailyData.length > 0 && !correlationIsFlat ? (
               <ResponsiveContainer width="100%" height={300}>
                 <ComposedChart data={dailyData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                   <defs>
@@ -544,6 +554,31 @@ const SalesIntelligence = () => {
                   )}
                 </ComposedChart>
               </ResponsiveContainer>
+            ) : correlationIsFlat ? (
+              <div className={`h-[300px] flex flex-col items-center justify-center gap-4 ${textSec}`}>
+                <span className={`text-[10px] uppercase tracking-wider ${textSec}`}>Period Snapshot</span>
+                <div className="grid grid-cols-3 gap-6 text-center">
+                  <div>
+                    <p className={`text-2xl font-bold ${textPri}`}>
+                      {(apiData?.totals?.tasks || 0).toLocaleString()}
+                    </p>
+                    <p className={`text-[10px] mt-1 ${textSec} uppercase tracking-wider`}>Activities</p>
+                  </div>
+                  <div>
+                    <p className={`text-2xl font-bold ${textPri}`}>
+                      {(apiData?.totals?.deals_won || totalWon || 0).toLocaleString()}
+                    </p>
+                    <p className={`text-[10px] mt-1 ${textSec} uppercase tracking-wider`}>Deals Won</p>
+                  </div>
+                  <div>
+                    <p className={`text-2xl font-bold ${textPri}`}>
+                      ${((apiData?.totals?.revenue_won || totalRevenue || 0) / 1000).toFixed(0)}K
+                    </p>
+                    <p className={`text-[10px] mt-1 ${textSec} uppercase tracking-wider`}>Revenue</p>
+                  </div>
+                </div>
+                <p className="text-[11px] italic opacity-70">Daily series syncing — showing period totals.</p>
+              </div>
             ) : (
               <div className={`h-[300px] flex items-center justify-center ${textSec}`}>
                 <p className="text-sm">No daily activity data available for this period.</p>
@@ -1013,7 +1048,7 @@ const SalesIntelligence = () => {
             { label: 'Training Signups', value: apiData?.totals?.training_signups || 0, icon: Award, color: 'text-orange-400', bg: 'from-orange-500/10 to-orange-600/5' },
             { label: 'New Leads', value: (apiData?.totals?.contacts || 0) - (apiData?.totals?.training_signups || 0), icon: Users, color: 'text-amber-400', bg: 'from-amber-500/10 to-amber-600/5' },
             { label: 'Form Submissions', value: apiData?.totals?.form_submissions || 0, icon: Zap, color: 'text-violet-400', bg: 'from-violet-500/10 to-violet-600/5' },
-          ].map((item, i) => (
+          ].filter(item => !(item.label === 'Emails Sent' && (!item.value || item.value === 0))).map((item, i) => (
             <motion.div
               key={item.label}
               initial={{ opacity: 0, scale: 0.9 }}

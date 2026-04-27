@@ -875,7 +875,11 @@ async def get_sales_intelligence(
         {"name": "Ending Pipeline", "value": pipe, "fill": "#8B5CF6"},
     ]
 
-    # ── Stalled deals from DB (not updated in 3+ days, open stage) ──────
+    # ── Stalled deals from DB (open-stage pipeline > 3 days old) ────────
+    # We don't sync HubSpot's `notes_last_updated` or `hs_lastmodifieddate`
+    # onto hubspot_deals, so `created_date` is the only age signal we have.
+    # Drop the dashboard date-window filter so deals opened before the
+    # selected period still surface as stalled.
     stalled_deals = []
     try:
         stalled_q = await db.execute(text(f"""
@@ -885,8 +889,9 @@ async def get_sales_intelligence(
               AND stage NOT IN ({','.join(LOST_STAGES)})
               AND stage != {PRE_LAUNCH}
               AND amount > 0
-              AND created_date >= '{start_date}' AND created_date <= '{end_date}'
-            ORDER BY amount DESC
+              AND created_date IS NOT NULL
+              AND created_date <= CURRENT_DATE - INTERVAL '3 days'
+            ORDER BY created_date ASC
             LIMIT 12
         """))
         for row in stalled_q.fetchall():
@@ -897,7 +902,7 @@ async def get_sales_intelligence(
             stalled_deals.append({
                 "id": row[0], "name": row[1] or "Untitled",
                 "value": float(row[4] or 0), "rep": rep_name,
-                "stage": row[3][:20], "days_stalled": days, "last_touch": "Pipeline",
+                "stage": (row[3] or "open")[:20], "days_stalled": days, "last_touch": "Pipeline",
             })
     except Exception as e:
         logger.warning("Stalled deals query failed: %s", e)
