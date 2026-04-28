@@ -7,7 +7,7 @@ CRM metrics, and custom metric queries with role-based filtering.
 
 import logging
 from datetime import date, datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, select, text
