@@ -619,9 +619,9 @@ const ExecutiveSummary = () => {
             change={summary?.qb_revenue?.active_pct}
             color="blue" format="currency" />
           <ScoreCard label="In-Active I-BOS Contractors"
-            value={summary?.qb_revenue?.inactive_count || 0}
-            color="amber" format="number"
-            sub={summary?.qb_revenue?.inactive_total ? `$${Math.round((summary.qb_revenue.inactive_total || 0) / 1000).toLocaleString()}K legacy revenue` : undefined} />
+            value={summary?.qb_revenue?.inactive_total || 0}
+            color="amber" format="currency"
+            sub={summary?.qb_revenue?.inactive_count ? `${summary.qb_revenue.inactive_count} legacy accounts` : undefined} />
           <ScoreCard label="Total QB Customers"
             value={(summary?.qb_revenue?.active_count || 0) + (summary?.qb_revenue?.inactive_count || 0) + (summary?.qb_revenue?.retail_count || 0)}
             color="violet" format="number" />
