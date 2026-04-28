@@ -275,6 +275,40 @@ const PipelinesPage = () => {
     }
   }, [isDemoMode]);
 
+  // Auto-clear stale "Running in background..." banners. When the
+  // pipelines list refreshes, any pipeline whose backend status is no
+  // longer 'running' / 'accepted' should have its pending toast resolved
+  // — otherwise a missed poll (network blip, page navigation, browser
+  // tab throttle, etc.) leaves the green banner visible indefinitely
+  // even though the run actually finished. The history table in the
+  // expanded panel still records the real duration.
+  useEffect(() => {
+    setRunResults((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const pipe of pipelines) {
+        const r = next[pipe.name];
+        if (!r || !r.pending) continue;
+        const upstreamDone =
+          pipe.status !== 'running' &&
+          pipe.status !== 'accepted' &&
+          pipe.status !== 'pending';
+        if (upstreamDone) {
+          next[pipe.name] = {
+            ...r,
+            pending: false,
+            success: pipe.status === 'success',
+            records_loaded: pipe.records_loaded ?? r.records_loaded ?? null,
+            duration_seconds: pipe.duration_seconds ?? r.duration_seconds ?? null,
+            error: pipe.error ?? r.error,
+          };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [pipelines]);
+
   // Auto-refresh every 30 seconds with countdown
   useEffect(() => {
     fetchStatus();
@@ -593,10 +627,10 @@ const PipelinesPage = () => {
                             </div>
                             <div className={`text-xs mt-0.5 ${textSec} flex flex-wrap gap-3`}>
                               <span>Last sync: <b className={textPrimary}>{relativeTime(pipe.last_success || pipe.last_run)}</b></span>
-                              {pipe.records_loaded != null && (
+                              {pipe.records_loaded != null && pipe.records_loaded > 0 && (
                                 <span>Records: <b className={textPrimary}>{pipe.records_loaded?.toLocaleString()}</b></span>
                               )}
-                              {pipe.duration_seconds != null && (
+                              {pipe.duration_seconds != null && pipe.duration_seconds > 0 && (
                                 <span>Duration: <b className={textPrimary}>{pipe.duration_seconds?.toFixed(1)}s</b></span>
                               )}
                             </div>
