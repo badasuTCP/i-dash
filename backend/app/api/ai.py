@@ -9,7 +9,8 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -469,6 +470,111 @@ async def _fetch_metrics_context(
     except Exception:
         pass
 
+    # ── Per-contractor full performance (Meta + Google Ads + QB rev) ──
+    # The chatbot's prompt builder looks for a flat "contractors" list. Build
+    # it live here from meta_ad_metrics + google_ad_metrics + qb_revenue::
+    # so the AI never falls back to the hardcoded CONTRACTOR_MARKETING_DATA
+    # constant in ai_service.py (which had stale Floor Warriors=$0 entries
+    # that contradicted the dashboard during the Will Fowler demo).
+    try:
+        from app.models.metrics import GoogleSheetMetric as _GSM3, GoogleAdMetric as _GAM3
+
+        meta_rows = (await db.execute(select(
+            MetaAdMetric.account_name,
+            func.coalesce(func.sum(MetaAdMetric.spend), 0),
+            func.coalesce(func.sum(MetaAdMetric.conversions), 0),
+            func.coalesce(func.sum(MetaAdMetric.clicks), 0),
+        ).where(and_(
+            MetaAdMetric.date >= start_date,
+            MetaAdMetric.account_name.isnot(None),
+        )).group_by(MetaAdMetric.account_name))).all()
+
+        # google_ad_metrics rows carry only customer_id, not contractor name.
+        # Map the two known I-BOS CIDs to their contractors (per project
+        # canonical mapping: 6754610688 = Tailored Concrete Coatings,
+        # 2957400868 = SLG Contracting Inc.). Anything else falls under the
+        # CID string so the AI can still talk about it specifically.
+        GADS_CID_TO_NAME = {
+            "6754610688": "Tailored Concrete Coatings",
+            "2957400868": "SLG Contracting Inc.",
+        }
+        gads_raw = (await db.execute(select(
+            _GAM3.customer_id,
+            func.coalesce(func.sum(_GAM3.spend), 0),
+            func.coalesce(func.sum(_GAM3.conversions), 0),
+            func.coalesce(func.sum(_GAM3.clicks), 0),
+        ).where(_GAM3.date >= start_date).group_by(_GAM3.customer_id))).all()
+        gads_rows = [
+            (
+                GADS_CID_TO_NAME.get(str(cid).strip(), f"Google Ads {cid}"),
+                spend, leads, clicks,
+            )
+            for cid, spend, leads, clicks in gads_raw
+            if cid is not None
+        ]
+
+        qb_rows = (await db.execute(select(
+            _GSM3.metric_name,
+            func.coalesce(func.sum(_GSM3.metric_value), 0),
+        ).where(and_(
+            _GSM3.sheet_name.like("qb_revenue::%"),
+            _GSM3.date >= start_date,
+        )).group_by(_GSM3.metric_name))).all()
+
+        def _norm(s: Optional[str]) -> str:
+            if not s:
+                return ""
+            s = s.lower()
+            for tok in ("llc", "inc.", "inc", ".com", ".co", "[meta]", "(", ")", "-"):
+                s = s.replace(tok, " ")
+            return " ".join(s.split())
+
+        merged: Dict[str, Dict[str, Any]] = {}
+        for name, spend, leads, clicks in meta_rows:
+            key = _norm(name)
+            if not key:
+                continue
+            merged.setdefault(key, {"name": name, "spend": 0.0, "leads": 0, "clicks": 0, "revenue": 0.0})
+            merged[key]["spend"] += float(spend or 0)
+            merged[key]["leads"] += int(leads or 0)
+            merged[key]["clicks"] += int(clicks or 0)
+        for name, spend, leads, clicks in gads_rows:
+            key = _norm(name)
+            if not key:
+                continue
+            merged.setdefault(key, {"name": name, "spend": 0.0, "leads": 0, "clicks": 0, "revenue": 0.0})
+            merged[key]["spend"] += float(spend or 0)
+            merged[key]["leads"] += int(leads or 0)
+            merged[key]["clicks"] += int(clicks or 0)
+        for qname, qrev in qb_rows:
+            key = _norm(qname)
+            if not key:
+                continue
+            merged.setdefault(key, {"name": qname, "spend": 0.0, "leads": 0, "clicks": 0, "revenue": 0.0})
+            merged[key]["revenue"] += float(qrev or 0)
+
+        contractor_list: List[Dict[str, Any]] = []
+        for c in merged.values():
+            spend = c["spend"]
+            leads = c["leads"]
+            revenue = c["revenue"]
+            roas = round(revenue / spend, 2) if spend > 0 else None
+            cpl = round(spend / leads, 2) if leads > 0 else 0
+            contractor_list.append({
+                "name": c["name"],
+                "spend": round(spend, 2),
+                "leads": leads,
+                "clicks": c["clicks"],
+                "revenue": round(revenue, 2),
+                "roas": roas,
+                "cpl": cpl,
+            })
+        contractor_list.sort(key=lambda r: r["spend"], reverse=True)
+        if contractor_list:
+            context["contractors"] = contractor_list
+    except Exception as exc:
+        logger.warning(f"Failed to build live per-contractor context: {exc}")
+
     # ── Period-over-period comparison ─────────────────────────────────
     # Same-length window immediately prior to the selected range, so the
     # AI can say "spend is up 23% vs the prior period" instead of only
@@ -505,6 +611,32 @@ async def _fetch_metrics_context(
     return context
 
 
+class ChatTurn(BaseModel):
+    """One turn of the chat history. Mirrors the OpenAI/Groq schema."""
+    role: str = Field(..., description="'user' or 'assistant'")
+    content: str = Field(..., max_length=4000)
+
+
+class DashboardState(BaseModel):
+    """Snapshot of what the user is looking at when they ask a question.
+
+    All fields optional — frontend only sends what's currently visible.
+    """
+    page: Optional[str] = Field(None, description="e.g. 'Executive Summary'")
+    brand: Optional[str] = Field(None, description="cp | sanitred | ibos")
+    date_range: Optional[str] = Field(None, description="e.g. 'Jan 1 – Apr 28, 2026'")
+    visible_kpis: Optional[Dict[str, Any]] = Field(None, description="label → value")
+
+
+class ChatRequest(BaseModel):
+    """Body for /ai/chat. Backwards compatible with the legacy
+    ?question= query-string call: when no body is sent the route
+    accepts the question as a query param instead."""
+    question: str = Field(..., min_length=1, max_length=1000)
+    history: List[ChatTurn] = Field(default_factory=list, description="Prior turns, oldest first. Last 10 are kept.")
+    dashboard_state: Optional[DashboardState] = None
+
+
 @router.post(
     "/chat",
     summary="Ask AI a question about your data",
@@ -515,7 +647,8 @@ async def _fetch_metrics_context(
     },
 )
 async def chat(
-    question: str = Query(..., min_length=1, max_length=1000),
+    request: Optional[ChatRequest] = Body(None),
+    question: Optional[str] = Query(None, min_length=1, max_length=1000),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     ai_service: AIService = Depends(get_ai_service),
@@ -523,36 +656,44 @@ async def chat(
     """
     Ask a question about analytics data and get an AI-powered answer.
 
-    The AI has context about your recent metrics and provides answers filtered
-    by the user's department access level.
+    Accepts either:
+      - JSON body { question, history?, dashboard_state? } (preferred)
+      - Legacy ?question=... query string (backwards compatible)
 
-    Args:
-        question: The question to ask about metrics.
-        db: Database session.
-        current_user: Current authenticated user.
-        ai_service: AI service instance.
-
-    Returns:
-        Dictionary with AI response.
-
-    Raises:
-        HTTPException: If AI service fails or is not configured.
+    The AI is given:
+      - The full live metrics context (rebuilt fresh on every call)
+      - The last 10 turns of conversation history
+      - The user's current dashboard view-state (page, brand, date range,
+        visible KPI values) so it can resolve "this number" / "that chart"
     """
+    if request is not None:
+        q = request.question
+        history = [t.dict() for t in request.history[-10:]]
+        dash_state = request.dashboard_state.dict() if request.dashboard_state else None
+    elif question:
+        q = question
+        history = []
+        dash_state = None
+    else:
+        raise HTTPException(status_code=400, detail="Missing question")
+
     try:
         # Build metrics context
         context = await _fetch_metrics_context(db, current_user)
 
         # Generate response
         response = await ai_service.chat(
-            question=question,
+            question=q,
             context=context,
             user_department=current_user.department.value,
+            history=history,
+            dashboard_state=dash_state,
         )
 
-        logger.info(f"User {current_user.id} asked AI question: {question[:50]}...")
+        logger.info(f"User {current_user.id} asked AI question: {q[:50]}... (history={len(history)} turns)")
 
         return {
-            "question": question,
+            "question": q,
             "answer": response,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "context_days": context["period_days"],

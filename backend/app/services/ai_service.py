@@ -15,24 +15,15 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
-# ── Contractor-level marketing data (from Looker / Google Sheets / GA4) ──
-# This data feeds the AI until the pipeline populates per-contractor metrics
-# in the database.  Updated alongside the frontend CONTRACTORS array.
-CONTRACTOR_MARKETING_DATA = [
-    {"name": "Beckley Concrete Decor",      "spend": 37749, "leads": 290, "clicks": 87728, "revenue": 392470, "roas": 47, "cpl": 130.17},
-    {"name": "Tailored Concrete Coatings",  "spend": 15887, "leads": 275, "clicks": 29097, "revenue": 0,      "roas": None, "cpl": 57.77},
-    {"name": "SLG Concrete Coatings",       "spend": 11328, "leads": 42,  "clicks": 13388, "revenue": 47790,  "roas": 40, "cpl": 269.72},
-    {"name": "Columbus Concrete Coatings",  "spend": 5180,  "leads": 10,  "clicks": 87260, "revenue": 113720, "roas": 26, "cpl": 518.00},
-    {"name": "TVS Coatings",                "spend": 4502,  "leads": 16,  "clicks": 10995, "revenue": 0,      "roas": None, "cpl": 281.36},
-    {"name": "Eminence",                    "spend": 0,     "leads": 3,   "clicks": 0,     "revenue": 330770, "roas": None, "cpl": 0},
-    {"name": "PermaSurface",                "spend": 0,     "leads": 2,   "clicks": 0,     "revenue": 156330, "roas": None, "cpl": 0},
-    {"name": "Diamond Topcoat",             "spend": 0,     "leads": 89,  "clicks": 0,     "revenue": 113730, "roas": None, "cpl": 0},
-    {"name": "Floor Warriors",              "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
-    {"name": "Graber Design Coatings",      "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
-    {"name": "Decorative Concrete Idaho",   "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
-    {"name": "Reeves Concrete Solutions",   "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
-    {"name": "Elite Pool Coatings",         "spend": 0,     "leads": 0,   "clicks": 0,     "revenue": 0,      "roas": None, "cpl": 0},
-]
+# Per-contractor marketing data is now built LIVE in
+# backend/app/api/ai.py::_fetch_metrics_context() from meta_ad_metrics +
+# google_ad_metrics + qb_revenue::sheets. The hardcoded constant that
+# used to live here had Floor Warriors=$0 (and other stale rows) that
+# contradicted the dashboard during the 2026-04-28 Will Fowler demo —
+# the bot answered "$0 on ads" while the dashboard showed real numbers.
+# Empty list = if the live context lookup ever fails, the AI says "no
+# per-contractor data available for this window" instead of fabricating.
+CONTRACTOR_MARKETING_DATA: list = []
 
 
 class AIService:
@@ -400,14 +391,21 @@ Note: CID 2823564937 = Sani-Tred, CID 6754610688 = Tailored, CID 2957400868 = SL
         question: str,
         context: Dict[str, Any],
         user_department: str = "all",
+        history: Optional[list] = None,
+        dashboard_state: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Answer a question about analytics using Groq.
 
         Args:
             question: User's question about metrics.
-            context: Current metrics context.
+            context: Current metrics context (live DB pull).
             user_department: User's department for filtering.
+            history: Prior conversation turns [{role, content}, ...]. Most
+                recent last. The route caps this at 10 turns before passing.
+            dashboard_state: Snapshot of what the user is looking at —
+                {page, brand, date_range, visible_kpis}. Lets the AI resolve
+                "this number" / "the chart on screen" without guessing.
 
         Returns:
             AI-generated answer, or a fallback message if unavailable.
@@ -422,6 +420,35 @@ Note: CID 2823564937 = Sani-Tred, CID 6754610688 = Tailored, CID 2957400868 = SL
         try:
             metrics_context = self._build_metrics_prompt(context)
 
+            # Render the dashboard view-state into the system prompt so the
+            # AI knows which page / brand / date range the user is viewing
+            # and which KPI values are currently on screen. Resolves "this
+            # number" / "that chart" without the AI having to guess.
+            dash_block = ""
+            if dashboard_state:
+                page = dashboard_state.get("page") or "(unspecified)"
+                brand = dashboard_state.get("brand") or "(all)"
+                date_range = dashboard_state.get("date_range") or "(default)"
+                visible_kpis = dashboard_state.get("visible_kpis") or {}
+                kpi_lines = "\n".join(
+                    f"  - {label}: {value}" for label, value in visible_kpis.items()
+                ) or "  (none reported)"
+                dash_block = f"""
+CURRENT VIEW (what the user is looking at right now):
+  - Page: {page}
+  - Brand filter: {brand}
+  - Date range: {date_range}
+  - Visible KPIs on screen:
+{kpi_lines}
+
+When the user says "this number", "that chart", "the dashboard", or
+"what I'm looking at", they mean the visible KPIs above. Cross-check
+your answer against them — if your answer disagrees with what the
+user can see on the page, say so explicitly and explain the difference
+(e.g. "the dashboard's filtered to last 7 days, the figure I have
+is YTD").
+"""
+
             system_prompt = f"""You are the senior data analyst for a company
 with three divisions: The Concrete Protector (CP), Sani-Tred (retail),
 and I-BOS (contractor network). You are answering an executive's
@@ -433,6 +460,9 @@ BANNED TERMS — never appear in your response:
   - Database or table names (hubspot_contacts, meta_ad_metrics, etc.)
   - Variable / JSON keys (tcp_main_total_revenue, hubspot_deals_won)
   - The word "context" or references to how this prompt is assembled
+  - Phrases like "this conversation just started", "I have no prior
+    information", "you haven't given me data" — the conversation
+    history is provided to you below; use it.
 
 Translate everything into plain business language. When you need to
 name a source, use its product name (HubSpot, Shopify, WooCommerce,
@@ -444,7 +474,7 @@ and reported by the finance team (Molly Quick). Refer to it as
 — never by any internal tab name.
 
 Department Access: {user_department}
-
+{dash_block}
 Your role:
 - Answer questions with specific numbers from the data below
 - Compare divisions by name (CP, Sani-Tred, I-BOS)
@@ -464,9 +494,31 @@ CONVERSATIONAL HANDLING:
 - Only pull numbers from the data when the user actually asks an
   analytical question.
 
+DISAGREEMENT HANDLING (CRITICAL):
+- If the user pushes back ("that's not true", "that's wrong", "no it
+  isn't", "actually...", "double-check"), do NOT defend the previous
+  answer or claim the conversation just started. Instead:
+  1. Re-read the Current Data block below from scratch.
+  2. Re-read the conversation history below to remember exactly what
+     you claimed.
+  3. Cite the specific data row(s) you're using by name and value.
+  4. If your prior claim was a $0 / N/A / "no activity" reading,
+     explicitly check whether the contractor or metric appears under
+     a slightly different name in the data (e.g. "Floor Warriors" vs
+     "Floor Warriors GA4" vs "Floor Warriors of GA"). Name variants
+     are common.
+  5. If after re-checking the user is correct that the data shows
+     something different, acknowledge the correction directly:
+     "You're right — I see Floor Warriors at $X spend / $Y revenue."
+- Never assert "the conversation just started" or "I have no context"
+  — the conversation history is provided below.
+
 RULES:
 - If the data shows $0 or N/A, do NOT fabricate. Say "no activity
-  recorded" or "not tracked in this window" and suggest a next step.
+  recorded" or "not tracked in this window" and suggest a next step —
+  but BEFORE answering $0, check for name variants in the contractor
+  list (some contractors appear as "<Name>", "<Name> GA4",
+  "<Name> Coatings", etc.).
 - If the question is about ROAS and ad-attributable revenue is marked
   N/A, explain attribution isn't set up rather than inventing a ratio.
 - Never write "revenue is $0 according to [source name]" — it sounds
@@ -478,13 +530,17 @@ Current Data:
 
 Lead with the most decision-relevant number. Numbers > adjectives."""
 
+            messages: list = [{"role": "system", "content": system_prompt}]
+            for turn in (history or [])[-10:]:
+                role = turn.get("role")
+                if role in ("user", "assistant") and turn.get("content"):
+                    messages.append({"role": role, "content": turn["content"]})
+            messages.append({"role": "user", "content": question})
+
             response = self._call_chat_completions(
                 model=self.model,
                 max_tokens=1024,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": question},
-                ],
+                messages=messages,
             )
 
             response_text = response.choices[0].message.content

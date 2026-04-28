@@ -1,14 +1,60 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, X, Send, Loader, WifiOff } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import { useGlobalDate } from '../context/GlobalDateContext';
 import { aiAPI } from '../services/api';
+
+// Best-effort dashboard view-state extraction. We pull human-readable KPI
+// labels + values straight from the rendered DOM so any page that wraps a
+// number in `[data-kpi="Label"]` (or just renders a recognisable card)
+// gets included automatically. No per-page wiring required.
+function snapshotDashboardState(pathname, dateFrom, dateTo) {
+  const PAGE_NAMES = {
+    '/dashboard/executive':   'Executive Summary',
+    '/dashboard/sales-intelligence': 'Sales Intelligence',
+    '/dashboard/cp':          'CP Overview',
+    '/dashboard/sanitred':    'Sani-Tred Overview',
+    '/dashboard/ibos':        'I-BOS Overview',
+    '/dashboard/cp/marketing':         'CP Marketing',
+    '/dashboard/sanitred/marketing':   'Sani-Tred Marketing',
+    '/dashboard/ibos/marketing':       'I-BOS Marketing',
+    '/dashboard/cp/web-analytics':       'CP Web Analytics',
+    '/dashboard/sanitred/web-analytics': 'Sani-Tred Web Analytics',
+    '/dashboard/ibos/web-analytics':     'I-BOS Web Analytics',
+    '/dashboard/sanitred/retail':        'Sani-Tred Store',
+    '/dashboard/cp/retail':              'CP Store',
+    '/dashboard/ibos/contractors':       'I-BOS Contractor Breakdown',
+  };
+  const page = PAGE_NAMES[pathname] || pathname || 'unknown';
+  const brand = pathname?.includes('/sanitred') ? 'sanitred'
+              : pathname?.includes('/ibos')     ? 'ibos'
+              : pathname?.includes('/cp')       ? 'cp'
+              : null;
+  const dateRange = (dateFrom && dateTo) ? `${dateFrom} to ${dateTo}` : null;
+
+  // Walk the DOM for any element with [data-kpi]; fall back to scraping
+  // labelled scorecards on Executive Summary by class hooks.
+  const visible_kpis = {};
+  try {
+    document.querySelectorAll('[data-kpi]').forEach((el) => {
+      const label = el.getAttribute('data-kpi');
+      const value = (el.getAttribute('data-kpi-value') || el.innerText || '').trim();
+      if (label && value) visible_kpis[label] = value.split('\n')[0].slice(0, 80);
+    });
+  } catch { /* best effort only */ }
+
+  return { page, brand, date_range: dateRange, visible_kpis };
+}
 
 const AIChatbot = () => {
   const { isDark } = useTheme();
   const { user } = useAuth();
+  const location = useLocation();
+  const { dateFrom, dateTo } = useGlobalDate();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
     {
@@ -34,7 +80,16 @@ const AIChatbot = () => {
     setIsTyping(true);
 
     try {
-      const { data } = await aiAPI.chat(question);
+      // Send the last 10 turns of history (plain user/assistant pairs) and
+      // a snapshot of the current dashboard view so the AI can resolve
+      // "this number" / "that chart" without guessing.
+      const history = messages
+        .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content && !m.error)
+        .slice(-10)
+        .map((m) => ({ role: m.role, content: m.content }));
+      const dashboardState = snapshotDashboardState(location.pathname, dateFrom, dateTo);
+
+      const { data } = await aiAPI.chat(question, { history, dashboardState });
 
       setMessages((prev) => [
         ...prev,

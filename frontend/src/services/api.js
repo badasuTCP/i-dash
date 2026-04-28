@@ -187,10 +187,16 @@ export const pipelinesAPI = {
   getSchedulerStatus: ()  => apiClient.get('/pipelines/system/scheduler'),
 };
 
-// AI endpoints — backend uses query params, not body
+// AI endpoints — chat now POSTs a JSON body with history + dashboard state
+// so the bot has conversation memory and view-context. Legacy ?question=
+// query-string still works on the backend for backwards compat.
 export const aiAPI = {
-  chat: (question) =>
-    apiClient.post(`/ai/chat?question=${encodeURIComponent(question)}`),
+  chat: (question, { history = [], dashboardState = null } = {}) =>
+    apiClient.post('/ai/chat', {
+      question,
+      history,
+      dashboard_state: dashboardState,
+    }),
   getInsights: (days = 7) =>
     apiClient.get('/ai/insights', { params: { days } }),
   generateReport: (dateFrom, dateTo, reportType = 'summary') =>
