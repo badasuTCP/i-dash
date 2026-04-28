@@ -7,14 +7,16 @@ classification of worksheets as retail:: or contractor:: based on header
 keyword scoring.
 """
 
+import asyncio
 import json
 import logging
+import random
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import gspread
-from gspread.exceptions import GSpreadException
+from gspread.exceptions import APIError, GSpreadException
 from gspread.worksheet import Worksheet
 
 from app.core.config import settings
@@ -29,6 +31,16 @@ _CONTRACTOR_KEYWORDS = {"contractor", "lead", "territory", "beckley", "job"}
 # Tabs containing these keywords are skipped — Meta data must come from the
 # direct API pipeline, not the old Coupler-to-Sheets sync.
 _BLACKLISTED_TAB_KEYWORDS = {"meta", "facebook", "coupler"}
+
+# Sheets API quota: 60 read requests / minute / user. Each worksheet read
+# costs ~1 request. Sleep between worksheet reads to stay well under the
+# limit. 2.0s = 30 worksheets/min ceiling — comfortably under quota even
+# with the dual-sheet (A + B) workload.
+_SHEETS_READ_DELAY_SECONDS = 2.0
+
+# Max attempts before giving up on a single worksheet. Backoff doubles each
+# time, with jitter, so 4 attempts spans ~2s + 4s + 8s + 16s = up to 30s.
+_SHEETS_RETRY_MAX_ATTEMPTS = 4
 
 
 class GoogleSheetsPipeline(BasePipeline):
@@ -115,7 +127,7 @@ class GoogleSheetsPipeline(BasePipeline):
                     f"Sheet {sheet_id}: processing {len(worksheets_to_process)} worksheets"
                 )
 
-                for worksheet in worksheets_to_process:
+                for ws_index, worksheet in enumerate(worksheets_to_process):
                     # Skip tabs that contain Meta/Facebook/Coupler data —
                     # Meta metrics must come from the direct API pipeline only.
                     title_lower = worksheet.title.lower()
@@ -126,8 +138,14 @@ class GoogleSheetsPipeline(BasePipeline):
                         )
                         continue
 
+                    # Throttle to stay under Sheets API's 60 reads/min quota.
+                    # Don't sleep before the first read so the pipeline still
+                    # feels responsive on small accounts.
+                    if ws_index > 0:
+                        await asyncio.sleep(_SHEETS_READ_DELAY_SECONDS)
+
                     try:
-                        rows = await self._extract_worksheet(worksheet)
+                        rows = await self._extract_worksheet_with_retry(worksheet)
                         prefix = self._classify_sheet(
                             list(rows[0].keys()) if rows else []
                         )
@@ -181,6 +199,45 @@ class GoogleSheetsPipeline(BasePipeline):
                 best_score = score
                 best_idx = i
         return best_idx
+
+    async def _extract_worksheet_with_retry(
+        self, worksheet: Worksheet
+    ) -> List[Dict[str, Any]]:
+        """Wrap _extract_worksheet with exponential backoff for 429/quota errors.
+
+        Sheets returns HTTP 429 RESOURCE_EXHAUSTED once we cross 60 reads/min.
+        Catch it, back off (2s, 4s, 8s, 16s with jitter), and retry. Other
+        errors propagate immediately so we don't mask real bugs.
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(_SHEETS_RETRY_MAX_ATTEMPTS):
+            try:
+                return await self._extract_worksheet(worksheet)
+            except APIError as exc:
+                msg = str(exc)
+                is_rate_limit = (
+                    "429" in msg
+                    or "RATE_LIMIT_EXCEEDED" in msg
+                    or "RESOURCE_EXHAUSTED" in msg
+                    or "Quota exceeded" in msg
+                )
+                if not is_rate_limit:
+                    raise
+                last_exc = exc
+                backoff = (2 ** attempt) * _SHEETS_READ_DELAY_SECONDS
+                jitter = random.uniform(0, _SHEETS_READ_DELAY_SECONDS / 2)
+                wait = backoff + jitter
+                self.logger.warning(
+                    f"Sheets rate limit on '{worksheet.title}' "
+                    f"(attempt {attempt + 1}/{_SHEETS_RETRY_MAX_ATTEMPTS}); "
+                    f"sleeping {wait:.1f}s before retry"
+                )
+                await asyncio.sleep(wait)
+        # All retries exhausted — bubble up the last 429 so the caller
+        # logs it and the pipeline status reflects the real failure.
+        if last_exc is not None:
+            raise last_exc
+        return []
 
     async def _extract_worksheet(self, worksheet: Worksheet) -> List[Dict[str, Any]]:
         """Extract all rows from a single worksheet as a list of dicts.

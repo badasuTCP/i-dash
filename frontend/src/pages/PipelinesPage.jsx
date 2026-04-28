@@ -4,7 +4,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useDashboardConfig } from '../context/DashboardConfigContext';
 import { pipelinesAPI, contractorsAPI } from '../services/api';
 import {
-  Database, Activity, AlertTriangle, CheckCircle, XCircle, Clock,
+  Database, Activity, AlertTriangle, AlertCircle, CheckCircle, XCircle, Clock,
   Play, RefreshCw, Settings, Zap, Terminal, Server, Loader2,
   ChevronDown, ChevronUp, Users, ToggleLeft, ToggleRight, Eye, EyeOff,
   Wifi, WifiOff, BarChart3, TrendingUp, Hash
@@ -48,6 +48,33 @@ function relativeTime(dateStr) {
     if (hrs < 24) return `${hrs}h ago`;
     return `${Math.floor(hrs / 24)}d ago`;
   } catch { return '—'; }
+}
+
+// Translate raw provider/SDK error strings into operator-friendly copy.
+// Returns { friendly, isRateLimit, raw } so callers can choose to surface
+// just the friendly text or both. Keep the raw error in a tooltip for
+// debug — but never render it inline as the primary message.
+function formatPipelineError(rawError) {
+  const raw = typeof rawError === 'string' ? rawError : (rawError ? String(rawError) : '');
+  if (!raw) return { friendly: '', isRateLimit: false, raw: '' };
+  const r = raw.toLowerCase();
+  const isRateLimit =
+    r.includes('429') ||
+    r.includes('rate_limit_exceeded') ||
+    r.includes('rate limit') ||
+    r.includes('resource_exhausted') ||
+    r.includes('quota exceeded') ||
+    r.includes('readrequestsperminute');
+  if (isRateLimit) {
+    return {
+      friendly: 'API rate limit reached. Retrying in 5 minutes…',
+      isRateLimit: true,
+      raw,
+    };
+  }
+  // Non-rate-limit failures: trim to a single short line.
+  const firstLine = raw.split('\n')[0].slice(0, 220);
+  return { friendly: firstLine, isRateLimit: false, raw };
 }
 
 function StatusBadge({ status, size = 'sm' }) {
@@ -572,10 +599,26 @@ const PipelinesPage = () => {
                               {pipe.duration_seconds != null && (
                                 <span>Duration: <b className={textPrimary}>{pipe.duration_seconds?.toFixed(1)}s</b></span>
                               )}
-                              {pipe.error && (
-                                <span className="text-red-400">Error: {pipe.error}</span>
-                              )}
                             </div>
+                            {pipe.error && (() => {
+                              const fmt = formatPipelineError(pipe.error);
+                              return (
+                                <div
+                                  className="mt-2 px-3 py-2 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-400 text-xs flex items-start gap-2"
+                                  title={fmt.raw}
+                                >
+                                  <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
+                                  <span className="flex-1">
+                                    {fmt.friendly}
+                                    {pipe.last_success && (
+                                      <span className="ml-1 opacity-75">
+                                        Showing data from last successful sync ({relativeTime(pipe.last_success)}).
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </div>
 
                           {/* Frequency picker — persists to backend on change */}
@@ -693,7 +736,7 @@ const PipelinesPage = () => {
                                 ? <><Loader2 size={12} className="animate-spin" /> {result.message || 'Running in background...'}</>
                                 : result.success
                                   ? <><CheckCircle size={12} /> Done — {(result.records_loaded ?? 0).toLocaleString()} records in {(result.duration_seconds ?? 0).toFixed(1)}s</>
-                                  : <><XCircle size={12} /> {result.error || 'Run failed'}</>}
+                                  : <><XCircle size={12} /> <span title={result.error || ''}>{formatPipelineError(result.error).friendly || 'Run failed'}</span></>}
                               <button onClick={() => setRunResults((p) => ({ ...p, [name]: null }))} className="ml-auto opacity-50 hover:opacity-100">✕</button>
                             </motion.div>
                           )}
@@ -725,7 +768,7 @@ const PipelinesPage = () => {
                                       <div className="flex items-center gap-3">
                                         <span className={textSec}>{run.records_loaded?.toLocaleString() ?? '—'} records</span>
                                         <span className={textSec}>{run.duration_seconds ? `${run.duration_seconds?.toFixed(1)}s` : '—'}</span>
-                                        {run.error && <span className="text-red-400 truncate max-w-[200px]">{run.error}</span>}
+                                        {run.error && <span className="text-red-400 truncate max-w-[200px]" title={run.error}>{formatPipelineError(run.error).friendly}</span>}
                                       </div>
                                     </div>
                                   ))}

@@ -226,7 +226,7 @@ const IBOSSDashboard = () => {
 
         {/* ── Contractor aggregate charts — moved from Breakdown page ── */}
         {breakdown?.contractors?.length > 0 && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
               className={`rounded-xl p-6 ${cardBg}`}>
               <div className="flex items-center gap-2 mb-4">
@@ -263,6 +263,7 @@ const IBOSSDashboard = () => {
               <SortableBarChart
                 data={breakdown.contractors.filter(c => c.spend > 50)}
                 nameKey="name"
+                height={460}
                 metrics={[
                   { key: 'spend',   label: 'Ad Spend', color: '#10B981', format: 'currency' },
                   { key: 'leads',   label: 'Leads',    color: '#8B5CF6', format: 'number' },
