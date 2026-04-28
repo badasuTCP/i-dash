@@ -5447,6 +5447,57 @@ async def get_contractor_revenue(
 
 
 @router.get(
+    "/sheets/service-account",
+    summary="Get the Google Sheets service-account email (admin only)",
+)
+async def get_sheets_service_account(
+    current_user: User = Depends(get_current_user),
+    _: None = Depends(role_required(["admin"])),
+) -> dict:
+    """Returns just the client_email field from the configured Sheets
+    service-account credentials so admins can grant the SA Viewer access
+    to new sheets (e.g. the Customer Lead Tracking Sheet for Pillar 1)
+    without needing to open Railway env vars and parse JSON manually.
+
+    Only the email is returned — never the private_key or any other
+    secret material. The email itself is non-sensitive (it's the
+    address you grant access to in Google's share dialog).
+    """
+    cred_value = (settings.GOOGLE_SHEETS_CREDENTIALS_FILE or "").strip()
+    if not cred_value:
+        return {
+            "configured": False,
+            "client_email": None,
+            "leads_sheet_configured": bool((settings.SHEET_ID_LEADS or "").strip()),
+            "hint": "GOOGLE_SHEETS_CREDENTIALS_FILE is empty. Set it on Railway first.",
+        }
+    import json as _json
+    try:
+        if cred_value.startswith("{"):
+            payload = _json.loads(cred_value)
+        else:
+            with open(cred_value, "r") as fh:
+                payload = _json.load(fh)
+        email = payload.get("client_email")
+    except Exception as exc:
+        return {
+            "configured": True,
+            "client_email": None,
+            "error": f"Could not parse credentials JSON: {type(exc).__name__}",
+        }
+    return {
+        "configured": True,
+        "client_email": email,
+        "leads_sheet_configured": bool((settings.SHEET_ID_LEADS or "").strip()),
+        "hint": (
+            "Share the Customer Lead Tracking Sheet with this email "
+            "as Viewer, then set SHEET_ID_LEADS in Railway and run "
+            "the google_sheets pipeline."
+        ),
+    }
+
+
+@router.get(
     "/debug/qb-revenue",
     summary="Debug: show all qb_revenue:: GoogleSheetMetric rows (admin only)",
 )
