@@ -614,11 +614,11 @@ const ExecutiveSummary = () => {
           <ScoreCard label="Total QB Revenue"
             value={summary?.qb_revenue?.grand_total || contractorRev?.totalRevenue || 0}
             color="emerald" format="currency" />
-          <ScoreCard label="Active I-BOS Contractors"
+          <ScoreCard label="Active I-BOS Contractors Revenue"
             value={summary?.qb_revenue?.active_total || 0}
             change={summary?.qb_revenue?.active_pct}
             color="blue" format="currency" />
-          <ScoreCard label="In-Active I-BOS Contractors"
+          <ScoreCard label="In-Active I-BOS Contractors Revenue"
             value={summary?.qb_revenue?.inactive_total || 0}
             color="amber" format="currency"
             sub={summary?.qb_revenue?.inactive_count ? `${summary.qb_revenue.inactive_count} legacy accounts` : undefined} />
