@@ -623,7 +623,7 @@ const ExecutiveSummary = () => {
             color="amber" format="number"
             sub={summary?.qb_revenue?.inactive_total ? `$${Math.round((summary.qb_revenue.inactive_total || 0) / 1000).toLocaleString()}K legacy revenue` : undefined} />
           <ScoreCard label="Total QB Customers"
-            value={(summary?.qb_revenue?.active_count || 0) + (summary?.qb_revenue?.inactive_count || 0)}
+            value={(summary?.qb_revenue?.active_count || 0) + (summary?.qb_revenue?.inactive_count || 0) + (summary?.qb_revenue?.retail_count || 0)}
             color="violet" format="number" />
         </motion.div>
 

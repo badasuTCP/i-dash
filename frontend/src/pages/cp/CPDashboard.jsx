@@ -117,7 +117,7 @@ const CPDashboard = () => {
             <ScoreCard label="Total QB Revenue" value={revenueData.grand_total || 0} change={0} color="emerald" format="currency" sparkData={[]} />
             <ScoreCard label="Active I-BOS Contractors" value={revenueData.active_total || 0} change={revenueData.active_pct} color="blue" format="currency" sparkData={[]} />
             <ScoreCard label="In-Active I-BOS Contractors" value={revenueData.inactive_count || 0} change={0} color="amber" format="number" sparkData={[]} />
-            <ScoreCard label="Total QB Customers" value={(revenueData.active_count || 0) + (revenueData.inactive_count || 0)} change={0} color="violet" format="number" sparkData={[]} />
+            <ScoreCard label="Total QB Customers" value={(revenueData.active_count || 0) + (revenueData.inactive_count || 0) + (revenueData.retail_count || 0)} change={0} color="violet" format="number" sparkData={[]} />
           </div>
         )}
 

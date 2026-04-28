@@ -4018,11 +4018,48 @@ async def get_all_contractors_revenue(
         "schmidt custom flooring": "scf concrete promo",
     }
 
+    # Industry keywords that strongly signal a CONTRACTOR / COMPANY name
+    # (vs a personal retail customer). Substring match, case-insensitive.
+    # Picked to cover the active I-BOS contractor naming patterns plus the
+    # most common dormant-contractor variants we've seen in the QB sheet.
+    _CONTRACTOR_KEYWORDS = (
+        "llc", "inc", "co.", "corp", "ltd", "company",
+        "concrete", "coating", "flooring", "floor", "construction",
+        "decor", "solutions", "services", "pool", "epoxy", "surface",
+        "stone", "custom", "warriors", "design", "build", "remodel",
+        "garage", "polishing", "restoration", "industries",
+    )
+
+    def _looks_like_company(raw: str) -> bool:
+        """True if the name looks like a contractor company, not a retail
+        customer. Used to separate dormant contractors from random one-off
+        QB customers (Mary Smith bought a 5-gal kit) so the "In-Active
+        I-BOS Contractors" headcount on the exec dashboard reflects ONLY
+        ex-contractors, not the whole retail backlog.
+        """
+        if not raw:
+            return False
+        s = raw.strip().lower()
+        # Comma-separated personal-name format: "Smith, John" → retail.
+        # Bail unless the part after the comma looks corporate.
+        if "," in s:
+            after = s.split(",", 1)[1].strip()
+            if not any(kw in after for kw in _CONTRACTOR_KEYWORDS):
+                return False
+        # Industry keyword match anywhere → company.
+        return any(kw in s for kw in _CONTRACTOR_KEYWORDS)
+
     def _classify(qb_name: str) -> tuple[str, Optional[str], Optional[str]]:
-        """Return (kind, matched_contractor_id, display_name). kind=active|inactive."""
+        """Return (kind, matched_contractor_id, display_name).
+        kind = 'active' | 'inactive_contractor' | 'retail'.
+        - active: matches an entry in the contractors table
+        - inactive_contractor: looks like a company but isn't currently active
+        - retail: personal-name / one-off QB customer (excluded from
+          the contractor headcount on the dashboard).
+        """
         raw = (qb_name or "").strip()
         if not raw:
-            return "inactive", None, raw
+            return "retail", None, raw
         n = _nrm(raw)
         # Exact or substring match against active contractors
         if n in active_name_map:
@@ -4040,9 +4077,10 @@ async def get_all_contractors_revenue(
             if alias_norm in active_name_map:
                 cid = active_name_map[alias_norm]
                 return "active", cid, active_display_names[cid]
-        # Heuristic: if the name contains a comma (LastName, FirstName), it's a personal name = inactive
-        # If it looks like a company (has words like "concrete", "coatings", "flooring", "inc", "llc"), it's still inactive if not matched
-        return "inactive", None, raw.title()
+        # Not active — split company-style names from personal/retail.
+        if _looks_like_company(raw):
+            return "inactive_contractor", None, raw.title()
+        return "retail", None, raw.title()
 
     # Skip aggregate/summary rows that aren't real contractors
     def _is_aggregate_row(name: str) -> bool:
@@ -4060,10 +4098,16 @@ async def get_all_contractors_revenue(
         # (not if the name happens to contain the word, e.g. "Grand Coatings")
         return False
 
-    # Aggregate: for each classified entry, accumulate revenue. Merge QB entries
-    # that map to the same active contractor (e.g. multiple rows for Tailored).
+    # Aggregate: for each classified entry, accumulate revenue. Merge QB
+    # entries that map to the same active contractor (e.g. multiple rows
+    # for Tailored). Three buckets now: active contractors, dormant
+    # contractor companies, and retail/personal customers. The frontend's
+    # "In-Active I-BOS Contractors" tile reads `inactive_count` which is
+    # contractors only — retail customers are kept on `retail_count` so
+    # the grand total still reconciles.
     active_agg: Dict[str, Dict[str, Any]] = {}
     inactive_agg: Dict[str, Dict[str, Any]] = {}
+    retail_agg: Dict[str, Dict[str, Any]] = {}
     for qb_name, rev in qb_rows:
         rev_f = float(rev or 0)
         if rev_f <= 0:
@@ -4071,7 +4115,12 @@ async def get_all_contractors_revenue(
         if _is_aggregate_row(qb_name):
             continue
         kind, cid, display = _classify(qb_name)
-        bucket = active_agg if kind == "active" else inactive_agg
+        if kind == "active":
+            bucket = active_agg
+        elif kind == "inactive_contractor":
+            bucket = inactive_agg
+        else:
+            bucket = retail_agg
         key = cid or display
         if key in bucket:
             bucket[key]["revenue"] += rev_f
@@ -4085,28 +4134,37 @@ async def get_all_contractors_revenue(
 
     active_list = sorted(active_agg.values(), key=lambda r: r["revenue"], reverse=True)
     inactive_list = sorted(inactive_agg.values(), key=lambda r: r["revenue"], reverse=True)
+    retail_list = sorted(retail_agg.values(), key=lambda r: r["revenue"], reverse=True)
 
     active_total = sum(r["revenue"] for r in active_list)
     inactive_total = sum(r["revenue"] for r in inactive_list)
-    grand_total = active_total + inactive_total
+    retail_total = sum(r["revenue"] for r in retail_list)
+    grand_total = active_total + inactive_total + retail_total
 
     # Round for display
-    for r in active_list + inactive_list:
+    for r in active_list + inactive_list + retail_list:
         r["revenue"] = round(r["revenue"], 2)
 
-    all_list = sorted(active_list + inactive_list, key=lambda r: r["revenue"], reverse=True)
+    all_list = sorted(
+        active_list + inactive_list + retail_list,
+        key=lambda r: r["revenue"], reverse=True,
+    )
 
     return {
         "period": f"{start_date.isoformat()} to {end_date.isoformat()}",
         "grand_total": round(grand_total, 2),
         "active_total": round(active_total, 2),
         "inactive_total": round(inactive_total, 2),
+        "retail_total": round(retail_total, 2),
         "active_count": len(active_list),
         "inactive_count": len(inactive_list),
+        "retail_count": len(retail_list),
         "active_pct": round((active_total / grand_total * 100), 1) if grand_total else 0,
         "inactive_pct": round((inactive_total / grand_total * 100), 1) if grand_total else 0,
+        "retail_pct": round((retail_total / grand_total * 100), 1) if grand_total else 0,
         "top_active": active_list[:top_n],
         "top_inactive": inactive_list[:top_n],
+        "top_retail": retail_list[:top_n],
         "top_all": all_list[:top_n],
     }
 
