@@ -600,7 +600,18 @@ const PipelinesPage = () => {
                                 <span>Duration: <b className={textPrimary}>{pipe.duration_seconds?.toFixed(1)}s</b></span>
                               )}
                             </div>
-                            {pipe.error && (() => {
+                            {(() => {
+                              // Gate the rose error banner on a CURRENT failure.
+                              // Stale errors from a sync that succeeded since
+                              // are hidden — the error string lingers in the
+                              // pipeline_log row even after a recovery sync, so
+                              // we cross-check status + last_run vs last_success.
+                              if (!pipe.error) return null;
+                              const isCurrentlyFailed = pipe.status === 'failed' || pipe.status === 'error';
+                              const lastRunTs = pipe.last_run ? new Date(pipe.last_run).getTime() : 0;
+                              const lastSuccessTs = pipe.last_success ? new Date(pipe.last_success).getTime() : 0;
+                              const hasRecoveredSinceError = lastSuccessTs > 0 && lastSuccessTs >= lastRunTs;
+                              if (!isCurrentlyFailed || hasRecoveredSinceError) return null;
                               const fmt = formatPipelineError(pipe.error);
                               return (
                                 <div
