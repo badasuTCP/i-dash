@@ -107,6 +107,13 @@ class GoogleSheetsPipeline(BasePipeline):
         """
         Extract data from all configured sheets.
 
+        Strategy: ONE batched read per spreadsheet (collapsing N worksheets
+        into a single HTTP request via Sheets `values:batchGet`). Falls back
+        to per-worksheet reads only if batchGet itself fails. With 2
+        spreadsheets × ~20 tabs each, this drops us from 40 reads/run to
+        2 reads/run — comfortably inside the 60/min quota even with
+        back-to-back runs.
+
         Returns:
             {"worksheets": {prefixed_sheet_name: [row_dicts, ...]}}
         """
@@ -123,37 +130,49 @@ class GoogleSheetsPipeline(BasePipeline):
                     else sheet.worksheets()
                 )
 
+                # Filter blacklisted tabs (Meta/Facebook/Coupler — those
+                # come from the direct API pipeline, not the sheets sync).
+                eligible = [
+                    ws for ws in worksheets_to_process
+                    if not any(kw in ws.title.lower() for kw in _BLACKLISTED_TAB_KEYWORDS)
+                ]
+                skipped = len(worksheets_to_process) - len(eligible)
+                if skipped:
+                    self.logger.info(
+                        f"Sheet {sheet_id}: skipping {skipped} blacklisted tab(s)"
+                    )
                 self.logger.debug(
-                    f"Sheet {sheet_id}: processing {len(worksheets_to_process)} worksheets"
+                    f"Sheet {sheet_id}: batching {len(eligible)} worksheets"
                 )
 
-                for ws_index, worksheet in enumerate(worksheets_to_process):
-                    # Skip tabs that contain Meta/Facebook/Coupler data —
-                    # Meta metrics must come from the direct API pipeline only.
-                    title_lower = worksheet.title.lower()
-                    if any(kw in title_lower for kw in _BLACKLISTED_TAB_KEYWORDS):
-                        self.logger.info(
-                            f"Skipping blacklisted tab '{worksheet.title}' "
-                            f"(Meta data sourced from direct API)"
+                # Try the batched path first.
+                batched = await self._batch_extract_worksheets(sheet, eligible)
+                if batched is not None:
+                    for title, rows in batched.items():
+                        prefix = self._classify_sheet(
+                            list(rows[0].keys()) if rows else []
                         )
-                        continue
+                        all_worksheets[f"{prefix}{title}"] = rows
+                        self.logger.debug(
+                            f"Batch-extracted {len(rows)} rows from '{title}'"
+                        )
+                    continue
 
-                    # Throttle to stay under Sheets API's 60 reads/min quota.
-                    # Don't sleep before the first read so the pipeline still
-                    # feels responsive on small accounts.
+                # Fallback: per-worksheet sequential reads with throttling.
+                # Only reached if batchGet failed wholesale.
+                self.logger.warning(
+                    f"Sheet {sheet_id}: batchGet failed; falling back to "
+                    f"per-worksheet reads with {_SHEETS_READ_DELAY_SECONDS}s throttle"
+                )
+                for ws_index, worksheet in enumerate(eligible):
                     if ws_index > 0:
                         await asyncio.sleep(_SHEETS_READ_DELAY_SECONDS)
-
                     try:
                         rows = await self._extract_worksheet_with_retry(worksheet)
                         prefix = self._classify_sheet(
                             list(rows[0].keys()) if rows else []
                         )
-                        key = f"{prefix}{worksheet.title}"
-                        all_worksheets[key] = rows
-                        self.logger.debug(
-                            f"Extracted {len(rows)} rows from '{worksheet.title}' → {key}"
-                        )
+                        all_worksheets[f"{prefix}{worksheet.title}"] = rows
                     except Exception as e:
                         self.logger.warning(
                             f"Error extracting worksheet '{worksheet.title}': {e}"
@@ -168,6 +187,73 @@ class GoogleSheetsPipeline(BasePipeline):
                 raise
 
         return {"worksheets": all_worksheets}
+
+    async def _batch_extract_worksheets(
+        self,
+        sheet,
+        worksheets: List[Worksheet],
+    ) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+        """Fetch every worksheet in `sheet` in a single batchGet HTTP call.
+
+        Returns a `{title: parsed_row_dicts}` map on success, or None if the
+        batchGet itself failed (caller falls back to per-worksheet reads).
+
+        We retry the batchGet once with backoff if it 429s — but a single
+        batchGet rarely trips the quota since it counts as 1 read regardless
+        of how many ranges are inside.
+        """
+        if not worksheets:
+            return {}
+
+        # Quote titles that contain spaces / special chars per A1 spec.
+        def _quote_title(t: str) -> str:
+            if any(c in t for c in " '!:,()") or not t:
+                return "'" + t.replace("'", "''") + "'"
+            return t
+
+        ranges = [f"{_quote_title(ws.title)}!A1:ZZ" for ws in worksheets]
+        title_by_index = [ws.title for ws in worksheets]
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(_SHEETS_RETRY_MAX_ATTEMPTS):
+            try:
+                resp = sheet.values_batch_get(ranges=ranges)
+                value_ranges = resp.get("valueRanges", [])
+                out: Dict[str, List[Dict[str, Any]]] = {}
+                for idx, vr in enumerate(value_ranges):
+                    title = title_by_index[idx]
+                    raw_values = vr.get("values", []) or []
+                    out[title] = self._parse_values_to_rows(title, raw_values)
+                return out
+            except APIError as exc:
+                msg = str(exc)
+                is_rate_limit = (
+                    "429" in msg
+                    or "RATE_LIMIT_EXCEEDED" in msg
+                    or "RESOURCE_EXHAUSTED" in msg
+                    or "Quota exceeded" in msg
+                )
+                if not is_rate_limit:
+                    self.logger.warning(
+                        f"batchGet failed (non-rate-limit), falling back: {exc}"
+                    )
+                    return None
+                last_exc = exc
+                wait = (2 ** attempt) * _SHEETS_READ_DELAY_SECONDS + random.uniform(
+                    0, _SHEETS_READ_DELAY_SECONDS / 2
+                )
+                self.logger.warning(
+                    f"batchGet rate-limited "
+                    f"(attempt {attempt + 1}/{_SHEETS_RETRY_MAX_ATTEMPTS}); "
+                    f"sleeping {wait:.1f}s"
+                )
+                await asyncio.sleep(wait)
+            except Exception as exc:
+                self.logger.warning(f"batchGet failed unexpectedly: {exc}")
+                return None
+        if last_exc is not None:
+            self.logger.warning(f"batchGet exhausted retries: {last_exc}")
+        return None
 
     def _detect_header_row(self, all_values: List[List[str]]) -> int:
         """Find the most likely header row.
@@ -242,58 +328,72 @@ class GoogleSheetsPipeline(BasePipeline):
     async def _extract_worksheet(self, worksheet: Worksheet) -> List[Dict[str, Any]]:
         """Extract all rows from a single worksheet as a list of dicts.
 
-        Auto-detects the header row to handle QuickBooks-style exports
-        with title/section rows above the actual columns.
+        Used by the per-worksheet fallback path. Calls the API directly
+        (one HTTP request per worksheet), then delegates parsing to the
+        shared _parse_values_to_rows helper that batchGet also uses.
         """
         try:
             all_values = worksheet.get_all_values()
-
-            if not all_values or len(all_values) < 2:
-                self.logger.debug(f"Worksheet '{worksheet.title}' is empty")
-                return []
-
-            header_idx = self._detect_header_row(all_values)
-            headers = all_values[header_idx]
-            data_rows = all_values[header_idx + 1:]
-            self.logger.info(
-                "Worksheet '%s': header row detected at index %d, %d data rows",
-                worksheet.title, header_idx, len(data_rows),
-            )
-
-            # De-duplicate empty header columns by giving them placeholder names
-            # so dict(zip(...)) doesn't collapse multiple empty-key columns into one.
-            cleaned_headers = []
-            seen = {}
-            for idx, h in enumerate(headers):
-                key = (h or "").strip()
-                if not key:
-                    key = f"_col_{idx}"
-                if key in seen:
-                    seen[key] += 1
-                    key = f"{key}_{seen[key]}"
-                else:
-                    seen[key] = 1
-                cleaned_headers.append(key)
-
-            data = []
-            for row in data_rows:
-                while len(row) < len(cleaned_headers):
-                    row.append("")
-                row_dict = dict(zip(cleaned_headers, row[: len(cleaned_headers)]))
-                # Keep rows that have at least one non-empty value in a NAMED column
-                # (i.e. ignore rows that only fill placeholder _col_N columns)
-                has_real_data = any(
-                    v and str(v).strip()
-                    for k, v in row_dict.items()
-                    if not k.startswith("_col_")
-                )
-                if has_real_data or any(row_dict.values()):
-                    data.append(row_dict)
-
-            return data
+            return self._parse_values_to_rows(worksheet.title, all_values)
         except Exception as e:
             self.logger.warning(f"Error extracting worksheet data: {e}")
             return []
+
+    def _parse_values_to_rows(
+        self,
+        title: str,
+        all_values: List[List[str]],
+    ) -> List[Dict[str, Any]]:
+        """Parse a 2D values array into a list of row dicts.
+
+        Auto-detects the header row to handle QuickBooks-style exports
+        with title/section rows above the actual columns. Used by both
+        the batched and per-worksheet extract paths so parsing stays
+        consistent regardless of which read strategy fetched the data.
+        """
+        if not all_values or len(all_values) < 2:
+            self.logger.debug(f"Worksheet '{title}' is empty")
+            return []
+
+        header_idx = self._detect_header_row(all_values)
+        headers = all_values[header_idx]
+        data_rows = all_values[header_idx + 1:]
+        self.logger.info(
+            "Worksheet '%s': header row detected at index %d, %d data rows",
+            title, header_idx, len(data_rows),
+        )
+
+        # De-duplicate empty header columns by giving them placeholder names
+        # so dict(zip(...)) doesn't collapse multiple empty-key columns into one.
+        cleaned_headers = []
+        seen: Dict[str, int] = {}
+        for idx, h in enumerate(headers):
+            key = (h or "").strip()
+            if not key:
+                key = f"_col_{idx}"
+            if key in seen:
+                seen[key] += 1
+                key = f"{key}_{seen[key]}"
+            else:
+                seen[key] = 1
+            cleaned_headers.append(key)
+
+        data = []
+        for row in data_rows:
+            while len(row) < len(cleaned_headers):
+                row.append("")
+            row_dict = dict(zip(cleaned_headers, row[: len(cleaned_headers)]))
+            # Keep rows that have at least one non-empty value in a NAMED column
+            # (i.e. ignore rows that only fill placeholder _col_N columns)
+            has_real_data = any(
+                v and str(v).strip()
+                for k, v in row_dict.items()
+                if not k.startswith("_col_")
+            )
+            if has_real_data or any(row_dict.values()):
+                data.append(row_dict)
+
+        return data
 
     # ──────────────────────────────────────────────────────────────────────────
     # Heuristic classification
