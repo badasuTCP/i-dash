@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTheme } from '../context/ThemeContext';
 import { useDashboardConfig } from '../context/DashboardConfigContext';
-import { pipelinesAPI, contractorsAPI } from '../services/api';
+import { pipelinesAPI, contractorsAPI, dashboardAPI } from '../services/api';
 import {
   Database, Activity, AlertTriangle, AlertCircle, CheckCircle, XCircle, Clock,
   Play, RefreshCw, Settings, Zap, Terminal, Server, Loader2,
@@ -124,6 +124,8 @@ const PipelinesPage = () => {
 
   // ── Pipeline state ───────────────────────────────────────────────────────────
   const [pipelines, setPipelines]     = useState([]);
+  const [saInfo, setSaInfo]           = useState(null); // { client_email, leads_sheet_configured }
+  const [saCopied, setSaCopied]       = useState(false);
   const [loadingAll, setLoadingAll]   = useState(true);
   const [loadError, setLoadError]     = useState(null);
   const [runningJobs, setRunningJobs] = useState({}); // { pipelineName: true/false }
@@ -274,6 +276,21 @@ const PipelinesPage = () => {
       if (!silent) setLoadingAll(false);
     }
   }, [isDemoMode]);
+
+  // Fetch the Sheets service-account email + leads-sheet status once
+  // on mount so we can surface a help banner when Pillar 1 (Customer
+  // Lead Tracking sheet) hasn't been activated yet. Failure is silent
+  // (non-admin users get 403; the banner just won't render).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await dashboardAPI.getSheetsServiceAccount();
+        if (!cancelled) setSaInfo(data || null);
+      } catch { /* not admin or backend down — fine, no banner */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Auto-clear stale "Running in background..." banners. When the
   // pipelines list refreshes, any pipeline whose backend status is no
@@ -571,6 +588,53 @@ const PipelinesPage = () => {
                 </div>
               ))}
             </motion.div>
+
+            {/* ── Pillar 1 activation helper banner ──────────────────────
+                Shown only to admins (the SA endpoint 403s for everyone
+                else) and only while the leads sheet hasn't been wired
+                up yet. Surfaces the service-account email so the admin
+                can paste it into the Google share dialog. */}
+            {saInfo?.client_email && !saInfo?.leads_sheet_configured && (
+              <div className={`mb-4 p-4 rounded-xl border ${
+                isDark ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-indigo-50 border-indigo-200'
+              }`}>
+                <div className="flex items-start gap-3">
+                  <Database size={16} className="text-indigo-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-semibold mb-1 ${textPrimary}`}>
+                      Activate Customer Lead Tracking sheet
+                    </p>
+                    <p className={`text-xs mb-3 ${textSec}`}>
+                      Share the lead sheet with this service-account email as <b>Viewer</b>,
+                      then add <code className={`px-1 py-0.5 rounded ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>SHEET_ID_LEADS</code> to Railway and run the Google Sheets pipeline.
+                    </p>
+                    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
+                      isDark ? 'bg-slate-900/60 border-slate-700/40' : 'bg-white border-slate-200'
+                    }`}>
+                      <code className={`text-xs flex-1 truncate font-mono ${textPrimary}`}>
+                        {saInfo.client_email}
+                      </code>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(saInfo.client_email);
+                            setSaCopied(true);
+                            setTimeout(() => setSaCopied(false), 2000);
+                          } catch { /* clipboard blocked */ }
+                        }}
+                        className={`text-xs px-2 py-1 rounded-md font-medium transition-colors ${
+                          saCopied
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : 'bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25'
+                        }`}
+                      >
+                        {saCopied ? 'Copied!' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Load error / demo mode banner */}
             {loadError && !loadingAll && (

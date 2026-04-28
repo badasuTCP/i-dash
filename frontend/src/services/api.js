@@ -163,6 +163,8 @@ export const dashboardAPI = {
     }),
   triggerGA4Discovery: () =>
     apiClient.post('/dashboard/analytics/ga4-discover'),
+  getSheetsServiceAccount: () =>
+    apiClient.get('/dashboard/sheets/service-account'),
   toggleGA4Property: (propertyId, enabled) =>
     apiClient.put(`/dashboard/analytics/ga4-properties/${propertyId}/toggle`, null, {
       params: { enabled },
