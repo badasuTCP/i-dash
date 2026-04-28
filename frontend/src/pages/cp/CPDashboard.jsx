@@ -121,20 +121,91 @@ const CPDashboard = () => {
           </div>
         )}
 
-        {/* ── Top Active Contractors by Revenue (active-only, no inactive
-             breakdown — execs want active performance, not legacy detail). */}
-        {revenueData?.top_active?.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}
+        {/* ── QB Revenue Split donut + Top Active Contractors ──
+             Side-by-side. Donut shows Active vs In-Active vs Retail
+             share of total QB revenue (full corporate picture).
+             Bar chart ranks active contractors so execs see who's
+             carrying the contractor channel. */}
+        {revenueData && (revenueData.grand_total || 0) > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            {/* Revenue split donut */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.06 }}
+              className={`rounded-xl p-6 ${cardBg}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <DollarSign size={16} className="text-emerald-400" />
+                <h3 className={`text-base font-semibold ${textPri}`}>QB Revenue Split</h3>
+              </div>
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: 'Active I-BOS', value: revenueData.active_total || 0, color: '#3B82F6' },
+                      { name: 'In-Active I-BOS', value: revenueData.inactive_total || 0, color: '#F59E0B' },
+                      { name: 'Retail / Other', value: revenueData.retail_total || 0, color: '#94A3B8' },
+                    ].filter((s) => s.value > 0)}
+                    cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value"
+                    animationDuration={500}
+                  >
+                    {[
+                      { color: '#3B82F6' },
+                      { color: '#F59E0B' },
+                      { color: '#94A3B8' },
+                    ].map((s, i) => <Cell key={i} fill={s.color} />)}
+                  </Pie>
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="space-y-1.5 mt-2">
+                {[
+                  { label: 'Active I-BOS', value: revenueData.active_total || 0, pct: revenueData.active_pct, color: '#3B82F6' },
+                  { label: 'In-Active I-BOS', value: revenueData.inactive_total || 0, pct: revenueData.inactive_pct, color: '#F59E0B' },
+                  { label: 'Retail / Other', value: revenueData.retail_total || 0, pct: revenueData.retail_pct, color: '#94A3B8' },
+                ].map((s, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
+                      <span className={textSec}>{s.label}</span>
+                    </div>
+                    <span className={`font-medium ${textPri}`}>${Math.round(s.value / 1000).toLocaleString()}K · {s.pct}%</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+
+            {/* Top Active Contractors */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}
+              className={`lg:col-span-2 rounded-xl p-6 ${cardBg}`}>
+              <div className="flex items-center gap-2 mb-4">
+                <HardHat size={16} className="text-blue-400" />
+                <h3 className={`text-base font-semibold ${textPri}`}>Top Active Contractors by Revenue</h3>
+                <span className={`ml-auto text-xs ${textSec}`}>{revenueData.active_count} active total</span>
+              </div>
+              {revenueData?.top_active?.length > 0 ? (
+                <SortableBarChart
+                  data={revenueData.top_active}
+                  nameKey="name"
+                  metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#3B82F6', format: 'currency' }]}
+                />
+              ) : (
+                <p className={`text-sm ${textSec} text-center py-12`}>No active contractor revenue in this period</p>
+              )}
+            </motion.div>
+          </div>
+        )}
+
+        {/* ── Top In-Active Contractors (legacy/dormant accounts, ranked) ── */}
+        {revenueData?.top_inactive?.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
             className={`rounded-xl p-6 mb-8 ${cardBg}`}>
             <div className="flex items-center gap-2 mb-4">
-              <HardHat size={16} className="text-blue-400" />
-              <h3 className={`text-base font-semibold ${textPri}`}>Top Active Contractors by Revenue</h3>
-              <span className={`ml-auto text-xs ${textSec}`}>{revenueData.active_count} active total</span>
+              <TrendingUp size={16} className="text-amber-400" />
+              <h3 className={`text-base font-semibold ${textPri}`}>Top In-Active Contractors by Revenue</h3>
+              <span className={`ml-auto text-xs ${textSec}`}>{revenueData.inactive_count} dormant total</span>
             </div>
             <SortableBarChart
-              data={revenueData.top_active}
+              data={revenueData.top_inactive}
               nameKey="name"
-              metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#3B82F6', format: 'currency' }]}
+              metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#F59E0B', format: 'currency' }]}
             />
           </motion.div>
         )}

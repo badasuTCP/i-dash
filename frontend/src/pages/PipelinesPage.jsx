@@ -589,6 +589,39 @@ const PipelinesPage = () => {
               ))}
             </motion.div>
 
+            {/* ── Sheet health diagnostic ───────────────────────────────
+                Always shown to admins. Reveals row counts per sheet
+                bucket so the operator can verify qb_revenue / leads /
+                exec are actually populated. If a bucket's count is 0
+                the dashboard will show $0 — clear signal to re-run the
+                Sheets pipeline. */}
+            {saInfo?.sheet_health && (
+              <div className={`mb-4 p-3 rounded-xl border text-xs ${
+                isDark ? 'bg-slate-900/40 border-slate-700/40' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <div className={`font-semibold mb-2 ${textPrimary}`}>Sheet Health (google_sheet_metrics)</div>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                  {Object.entries(saInfo.sheet_health).filter(([k]) => k !== 'error').map(([bucket, info]) => (
+                    <div key={bucket} className={`px-2 py-1.5 rounded-lg ${
+                      info.row_count > 0
+                        ? (isDark ? 'bg-slate-800/60' : 'bg-white border border-slate-200')
+                        : 'bg-rose-500/10 border border-rose-500/30'
+                    }`}>
+                      <div className={`text-[10px] uppercase tracking-wider ${textSec}`}>{bucket}</div>
+                      <div className={`text-sm font-bold ${info.row_count > 0 ? textPrimary : 'text-rose-400'}`}>
+                        {info.row_count.toLocaleString()} rows
+                      </div>
+                      {info.row_count > 0 && (
+                        <div className={`text-[10px] ${textSec}`}>
+                          {info.min_date} → {info.max_date}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* ── Pillar 1 activation helper banner ──────────────────────
                 Shown only to admins (the SA endpoint 403s for everyone
                 else) and only while the leads sheet hasn't been wired
