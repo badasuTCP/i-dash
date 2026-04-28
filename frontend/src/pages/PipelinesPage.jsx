@@ -612,9 +612,18 @@ const PipelinesPage = () => {
                         {info.row_count.toLocaleString()} rows
                       </div>
                       {info.row_count > 0 && (
-                        <div className={`text-[10px] ${textSec}`}>
-                          {info.min_date} → {info.max_date}
-                        </div>
+                        <>
+                          <div className={`text-[10px] ${textSec}`}>
+                            {info.min_date} → {info.max_date}
+                          </div>
+                          {info.total_value != null && (
+                            <div className={`text-[10px] mt-0.5 font-semibold ${
+                              info.total_value > 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}>
+                              Σ ${Math.round(info.total_value).toLocaleString()}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   ))}
