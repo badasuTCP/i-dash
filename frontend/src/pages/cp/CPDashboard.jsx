@@ -4,13 +4,14 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
 } from 'recharts';
-import { CheckCircle2, AlertCircle, TrendingUp, Users, Globe, DollarSign, ShoppingBag } from 'lucide-react';
+import { CheckCircle2, AlertCircle, TrendingUp, Users, Globe, DollarSign, ShoppingBag, HardHat } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useDashboardConfig } from '../../context/DashboardConfigContext';
 import ScoreCard from '../../components/scorecards/ScoreCard';
 import PageInsight from '../../components/common/PageInsight';
+import SortableBarChart from '../../components/common/SortableBarChart';
 import useRepExclusions from '../../hooks/useRepExclusions';
 
 const CPDashboard = () => {
@@ -24,6 +25,7 @@ const CPDashboard = () => {
   const showAds     = isPipelineVisible('metaAds') || isPipelineVisible('googleAds');
   const [data, setData] = useState(null);
   const [shopifyDetail, setShopifyDetail] = useState(null);
+  const [revenueData, setRevenueData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const ytdStart = `${new Date().getFullYear()}-01-01`;
@@ -34,13 +36,17 @@ const CPDashboard = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [summaryRes, shopifyRes] = await Promise.all([
+      // QB contractor revenue (formerly on I-BOS) lives here on CP now —
+      // CP is the corporate revenue centre (Retail + all Contractor QB).
+      const [summaryRes, shopifyRes, revRes] = await Promise.all([
         dashboardAPI.getBrandSummary('cp', from, to),
         dashboardAPI.getShopifyStore(from, to).catch(() => null),
+        dashboardAPI.getAllContractorsRevenue(from, to, 10).catch(() => ({ data: null })),
       ]);
       setData(summaryRes?.data || null);
       setShopifyDetail(shopifyRes?.data || null);
-    } catch { setData(null); setShopifyDetail(null); }
+      setRevenueData(revRes?.data || null);
+    } catch { setData(null); setShopifyDetail(null); setRevenueData(null); }
     finally { setLoading(false); }
   }, [from, to]);
 
@@ -102,6 +108,36 @@ const CPDashboard = () => {
             <ScoreCard key={i} {...kpi} change={0} sparkData={[]} />
           ))}
         </div>
+
+        {/* ── QB Contractor Revenue split (corporate revenue centre) ──
+             Active = full performance card. In-Active = headcount-only
+             scorecard per the exec directive (no detail breakdown). */}
+        {revenueData && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <ScoreCard label="Total QB Revenue" value={revenueData.grand_total || 0} change={0} color="emerald" format="currency" sparkData={[]} />
+            <ScoreCard label="Active I-BOS Contractors" value={revenueData.active_total || 0} change={revenueData.active_pct} color="blue" format="currency" sparkData={[]} />
+            <ScoreCard label="In-Active I-BOS Contractors" value={revenueData.inactive_count || 0} change={0} color="amber" format="number" sparkData={[]} />
+            <ScoreCard label="Total QB Customers" value={(revenueData.active_count || 0) + (revenueData.inactive_count || 0)} change={0} color="violet" format="number" sparkData={[]} />
+          </div>
+        )}
+
+        {/* ── Top Active Contractors by Revenue (active-only, no inactive
+             breakdown — execs want active performance, not legacy detail). */}
+        {revenueData?.top_active?.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}
+            className={`rounded-xl p-6 mb-8 ${cardBg}`}>
+            <div className="flex items-center gap-2 mb-4">
+              <HardHat size={16} className="text-blue-400" />
+              <h3 className={`text-base font-semibold ${textPri}`}>Top Active Contractors by Revenue</h3>
+              <span className={`ml-auto text-xs ${textSec}`}>{revenueData.active_count} active total</span>
+            </div>
+            <SortableBarChart
+              data={revenueData.top_active}
+              nameKey="name"
+              metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#3B82F6', format: 'currency' }]}
+            />
+          </motion.div>
+        )}
 
         {/* Row 2: Traffic Trend + Top Reps */}
         {(showGA4 || showHubspot) && (

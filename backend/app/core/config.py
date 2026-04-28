@@ -198,6 +198,14 @@ class Settings(BaseSettings):
         default="",
         description="Google Sheets ID for Sheet B (retail/contractor heuristic pipeline)",
     )
+    # Source-of-truth leads sheet (Customer Lead Tracking). Tabs ingested
+    # from this spreadsheet are stored under the 'leads::' prefix and used
+    # as the canonical Lead count for CPL across the dashboard. Spend keeps
+    # coming from Meta + Google Ads; only the Lead numerator switches.
+    SHEET_ID_LEADS: str = Field(
+        default="",
+        description="Google Sheets ID for the Customer Lead Tracking sheet (vetted leads, source of truth)",
+    )
 
     # WooCommerce (Sani-Tred retail)
     WC_STORE_URL: str = Field(

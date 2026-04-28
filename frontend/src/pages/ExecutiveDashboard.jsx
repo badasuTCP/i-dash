@@ -614,14 +614,14 @@ const ExecutiveSummary = () => {
           <ScoreCard label="Total QB Revenue"
             value={summary?.qb_revenue?.grand_total || contractorRev?.totalRevenue || 0}
             color="emerald" format="currency" />
-          <ScoreCard label="Active Contractors Revenue"
+          <ScoreCard label="Active I-BOS Contractors"
             value={summary?.qb_revenue?.active_total || 0}
             change={summary?.qb_revenue?.active_pct}
             color="blue" format="currency" />
-          <ScoreCard label="In-Active Contractors Revenue"
-            value={summary?.qb_revenue?.inactive_total || 0}
-            change={summary?.qb_revenue?.inactive_pct}
-            color="amber" format="currency" />
+          <ScoreCard label="In-Active I-BOS Contractors"
+            value={summary?.qb_revenue?.inactive_count || 0}
+            color="amber" format="number"
+            sub={summary?.qb_revenue?.inactive_total ? `$${Math.round((summary.qb_revenue.inactive_total || 0) / 1000).toLocaleString()}K legacy revenue` : undefined} />
           <ScoreCard label="Total QB Customers"
             value={(summary?.qb_revenue?.active_count || 0) + (summary?.qb_revenue?.inactive_count || 0)}
             color="violet" format="number" />

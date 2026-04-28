@@ -757,12 +757,7 @@ const IBOSContractors = () => {
             <h1 className={`text-3xl font-bold mb-1 ${textPri}`}>Contractor Breakdown</h1>
             <p className={textSec}>I-BOS Division — {contractors.length} contractors · {data?.period || 'Loading...'}</p>
           </div>
-          <ViewToggle
-            view={view}
-            setView={setView}
-            isDark={isDark}
-            revenueTotal={revenueData?.grand_total || 0}
-          />
+          {/* QB Revenue toggle removed — contractor revenue lives on CP brand. */}
         </motion.div>
 
         <PageInsight insights={insights} />
@@ -770,83 +765,13 @@ const IBOSContractors = () => {
         {/* View transition — smooth cross-fade/slide between Traffic and Revenue */}
         <AnimatePresence mode="wait">
         {/* ─── REVENUE VIEW ─── */}
-        {view === 'revenue' && revenueData && (
-          <motion.div
-            key="revenue"
-            initial={{ opacity: 0, x: 24 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -24 }}
-            transition={{ duration: 0.28, ease: 'easeOut' }}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              <ScoreCard label="Total QB Revenue" value={revenueData.grand_total || 0} change={0} color="emerald" format="currency" sparkData={[]} />
-              <ScoreCard label="Active Contractors Revenue" value={revenueData.active_total || 0} change={revenueData.active_pct} color="blue" format="currency" sparkData={[]} />
-              <ScoreCard label="In-Active Contractors Revenue" value={revenueData.inactive_total || 0} change={revenueData.inactive_pct} color="amber" format="currency" sparkData={[]} />
-              <ScoreCard label="Total QB Customers" value={(revenueData.active_count || 0) + (revenueData.inactive_count || 0)} change={0} color="violet" format="number" sparkData={[]} />
-            </div>
+        {/* Revenue view removed — QB revenue scorecards + Top
+            Active/In-Active charts now live on the CP brand pages
+            (corporate revenue centre). I-BOS focuses purely on
+            managed ad performance from this point on. */}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-              {/* Top Active Contractors */}
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className={`rounded-xl p-6 ${cardBg}`}>
-                <div className="flex items-center gap-2 mb-4">
-                  <Users size={16} className="text-blue-400" />
-                  <h3 className={`text-base font-semibold ${textPri}`}>Top Active Contractors</h3>
-                  <span className={`ml-auto text-xs ${textSec}`}>{revenueData.active_count} total</span>
-                </div>
-                <SortableBarChart
-                  data={revenueData.top_active}
-                  nameKey="name"
-                  metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#3B82F6', format: 'currency' }]}
-                  emptyMessage="No active contractor revenue"
-                />
-              </motion.div>
-
-              {/* Top Inactive Contractors */}
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className={`rounded-xl p-6 ${cardBg}`}>
-                <div className="flex items-center gap-2 mb-4">
-                  <TrendingUp size={16} className="text-amber-400" />
-                  <h3 className={`text-base font-semibold ${textPri}`}>Top In-Active Contractors</h3>
-                  <span className={`ml-auto text-xs ${textSec}`}>{revenueData.inactive_count} total</span>
-                </div>
-                <SortableBarChart
-                  data={revenueData.top_inactive}
-                  nameKey="name"
-                  metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#F59E0B', format: 'currency' }]}
-                  emptyMessage="No inactive contractor revenue"
-                />
-              </motion.div>
-            </div>
-
-            {/* Split banner */}
-            <div className={`mb-8 p-4 rounded-xl ${cardBg}`}>
-              <p className={`text-xs ${textSec} mb-2 uppercase tracking-wide`}>Revenue Split</p>
-              <div className="flex items-center gap-1 h-8 rounded-lg overflow-hidden">
-                <div className="bg-blue-500 h-full flex items-center justify-center text-white text-xs font-bold transition-all" style={{ width: `${revenueData.active_pct || 0}%` }}>
-                  {revenueData.active_pct >= 10 && `Active ${revenueData.active_pct}%`}
-                </div>
-                <div className="bg-amber-500 h-full flex items-center justify-center text-white text-xs font-bold transition-all" style={{ width: `${revenueData.inactive_pct || 0}%` }}>
-                  {revenueData.inactive_pct >= 10 && `In-Active ${revenueData.inactive_pct}%`}
-                </div>
-              </div>
-              <div className="flex justify-between mt-2 text-xs">
-                <span className={textSec}>Active: ${(revenueData.active_total || 0).toLocaleString()}</span>
-                <span className={textSec}>In-Active: ${(revenueData.inactive_total || 0).toLocaleString()}</span>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {view === 'revenue' && !revenueData && (
-          <motion.div
-            key="revenue-loading"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className={`p-8 rounded-xl ${cardBg} text-center ${textSec}`}
-          >
-            Loading QB revenue data...
-          </motion.div>
-        )}
-
-        {view === 'traffic' && (
+        {/* Traffic view is now the only view on this page. */}
+        {(
         <motion.div
           key="traffic"
           initial={{ opacity: 0, x: -24 }}

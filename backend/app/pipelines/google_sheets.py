@@ -67,7 +67,12 @@ class GoogleSheetsPipeline(BasePipeline):
     ) -> None:
         super().__init__(name="google_sheets_pipeline", **kwargs)
 
-        # If no explicit sheet_id, fall back to settings-driven dual sheets
+        # If no explicit sheet_id, fall back to settings-driven sheets:
+        # SHEET_ID_A + SHEET_ID_B (heuristic retail/contractor classifier)
+        # plus SHEET_ID_LEADS (Customer Lead Tracking — vetted leads, source
+        # of truth for the CPL numerator). Tabs from the leads sheet are
+        # always classified as 'leads::' regardless of header content.
+        self._leads_sheet_id = (settings.SHEET_ID_LEADS or "").strip() or None
         if sheet_id:
             self._sheet_ids = [sheet_id]
         else:
@@ -76,6 +81,8 @@ class GoogleSheetsPipeline(BasePipeline):
                 for sid in [settings.SHEET_ID_A, settings.SHEET_ID_B]
                 if sid and sid.strip()
             ]
+            if self._leads_sheet_id:
+                ids.append(self._leads_sheet_id)
             if not ids:
                 raise ValueError(
                     "Provide sheet_id or set SHEET_ID_A / SHEET_ID_B in settings"
@@ -145,16 +152,27 @@ class GoogleSheetsPipeline(BasePipeline):
                     f"Sheet {sheet_id}: batching {len(eligible)} worksheets"
                 )
 
+                # Tabs from the leads-tracking sheet always get classified
+                # as 'leads::' regardless of header content — that sheet IS
+                # the canonical lead source by definition.
+                is_leads_sheet = (
+                    self._leads_sheet_id is not None
+                    and sheet_id == self._leads_sheet_id
+                )
+
+                def _resolve_prefix(rows: List[Dict[str, Any]]) -> str:
+                    if is_leads_sheet:
+                        return "leads::"
+                    return self._classify_sheet(list(rows[0].keys()) if rows else [])
+
                 # Try the batched path first.
                 batched = await self._batch_extract_worksheets(sheet, eligible)
                 if batched is not None:
                     for title, rows in batched.items():
-                        prefix = self._classify_sheet(
-                            list(rows[0].keys()) if rows else []
-                        )
+                        prefix = _resolve_prefix(rows)
                         all_worksheets[f"{prefix}{title}"] = rows
                         self.logger.debug(
-                            f"Batch-extracted {len(rows)} rows from '{title}'"
+                            f"Batch-extracted {len(rows)} rows from '{title}' (prefix={prefix})"
                         )
                     continue
 
@@ -169,9 +187,7 @@ class GoogleSheetsPipeline(BasePipeline):
                         await asyncio.sleep(_SHEETS_READ_DELAY_SECONDS)
                     try:
                         rows = await self._extract_worksheet_with_retry(worksheet)
-                        prefix = self._classify_sheet(
-                            list(rows[0].keys()) if rows else []
-                        )
+                        prefix = _resolve_prefix(rows)
                         all_worksheets[f"{prefix}{worksheet.title}"] = rows
                     except Exception as e:
                         self.logger.warning(
@@ -446,6 +462,28 @@ class GoogleSheetsPipeline(BasePipeline):
                     if not rows:
                         continue
 
+                    # ── Leads sheet: vetted-leads-by-contractor counter ──
+                    # Tabs prefixed leads:: come from the Customer Lead
+                    # Tracking sheet. They're raw lead records (one row per
+                    # lead). We collapse to (date, contractor_name) buckets
+                    # with metric_value = lead count, so downstream CPL
+                    # queries can do SUM(metric_value) GROUP BY metric_name.
+                    if sheet_name.startswith("leads::"):
+                        lead_records = self._transform_leads_rows(sheet_name, rows)
+                        if lead_records:
+                            records.extend(lead_records)
+                            self.logger.info(
+                                "Leads sheet '%s': emitted %d (date,contractor) lead rows",
+                                sheet_name, len(lead_records),
+                            )
+                        else:
+                            self.logger.warning(
+                                "Leads sheet '%s': no contractor column detected — "
+                                "rows skipped. Expected a header like Contractor / "
+                                "Dealer / Account / Company.", sheet_name,
+                            )
+                        continue
+
                     # ── Pivot-table layout detection ──────────────────────
                     # Some tabs (notably TCP MAIN) store metric names down
                     # column A and quarter labels across the top row:
@@ -526,6 +564,76 @@ class GoogleSheetsPipeline(BasePipeline):
     # ──────────────────────────────────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────────────────────────────────
+
+    # Header patterns we'll accept as the contractor identity column on the
+    # Customer Lead Tracking sheet. Substring match, case-insensitive — order
+    # matters (most specific first) so "contractor name" wins over "name".
+    _LEADS_CONTRACTOR_HEADER_PATTERNS = (
+        "contractor", "dealer", "account name", "company", "business",
+        "account", "client",
+    )
+
+    def _detect_leads_contractor_column(
+        self, column_names: List[str]
+    ) -> Optional[str]:
+        """Pick the column on a leads-sheet tab that identifies the contractor."""
+        for pattern in self._LEADS_CONTRACTOR_HEADER_PATTERNS:
+            for col in column_names:
+                if pattern in col.lower():
+                    return col
+        return None
+
+    def _transform_leads_rows(
+        self,
+        sheet_name: str,
+        rows: List[Dict[str, Any]],
+    ) -> List[GoogleSheetMetric]:
+        """Collapse raw lead rows into (date, contractor) lead-count metrics.
+
+        Output: one GoogleSheetMetric per (date, contractor) with
+        metric_value summing the leads for that pair. Dashboards can then
+        do `SUM(metric_value) WHERE sheet_name LIKE 'leads::%'
+        GROUP BY metric_name` to get vetted leads per contractor.
+
+        Date column is auto-detected. Contractor column is auto-detected
+        from header keywords (contractor / dealer / account / company /
+        business). If no contractor column is found, returns [] and the
+        caller logs a warning so the operator knows to rename the column.
+        """
+        if not rows:
+            return []
+
+        headers = list(rows[0].keys())
+        contractor_col = self._detect_leads_contractor_column(headers)
+        if not contractor_col:
+            return []
+        date_col = self._detect_date_column(headers)
+
+        # Aggregate: { (date, contractor_name) -> count }
+        bucket: Dict[tuple, int] = {}
+        today = datetime.now(timezone.utc).date()
+        for row in rows:
+            name = str(row.get(contractor_col, "") or "").strip()
+            if not name:
+                continue
+            metric_date = today
+            if date_col:
+                parsed = self._parse_date(row.get(date_col, ""))
+                if parsed:
+                    metric_date = parsed
+            key = (metric_date, name)
+            bucket[key] = bucket.get(key, 0) + 1
+
+        return [
+            GoogleSheetMetric(
+                sheet_name=sheet_name,
+                date=metric_date,
+                metric_name=name,
+                metric_value=float(count),
+                category="leads",
+            )
+            for (metric_date, name), count in bucket.items()
+        ]
 
     def _detect_date_column(self, column_names: List[str]) -> Optional[str]:
         """Return the first column whose name contains a common date keyword."""

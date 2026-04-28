@@ -97,48 +97,28 @@ const IBOSSDashboard = () => {
         </div>
 
         {/* ── QB Revenue split: Active vs In-Active contractors ─────── */}
-        {revenueData && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <ScoreCard label="Total QB Revenue" value={revenueData.grand_total || 0} change={0} color="emerald" format="currency" sparkData={[]} />
-            <ScoreCard label="Active Contractors Revenue" value={revenueData.active_total || 0} change={revenueData.active_pct} color="blue" format="currency" sparkData={[]} />
-            <ScoreCard label="In-Active Contractors Revenue" value={revenueData.inactive_total || 0} change={revenueData.inactive_pct} color="amber" format="currency" sparkData={[]} />
-            <ScoreCard label="Total QB Customers" value={(revenueData.active_count || 0) + (revenueData.inactive_count || 0)} change={0} color="violet" format="number" sparkData={[]} />
+        {/* QB revenue scorecards moved to CP brand (corporate revenue centre).
+            Keep just a thin reminder banner showing the inactive headcount —
+            execs only need that count on I-BOS. Active performance lives
+            in the marketing/traffic charts further down. */}
+        {revenueData && (revenueData.inactive_count || 0) > 0 && (
+          <div className={`mb-8 p-3 rounded-lg flex items-center gap-3 text-xs ${
+            isDark ? 'bg-slate-800/60 border border-slate-700/40 text-slate-300'
+                   : 'bg-slate-50 border border-slate-200 text-slate-600'
+          }`}>
+            <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-500 font-semibold">
+              {revenueData.inactive_count} in-active
+            </span>
+            <span>Legacy / dormant accounts. Full QB revenue breakdown lives on the <strong>CP</strong> brand page (corporate revenue centre).</span>
           </div>
         )}
 
         {/* ── Top Active Contractors by Revenue (QB) ──────────────── */}
-        {revenueData?.top_active?.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
-            className={`rounded-xl p-6 mb-8 ${cardBg}`}>
-            <div className="flex items-center gap-2 mb-4">
-              <TrendingUp size={16} className="text-blue-400" />
-              <h3 className={`text-base font-semibold ${textPri}`}>Top Active Contractors by Revenue</h3>
-              <span className={`ml-auto text-xs ${textSec}`}>{revenueData.active_count} total</span>
-            </div>
-            <SortableBarChart
-              data={revenueData.top_active}
-              nameKey="name"
-              metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#3B82F6', format: 'currency' }]}
-            />
-          </motion.div>
-        )}
+        {/* Top Active Contractors by Revenue moved to CP brand. */}
 
         {/* ── Top In-Active Contractors (revenue-only, no ads) ────── */}
-        {revenueData?.top_inactive?.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-            className={`rounded-xl p-6 mb-8 ${cardBg}`}>
-            <div className="flex items-center gap-2 mb-4">
-              <TrendingUp size={16} className="text-amber-400" />
-              <h3 className={`text-base font-semibold ${textPri}`}>Top In-Active Contractors by Revenue</h3>
-              <span className={`ml-auto text-xs ${textSec}`}>{revenueData.inactive_count} total</span>
-            </div>
-            <SortableBarChart
-              data={revenueData.top_inactive}
-              nameKey="name"
-              metrics={[{ key: 'revenue', label: 'Revenue (QB)', color: '#F59E0B', format: 'currency' }]}
-            />
-          </motion.div>
-        )}
+        {/* Top In-Active Contractors chart removed entirely — execs only
+            see headcount of inactive on I-BOS, no detail breakdown. */}
 
         {/* Traffic Trend + Marketing Summary */}
         {(showGA4 || showAds || showHubspot) && (

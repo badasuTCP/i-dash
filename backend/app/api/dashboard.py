@@ -119,6 +119,90 @@ def _calculate_change_percent(current: float, previous: float) -> tuple[Optional
     return abs(change), direction
 
 
+def _normalize_contractor_name(s: Optional[str]) -> str:
+    """Aggressive normalization for fuzzy contractor matching.
+
+    Lowercase, drop punctuation/spacing, strip common suffix tokens (LLC,
+    Inc, .com), remove platform-tag prefixes ([META], [GA4]). Used to
+    align lead-tracking sheet rows ("Floor Warriors GA4") with Meta
+    account names ("Floor Warriors") and contractor table entries
+    ("Floor Warriors of Atlanta") under one key.
+    """
+    if not s:
+        return ""
+    out = str(s).lower()
+    for tok in ("[meta]", "[ga4]", "llc", "inc.", "inc", ".com", ".co",
+                " - ga4", "- ga4", " of ", "(", ")"):
+        out = out.replace(tok, " ")
+    return "".join(ch for ch in out if ch.isalnum())
+
+
+async def _get_vetted_leads_map(
+    db: AsyncSession,
+    start_date: date,
+    end_date: date,
+) -> Dict[str, int]:
+    """Return {normalized_contractor_name: vetted_lead_count} for the period.
+
+    Reads the leads:: rows in google_sheet_metrics (populated by the
+    Customer Lead Tracking sheet ingestion). Returns an empty dict when
+    the leads sheet hasn't been configured/shared yet — callers fall
+    back to ad-platform conversion counts in that case.
+
+    Fuzzy match on the normalized name is the caller's responsibility:
+    they should run _normalize_contractor_name() on their contractor's
+    own name and look it up in this map (or substring-scan for partial
+    matches if the exact normalized key isn't present).
+    """
+    try:
+        q = await db.execute(
+            select(
+                GoogleSheetMetric.metric_name,
+                func.sum(GoogleSheetMetric.metric_value),
+            ).where(and_(
+                GoogleSheetMetric.sheet_name.like("leads::%"),
+                GoogleSheetMetric.date >= start_date,
+                GoogleSheetMetric.date <= end_date,
+            )).group_by(GoogleSheetMetric.metric_name)
+        )
+        out: Dict[str, int] = {}
+        for name, total in q.all():
+            key = _normalize_contractor_name(name)
+            if not key:
+                continue
+            out[key] = out.get(key, 0) + int(round(float(total or 0)))
+        return out
+    except Exception as exc:
+        logger.warning(f"vetted-leads lookup failed: {exc}")
+        return {}
+
+
+def _resolve_vetted_leads(
+    contractor_name: str,
+    leads_map: Dict[str, int],
+) -> Optional[int]:
+    """Look up vetted leads for `contractor_name` in `leads_map` with fuzzy
+    fallback. Returns None if no match (so callers can distinguish
+    "zero vetted leads recorded" from "no lookup possible").
+    """
+    if not contractor_name or not leads_map:
+        return None
+    key = _normalize_contractor_name(contractor_name)
+    if not key:
+        return None
+    if key in leads_map:
+        return leads_map[key]
+    # Substring fuzzy fallback — handles "Floor Warriors GA4" vs
+    # "Floor Warriors" and similar variants. Keys must overlap by
+    # at least 5 chars on the shorter side to count as a match.
+    for sheet_key, count in leads_map.items():
+        if len(sheet_key) < 5 or len(key) < 5:
+            continue
+        if sheet_key in key or key in sheet_key:
+            return count
+    return None
+
+
 def _filter_by_department(user: User) -> Optional[List[str]]:
     """
     Get department filter based on user role and department.
@@ -2284,9 +2368,26 @@ async def get_marketing_data(
         except Exception as e:
             logger.warning("Sheets marketing fallback failed: %s", e)
 
+    # ── Vetted-leads override (Customer Lead Tracking sheet) ─────────
+    # Source-of-truth lead count comes from the leads:: rows. Spend stays
+    # as Meta+Google sum. CPL is recomputed against the vetted total when
+    # any leads row exists for the period; otherwise we keep the
+    # ad-platform conversions.
+    leads_source = "ad_platform_conversions"
+    try:
+        vetted_map = await _get_vetted_leads_map(db, start_date, end_date)
+        if vetted_map:
+            vetted_total = sum(vetted_map.values())
+            if vetted_total > 0:
+                total_leads = vetted_total
+                cpl = (total_spend / vetted_total) if total_spend > 0 else 0
+                leads_source = "vetted_sheet"
+    except Exception as exc:
+        logger.warning(f"vetted-leads override skipped (marketing): {exc}")
+
     logger.info(
-        "Marketing data for %s: spend=$%.2f, impressions=%d, leads=%d, hasLive=True",
-        division, total_spend, total_impressions, total_leads,
+        "Marketing data for %s: spend=$%.2f, impressions=%d, leads=%d, hasLive=True, leads_source=%s",
+        division, total_spend, total_impressions, total_leads, leads_source,
     )
 
     return {
@@ -2300,6 +2401,7 @@ async def get_marketing_data(
             "totalLeads": total_leads,
             "cpl": round(cpl, 2),
         },
+        "leads_source": leads_source,
         "platforms": platforms,
         "spendByPeriod": spend_by_period,
     }
@@ -2955,6 +3057,33 @@ async def get_contractor_breakdown(
                 if imps > 0:
                     c["frequency"] = round(imps / live, 2)
 
+    # ── Vetted-leads override (Customer Lead Tracking sheet) ─────────
+    # Spend stays as Meta+Google sum, but lead counts come ONLY from the
+    # leads:: rows. CPL is recomputed accordingly. If the leads sheet
+    # isn't populated for this period (or hasn't been shared with the
+    # service account), the map is empty and we fall back to the
+    # ad-platform conversion counts already in c["leads"].
+    leads_map = await _get_vetted_leads_map(db, start_date, end_date)
+    if leads_map:
+        vetted_total = 0
+        matched = 0
+        for c in contractors:
+            v = _resolve_vetted_leads(c.get("name") or "", leads_map)
+            if v is None:
+                continue
+            c["leads"] = int(v)
+            c["leads_source"] = "vetted_sheet"
+            spend = float(c.get("spend") or 0)
+            c["cpl"] = round(spend / max(int(v), 1), 2) if int(v) > 0 else 0
+            vetted_total += int(v)
+            matched += 1
+        if matched:
+            total_leads = vetted_total
+            logger.info(
+                f"Vetted leads override applied: {matched} contractor(s), "
+                f"{vetted_total} total leads"
+            )
+
     return {
         "period": f"{start_date} to {end_date}",
         "hasLiveData": len(contractors) > 0,
@@ -2964,6 +3093,7 @@ async def get_contractor_breakdown(
         "total_spend": round(total_spend, 2),
         "total_leads": total_leads,
         "total_revenue": round(total_revenue, 2),
+        "leads_source": "vetted_sheet" if leads_map else "ad_platform_conversions",
         "contractors": contractors,
     }
 
