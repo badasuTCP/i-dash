@@ -809,7 +809,12 @@ class GoogleSheetsPipeline(BasePipeline):
         bare = sheet_name.split("::", 1)[1] if "::" in sheet_name else sheet_name
         bare_lower = bare.lower()
         # QB contractor revenue sheets get a special prefix for easy querying.
-        if "qb" in bare_lower or "contractor_revenue" in bare_lower or "contractor revenue" in bare_lower:
+        is_qb = (
+            "qb" in bare_lower
+            or "contractor_revenue" in bare_lower
+            or "contractor revenue" in bare_lower
+        )
+        if is_qb:
             tagged = f"qb_revenue::{bare}"
         else:
             tagged = f"exec::{bare}"
@@ -855,19 +860,40 @@ class GoogleSheetsPipeline(BasePipeline):
 
         out: List[GoogleSheetMetric] = []
         for row in rows:
-            # Prefer the LAST label column whose value is non-empty AND non-numeric
-            # (contractor names can never be pure numbers). This protects against
-            # trailing total columns that slipped past the header filter.
+            # QB Contractor Revenue rule (per the sheet's column structure):
+            #   first label column  = personal/owner name (always populated)
+            #   second label column = company name (populated ONLY when the
+            #                         entry is a currently-active I-BOS contractor)
+            # Active   ⇔ second label column is populated → metric_name = company name
+            # Inactive ⇔ second label column is empty     → metric_name = first label value
+            # The active/inactive flag is encoded as a sheet_name suffix so the
+            # dashboard endpoint can sum each bucket with one indexed query.
+            # Non-QB pivots keep the legacy "last non-empty non-numeric" rule.
+            row_tagged = tagged
             metric_label = ""
-            for lc in reversed(label_cols):
-                val = (row.get(lc) or "").strip()
-                if val and not _looks_numeric(val):
-                    metric_label = val
-                    break
-            if not metric_label:
-                first_val = (row.get(first_col) or "").strip()
-                if first_val and not _looks_numeric(first_val):
+            if is_qb and len(label_cols) >= 2:
+                first_lc, second_lc = label_cols[0], label_cols[1]
+                second_val = (row.get(second_lc) or "").strip()
+                first_val = (row.get(first_lc) or "").strip()
+                if second_val and not _looks_numeric(second_val):
+                    metric_label = second_val
+                    row_tagged = f"{tagged}::active"
+                elif first_val and not _looks_numeric(first_val):
                     metric_label = first_val
+                    row_tagged = f"{tagged}::inactive"
+            else:
+                # Non-QB pivots: prefer the LAST label column whose value is
+                # non-empty AND non-numeric — protects against trailing total
+                # columns that slipped past the header filter.
+                for lc in reversed(label_cols):
+                    val = (row.get(lc) or "").strip()
+                    if val and not _looks_numeric(val):
+                        metric_label = val
+                        break
+                if not metric_label:
+                    first_val = (row.get(first_col) or "").strip()
+                    if first_val and not _looks_numeric(first_val):
+                        metric_label = first_val
             if not metric_label:
                 continue
             for header, period_date in period_cols:
@@ -899,7 +925,7 @@ class GoogleSheetsPipeline(BasePipeline):
                     continue
                 out.append(
                     GoogleSheetMetric(
-                        sheet_name=tagged,
+                        sheet_name=row_tagged,
                         date=period_date,
                         metric_name=metric_label,
                         metric_value=value,
