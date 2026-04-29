@@ -139,6 +139,87 @@ const CPDashboard = () => {
           </motion.div>
         )}
 
+        {/* ── Active I-BOS Revenue Share (donut) + Concentration Stats ──
+             Same data as above (revenueData.top_active + active_total +
+             active_count) — visualizes share/concentration. No new fetch. */}
+        {revenueData?.top_active?.length > 0 && (revenueData.active_total || 0) > 0 && (() => {
+          const active = revenueData.top_active || [];
+          const totalActive = revenueData.active_total || 0;
+          const totalCount = revenueData.active_count || active.length;
+          const top5 = active.slice(0, 5);
+          const top5Sum = top5.reduce((a, r) => a + (r.revenue || 0), 0);
+          const others = Math.max(totalActive - top5Sum, 0);
+          const donutData = [
+            ...top5.map(r => ({ name: r.name, revenue: r.revenue || 0 })),
+            ...(others > 0 ? [{ name: `Other Active (${Math.max(totalCount - top5.length, 0)})`, revenue: others }] : []),
+          ];
+          const top1 = active[0] || { name: '—', revenue: 0 };
+          const top1Pct = totalActive > 0 ? Math.round((top1.revenue / totalActive) * 1000) / 10 : 0;
+          const top3Sum = active.slice(0, 3).reduce((a, r) => a + (r.revenue || 0), 0);
+          const top3Pct = totalActive > 0 ? Math.round((top3Sum / totalActive) * 1000) / 10 : 0;
+          const avgPer = totalCount > 0 ? totalActive / totalCount : 0;
+          const fmtUSD0 = (v) => `$${Math.round(v).toLocaleString()}`;
+          return (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+              {/* Donut: revenue share */}
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                className={`rounded-xl p-6 ${cardBg}`}>
+                <div className="flex items-center gap-2 mb-4">
+                  <DollarSign size={16} className="text-emerald-400" />
+                  <h3 className={`text-base font-semibold ${textPri}`}>Active Revenue Share</h3>
+                  <span className={`ml-auto text-xs ${textSec}`}>Top 5 + Others</span>
+                </div>
+                <ResponsiveContainer width="100%" height={240}>
+                  <PieChart>
+                    <Pie data={donutData} dataKey="revenue" nameKey="name" cx="50%" cy="50%"
+                         innerRadius={55} outerRadius={90} paddingAngle={2} animationDuration={500}>
+                      {donutData.map((_, i) => <Cell key={i} fill={_clrs[i % _clrs.length]} />)}
+                    </Pie>
+                    <Tooltip contentStyle={tooltipStyle}
+                             formatter={(v) => [fmtUSD0(v), 'Revenue']} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="mt-2 space-y-1.5 max-h-[140px] overflow-y-auto">
+                  {donutData.map((s, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: _clrs[i % _clrs.length] }} />
+                        <span className={`${textSec} truncate`}>{s.name}</span>
+                      </div>
+                      <span className={`font-medium ${textPri} flex-shrink-0 ml-2`}>
+                        {fmtUSD0(s.revenue)} · {totalActive > 0 ? `${Math.round((s.revenue / totalActive) * 1000) / 10}%` : '—'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+
+              {/* Concentration / health stats */}
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+                className={`rounded-xl p-6 ${cardBg}`}>
+                <div className="flex items-center gap-2 mb-4">
+                  <TrendingUp size={16} className="text-blue-400" />
+                  <h3 className={`text-base font-semibold ${textPri}`}>Active Contractor Concentration</h3>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { label: 'Active Revenue Total', value: fmtUSD0(totalActive), sub: `${totalCount} active contractors` },
+                    { label: 'Avg per Active', value: fmtUSD0(avgPer), sub: 'mean revenue / contractor' },
+                    { label: 'Top Contractor', value: top1.name, sub: `${fmtUSD0(top1.revenue)} · ${top1Pct}% of active` },
+                    { label: 'Top 3 Share', value: `${top3Pct}%`, sub: `${fmtUSD0(top3Sum)} of total active` },
+                  ].map((m, i) => (
+                    <div key={i} className={`rounded-lg p-3 ${isDark ? 'bg-slate-800/40' : 'bg-slate-50'}`}>
+                      <p className={`text-[10px] uppercase tracking-wide font-semibold mb-1 ${textSec}`}>{m.label}</p>
+                      <p className={`text-base font-bold ${textPri} truncate`} title={m.value}>{m.value}</p>
+                      <p className={`text-[10px] mt-0.5 ${textSec}`}>{m.sub}</p>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+
         {/* Row 2: Traffic Trend + Top Reps */}
         {(showGA4 || showHubspot) && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
