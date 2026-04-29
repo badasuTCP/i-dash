@@ -5448,92 +5448,53 @@ async def get_contractor_revenue(
 
 @router.get(
     "/sheets/service-account",
-    summary="Get the Google Sheets service-account email + sheet health (admin only)",
+    summary="Get the Google Sheets service-account email (admin only)",
 )
 async def get_sheets_service_account(
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: None = Depends(role_required(["admin"])),
 ) -> dict:
-    """Returns the client_email field from the configured Sheets
-    service-account credentials plus a row-count breakdown of what's
-    actually in google_sheet_metrics, bucketed by the sheet_name prefix
-    (qb_revenue::, leads::, exec::, etc.). Lets admins both grant the
-    SA access to new sheets AND verify the pipeline is producing the
-    expected data on the most recent run.
+    """Returns just the client_email field from the configured Sheets
+    service-account credentials so admins can grant the SA Viewer access
+    to new sheets (e.g. the Customer Lead Tracking Sheet for Pillar 1)
+    without needing to open Railway env vars and parse JSON manually.
 
-    Only the SA email is returned — never the private_key or any other
-    secret material.
+    Only the email is returned — never the private_key or any other
+    secret material. The email itself is non-sensitive (it's the
+    address you grant access to in Google's share dialog).
     """
     cred_value = (settings.GOOGLE_SHEETS_CREDENTIALS_FILE or "").strip()
-    out: Dict[str, Any] = {
-        "leads_sheet_configured": bool((settings.SHEET_ID_LEADS or "").strip()),
-    }
-
-    # ── 1. Service-account email lookup ─────────────────────────────
     if not cred_value:
-        out.update({
+        return {
             "configured": False,
             "client_email": None,
+            "leads_sheet_configured": bool((settings.SHEET_ID_LEADS or "").strip()),
             "hint": "GOOGLE_SHEETS_CREDENTIALS_FILE is empty. Set it on Railway first.",
-        })
-    else:
-        import json as _json
-        try:
-            if cred_value.startswith("{"):
-                payload = _json.loads(cred_value)
-            else:
-                with open(cred_value, "r") as fh:
-                    payload = _json.load(fh)
-            out.update({
-                "configured": True,
-                "client_email": payload.get("client_email"),
-                "hint": (
-                    "Share the Customer Lead Tracking Sheet with this email "
-                    "as Viewer, then set SHEET_ID_LEADS in Railway and run "
-                    "the google_sheets pipeline."
-                ),
-            })
-        except Exception as exc:
-            out.update({
-                "configured": True,
-                "client_email": None,
-                "error": f"Could not parse credentials JSON: {type(exc).__name__}",
-            })
-
-    # ── 2. Sheet health: row counts + date ranges per bucket ────────
-    # Lets the operator confirm at a glance whether qb_revenue / leads
-    # data is actually populated. If qb_revenue_count is 0 or the date
-    # range looks wrong, the dashboard will be empty and they'll know
-    # to re-run the Sheets pipeline.
+        }
+    import json as _json
     try:
-        prefixes = [
-            ("qb_revenue", "qb_revenue::%"),
-            ("leads", "leads::%"),
-            ("exec", "exec::%"),
-            ("retail", "retail::%"),
-            ("contractor", "contractor::%"),
-        ]
-        buckets = {}
-        for name, pattern in prefixes:
-            row = (await db.execute(select(
-                func.count(GoogleSheetMetric.id),
-                func.min(GoogleSheetMetric.date),
-                func.max(GoogleSheetMetric.date),
-                func.coalesce(func.sum(GoogleSheetMetric.metric_value), 0),
-            ).where(GoogleSheetMetric.sheet_name.like(pattern)))).first()
-            buckets[name] = {
-                "row_count": int(row[0] or 0),
-                "min_date": row[1].isoformat() if row[1] else None,
-                "max_date": row[2].isoformat() if row[2] else None,
-                "total_value": round(float(row[3] or 0), 2),
-            }
-        out["sheet_health"] = buckets
+        if cred_value.startswith("{"):
+            payload = _json.loads(cred_value)
+        else:
+            with open(cred_value, "r") as fh:
+                payload = _json.load(fh)
+        email = payload.get("client_email")
     except Exception as exc:
-        logger.warning(f"sheet_health diagnostic failed: {exc}")
-        out["sheet_health"] = {"error": str(exc)}
-
-    return out
+        return {
+            "configured": True,
+            "client_email": None,
+            "error": f"Could not parse credentials JSON: {type(exc).__name__}",
+        }
+    return {
+        "configured": True,
+        "client_email": email,
+        "leads_sheet_configured": bool((settings.SHEET_ID_LEADS or "").strip()),
+        "hint": (
+            "Share the Customer Lead Tracking Sheet with this email "
+            "as Viewer, then set SHEET_ID_LEADS in Railway and run "
+            "the google_sheets pipeline."
+        ),
+    }
 
 
 @router.get(
