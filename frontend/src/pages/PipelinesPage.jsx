@@ -589,44 +589,6 @@ const PipelinesPage = () => {
               ))}
             </motion.div>
 
-            {/* ── Endpoint preview: what /all-contractors-revenue returns
-                for YTD. Lets us see whether the bug is in the endpoint
-                (preview = $0 despite sheet_health $30M) or somewhere
-                downstream (preview = $XXM but dashboard tile = $0). */}
-            {saInfo?.endpoint_preview && !saInfo.endpoint_preview.error && (
-              <div className={`mb-4 p-3 rounded-xl border text-xs ${
-                (saInfo.endpoint_preview.grand_total || 0) > 0
-                  ? (isDark ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200')
-                  : (isDark ? 'bg-rose-500/10 border-rose-500/30' : 'bg-rose-50 border-rose-200')
-              }`}>
-                <div className={`font-semibold mb-2 ${textPrimary}`}>
-                  /all-contractors-revenue preview ({saInfo.endpoint_preview.window})
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {[
-                    { label: 'grand_total', value: saInfo.endpoint_preview.grand_total },
-                    { label: 'active_total', value: saInfo.endpoint_preview.active_total },
-                    { label: 'inactive_total', value: saInfo.endpoint_preview.inactive_total },
-                    { label: 'retail_total', value: saInfo.endpoint_preview.retail_total },
-                  ].map((f) => (
-                    <div key={f.label} className={`px-2 py-1.5 rounded-lg ${
-                      isDark ? 'bg-slate-900/40' : 'bg-white border border-slate-200'
-                    }`}>
-                      <div className={`text-[10px] uppercase tracking-wider ${textSec}`}>{f.label}</div>
-                      <div className={`text-sm font-bold ${textPrimary}`}>
-                        ${Number(f.value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {saInfo.endpoint_preview.top_active_3?.length > 0 && (
-                  <div className={`mt-2 text-[11px] ${textSec}`}>
-                    Top active: {saInfo.endpoint_preview.top_active_3.map((r) => `${r.name} ($${Math.round(r.revenue).toLocaleString()})`).join(' · ')}
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* ── Sheet health diagnostic ───────────────────────────────
                 Always shown to admins. Reveals row counts per sheet
                 bucket so the operator can verify qb_revenue / leads /

@@ -5533,35 +5533,6 @@ async def get_sheets_service_account(
         logger.warning(f"sheet_health diagnostic failed: {exc}")
         out["sheet_health"] = {"error": str(exc)}
 
-    # ── 3. Endpoint preview: actually run /all-contractors-revenue
-    # for the YTD window so we can see what the dashboard sees. If
-    # this returns 0 while sheet_health shows non-zero qb_revenue,
-    # the bug is in the endpoint itself (date filter, classifier, etc.).
-    try:
-        ytd_start = date(date.today().year, 1, 1)
-        ytd_end = date.today()
-        preview = await get_all_contractors_revenue(
-            db=db, current_user=current_user,
-            date_from=ytd_start, date_to=ytd_end, top_n=3,
-        )
-        out["endpoint_preview"] = {
-            "window": f"{ytd_start.isoformat()} → {ytd_end.isoformat()}",
-            "grand_total": preview.get("grand_total"),
-            "active_total": preview.get("active_total"),
-            "inactive_total": preview.get("inactive_total"),
-            "retail_total": preview.get("retail_total"),
-            "active_count": preview.get("active_count"),
-            "inactive_count": preview.get("inactive_count"),
-            "retail_count": preview.get("retail_count"),
-            "top_active_3": [
-                {"name": r["name"], "revenue": r["revenue"]}
-                for r in (preview.get("top_active") or [])[:3]
-            ],
-        }
-    except Exception as exc:
-        logger.warning(f"endpoint preview failed: {exc}")
-        out["endpoint_preview"] = {"error": str(exc)}
-
     return out
 
 
