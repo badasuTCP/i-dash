@@ -844,6 +844,28 @@ class GoogleSheetsPipeline(BasePipeline):
             "Pivot '%s': label columns = %s", sheet_name, label_cols,
         )
 
+        # QB sheets often interleave empty spacer columns between the
+        # period columns (e.g. "_col_2", "Jan 25", "_col_4", "Jan 24",
+        # "_col_6", ...). For the active/inactive classification we only
+        # care about the LEADING label columns — the ones that come
+        # before the first period column. The rightmost of those is the
+        # company-name column, which is the active signal.
+        leading_label_cols: List[str] = label_cols
+        if period_cols:
+            first_period_header = period_cols[0][0]
+            try:
+                first_period_idx = headers.index(first_period_header)
+                leading_label_cols = [
+                    h for h in label_cols
+                    if h in headers and headers.index(h) < first_period_idx
+                ]
+            except ValueError:
+                pass
+        self.logger.info(
+            "Pivot '%s': leading label columns = %s",
+            sheet_name, leading_label_cols,
+        )
+
         def _looks_numeric(s: str) -> bool:
             """True if s parses as a number (incl. $/,/% formatting)."""
             if not s:
@@ -876,8 +898,11 @@ class GoogleSheetsPipeline(BasePipeline):
             # non-numeric" rule, untouched.
             row_tagged = tagged
             metric_label = ""
-            if is_qb and label_cols:
-                for idx, lc in enumerate(reversed(label_cols)):
+            if is_qb and leading_label_cols:
+                # Walk LEADING label cols right-to-left. Rightmost match
+                # = company column = active. Earlier match = personal
+                # name column = inactive.
+                for idx, lc in enumerate(reversed(leading_label_cols)):
                     val = (row.get(lc) or "").strip()
                     if val and not _looks_numeric(val):
                         metric_label = val
