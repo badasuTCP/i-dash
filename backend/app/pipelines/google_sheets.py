@@ -861,26 +861,31 @@ class GoogleSheetsPipeline(BasePipeline):
         out: List[GoogleSheetMetric] = []
         for row in rows:
             # QB Contractor Revenue rule (per the sheet's column structure):
-            #   first label column  = personal/owner name (always populated)
-            #   second label column = company name (populated ONLY when the
-            #                         entry is a currently-active I-BOS contractor)
-            # Active   ⇔ second label column is populated → metric_name = company name
-            # Inactive ⇔ second label column is empty     → metric_name = first label value
-            # The active/inactive flag is encoded as a sheet_name suffix so the
-            # dashboard endpoint can sum each bucket with one indexed query.
-            # Non-QB pivots keep the legacy "last non-empty non-numeric" rule.
+            #   The RIGHTMOST label column holds the company name. It's
+            #   populated only when the row is a currently-active I-BOS
+            #   contractor. Earlier label columns (personal/owner name,
+            #   and possibly a row-index column) are populated for both
+            #   active and inactive rows.
+            # Active   ⇔ rightmost label col has a non-numeric value
+            #              → metric_name = company name
+            # Inactive ⇔ rightmost label col empty/numeric, fall back to
+            #              an earlier label col → metric_name = personal name
+            # The active/inactive flag is encoded as a sheet_name suffix so
+            # the dashboard endpoint can sum each bucket with one indexed
+            # query. Non-QB pivots keep the legacy "last non-empty
+            # non-numeric" rule, untouched.
             row_tagged = tagged
             metric_label = ""
-            if is_qb and len(label_cols) >= 2:
-                first_lc, second_lc = label_cols[0], label_cols[1]
-                second_val = (row.get(second_lc) or "").strip()
-                first_val = (row.get(first_lc) or "").strip()
-                if second_val and not _looks_numeric(second_val):
-                    metric_label = second_val
-                    row_tagged = f"{tagged}::active"
-                elif first_val and not _looks_numeric(first_val):
-                    metric_label = first_val
-                    row_tagged = f"{tagged}::inactive"
+            if is_qb and label_cols:
+                for idx, lc in enumerate(reversed(label_cols)):
+                    val = (row.get(lc) or "").strip()
+                    if val and not _looks_numeric(val):
+                        metric_label = val
+                        row_tagged = (
+                            f"{tagged}::active" if idx == 0
+                            else f"{tagged}::inactive"
+                        )
+                        break
             else:
                 # Non-QB pivots: prefer the LAST label column whose value is
                 # non-empty AND non-numeric — protects against trailing total
