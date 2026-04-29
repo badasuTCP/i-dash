@@ -466,9 +466,13 @@ const MatrixCard = ({ c, i, isDark, textPri, textSec, _clrs, efficiency, isExpan
           <p className={`text-xl font-bold ${textPri} leading-tight`}>{c.leads > 0 ? c.leads : '—'}</p>
         </div>
         <div>
-          <p className={`text-[9px] uppercase tracking-wider ${textSec}`}>CPL</p>
-          <p className={`text-xl font-bold leading-tight ${c.cpl > 0 && c.cpl < 30 ? 'text-emerald-400' : c.cpl >= 30 && c.cpl < 80 ? 'text-amber-400' : c.cpl >= 80 ? 'text-rose-400' : textPri}`}>
-            {c.cpl > 0 ? `$${c.cpl.toFixed(0)}` : '—'}
+          <p className={`text-[9px] uppercase tracking-wider ${textSec}`}>
+            Revenue {c.revenue_source === 'quickbooks' ? '(QB)' : '(est)'}
+          </p>
+          <p className={`text-xl font-bold leading-tight ${c.revenue_source === 'quickbooks' ? 'text-emerald-400' : (c.revenue || 0) > 0 ? 'text-amber-400' : textSec}`}>
+            {(c.revenue || 0) > 0
+              ? `$${c.revenue >= 1000 ? (c.revenue/1000).toFixed(1)+'k' : c.revenue.toFixed(0)}`
+              : '—'}
           </p>
         </div>
       </div>
@@ -565,9 +569,9 @@ const MatrixCard = ({ c, i, isDark, textPri, textSec, _clrs, efficiency, isExpan
                   <p className={`font-bold ${textPri}`}>{c.bounce_rate}%</p>
                 </div>
                 <div>
-                  <p className={`uppercase ${textSec}`}>Revenue {c.revenue_source === 'quickbooks' ? '(QB)' : '(est)'}</p>
-                  <p className={`font-bold ${c.revenue_source === 'quickbooks' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    ${(c.revenue || 0).toLocaleString()}
+                  <p className={`uppercase ${textSec}`}>CPL</p>
+                  <p className={`font-bold ${c.cpl > 0 && c.cpl < 30 ? 'text-emerald-400' : c.cpl >= 30 && c.cpl < 80 ? 'text-amber-400' : c.cpl >= 80 ? 'text-rose-400' : textPri}`}>
+                    {c.cpl > 0 ? `$${c.cpl.toFixed(0)}` : '—'}
                   </p>
                 </div>
                 <div>
