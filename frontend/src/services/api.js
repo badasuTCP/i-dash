@@ -95,6 +95,10 @@ export const dashboardAPI = {
     apiClient.get('/dashboard/all-contractors-revenue', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate), top_n: topN },
     }),
+  getActiveContractorsYoy: (startDate, endDate) =>
+    apiClient.get('/dashboard/active-contractors-yoy', {
+      params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },
+    }),
   getScorecards: (startDate, endDate) =>
     apiClient.get('/dashboard/scorecards', {
       params: { date_from: _fmtDate(startDate), date_to: _fmtDate(endDate) },

@@ -4,7 +4,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
 } from 'recharts';
-import { CheckCircle2, AlertCircle, TrendingUp, Users, Globe, DollarSign, ShoppingBag, HardHat } from 'lucide-react';
+import { CheckCircle2, AlertCircle, TrendingUp, TrendingDown, Users, Globe, DollarSign, ShoppingBag, HardHat, BarChart3 } from 'lucide-react';
 import { dashboardAPI } from '../../services/api';
 import { useGlobalDate } from '../../context/GlobalDateContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -26,6 +26,7 @@ const CPDashboard = () => {
   const [data, setData] = useState(null);
   const [shopifyDetail, setShopifyDetail] = useState(null);
   const [revenueData, setRevenueData] = useState(null);
+  const [yoyData, setYoyData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const ytdStart = `${new Date().getFullYear()}-01-01`;
@@ -38,15 +39,17 @@ const CPDashboard = () => {
     try {
       // QB contractor revenue (formerly on I-BOS) lives here on CP now —
       // CP is the corporate revenue centre (Retail + all Contractor QB).
-      const [summaryRes, shopifyRes, revRes] = await Promise.all([
+      const [summaryRes, shopifyRes, revRes, yoyRes] = await Promise.all([
         dashboardAPI.getBrandSummary('cp', from, to),
         dashboardAPI.getShopifyStore(from, to).catch(() => null),
         dashboardAPI.getAllContractorsRevenue(from, to, 10).catch(() => ({ data: null })),
+        dashboardAPI.getActiveContractorsYoy(from, to).catch(() => ({ data: null })),
       ]);
       setData(summaryRes?.data || null);
       setShopifyDetail(shopifyRes?.data || null);
       setRevenueData(revRes?.data || null);
-    } catch { setData(null); setShopifyDetail(null); setRevenueData(null); }
+      setYoyData(yoyRes?.data || null);
+    } catch { setData(null); setShopifyDetail(null); setRevenueData(null); setYoyData(null); }
     finally { setLoading(false); }
   }, [from, to]);
 
@@ -219,6 +222,90 @@ const CPDashboard = () => {
             </div>
           );
         })()}
+
+        {/* ── YoY Performance for Active I-BOS Contractors ──
+             Per-contractor: This Year vs Same Period Last Year, Δ$, Δ%.
+             Sorted by current revenue desc. Sticky-header scroll table. */}
+        {yoyData && (yoyData.rows?.length || 0) > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}
+            className={`rounded-xl p-6 mb-8 ${cardBg}`}>
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <BarChart3 size={16} className="text-emerald-400" />
+              <h3 className={`text-base font-semibold ${textPri}`}>Active I-BOS — YoY Revenue Performance</h3>
+              <span className={`ml-auto text-xs ${textSec}`}>
+                {yoyData.period_current} vs {yoyData.period_prior}
+              </span>
+            </div>
+            {/* Aggregate strip */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              {(() => {
+                const cur = yoyData.total_current || 0;
+                const pri = yoyData.total_prior || 0;
+                const dAmt = yoyData.total_delta_amount || 0;
+                const dPct = yoyData.total_delta_pct;
+                const fmt = (v) => `$${Math.round(v).toLocaleString()}`;
+                const dColor = dAmt > 0 ? 'text-emerald-400' : dAmt < 0 ? 'text-rose-400' : textSec;
+                return [
+                  { label: 'This Period (Active)', value: fmt(cur) },
+                  { label: 'Same Period Last Year', value: fmt(pri) },
+                  { label: 'Δ Amount', value: `${dAmt >= 0 ? '+' : ''}${fmt(dAmt)}`, color: dColor },
+                  { label: 'Δ Percent', value: dPct == null ? '—' : `${dPct >= 0 ? '+' : ''}${dPct}%`, color: dColor },
+                ].map((m, i) => (
+                  <div key={i} className={`rounded-lg p-3 ${isDark ? 'bg-slate-800/40' : 'bg-slate-50'}`}>
+                    <p className={`text-[10px] uppercase tracking-wide font-semibold mb-1 ${textSec}`}>{m.label}</p>
+                    <p className={`text-base font-bold ${m.color || textPri} truncate`} title={m.value}>{m.value}</p>
+                  </div>
+                ));
+              })()}
+            </div>
+            {/* Per-contractor table */}
+            <div className={`rounded-lg overflow-hidden border ${isDark ? 'border-slate-700/40' : 'border-slate-200'}`}>
+              <div className="max-h-[420px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className={`sticky top-0 ${isDark ? 'bg-slate-900/95' : 'bg-slate-50/95'} backdrop-blur`}>
+                    <tr className={`text-[10px] uppercase tracking-wider ${textSec}`}>
+                      <th className="text-left px-4 py-2 font-semibold">Contractor</th>
+                      <th className="text-right px-4 py-2 font-semibold">This Period</th>
+                      <th className="text-right px-4 py-2 font-semibold">Last Year</th>
+                      <th className="text-right px-4 py-2 font-semibold">Δ $</th>
+                      <th className="text-right px-4 py-2 font-semibold">Δ %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {yoyData.rows.map((r, i) => {
+                      const dAmt = r.delta_amount || 0;
+                      const dPct = r.delta_pct;
+                      const up = dAmt > 0;
+                      const down = dAmt < 0;
+                      const dColor = up ? 'text-emerald-400' : down ? 'text-rose-400' : textSec;
+                      const fmt = (v) => `$${Math.round(v).toLocaleString()}`;
+                      const Icon = up ? TrendingUp : down ? TrendingDown : null;
+                      return (
+                        <tr key={r.name} className={`border-t ${isDark ? 'border-slate-800/40' : 'border-slate-100'} ${i % 2 === 1 ? (isDark ? 'bg-slate-900/30' : 'bg-slate-50/40') : ''}`}>
+                          <td className={`px-4 py-2 ${textPri} font-medium truncate max-w-[280px]`} title={r.name}>{r.name}</td>
+                          <td className={`px-4 py-2 text-right ${textPri} font-semibold`}>{fmt(r.current_revenue)}</td>
+                          <td className={`px-4 py-2 text-right ${textSec}`}>{fmt(r.prior_revenue)}</td>
+                          <td className={`px-4 py-2 text-right font-semibold ${dColor}`}>
+                            {dAmt >= 0 ? '+' : ''}{fmt(dAmt)}
+                          </td>
+                          <td className={`px-4 py-2 text-right font-semibold ${dColor}`}>
+                            <span className="inline-flex items-center gap-1 justify-end">
+                              {Icon && <Icon size={12} />}
+                              {dPct == null ? 'NEW' : `${dPct >= 0 ? '+' : ''}${dPct}%`}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p className={`text-[10px] mt-2 ${textSec}`}>
+              Δ% shows "NEW" when prior-year revenue was zero (no baseline). Sourced from QB Contractor Revenue sheet rows where the company column is populated.
+            </p>
+          </motion.div>
+        )}
 
         {/* Row 2: Traffic Trend + Top Reps */}
         {(showGA4 || showHubspot) && (

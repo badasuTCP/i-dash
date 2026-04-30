@@ -4039,6 +4039,110 @@ async def get_all_contractors_revenue(
     }
 
 
+@router.get(
+    "/active-contractors-yoy",
+    summary="Active I-BOS contractor revenue: current period vs same period prior year",
+)
+async def get_active_contractors_yoy(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+) -> dict:
+    """
+    For each ACTIVE I-BOS contractor (sheet_name suffix '::active'), return
+    revenue in the current selected period AND the same period one year
+    earlier, with delta amount and delta percent.
+
+    Example: date_from=2026-01-01, date_to=2026-04-30
+      → current  = 2026-01-01 → 2026-04-30
+      → prior    = 2025-01-01 → 2025-04-30
+
+    Returns rows sorted by current revenue desc, plus aggregate totals.
+    Uses the same sheet-driven active definition as /all-contractors-revenue.
+    """
+    start_date, end_date = _get_date_range(date_from, date_to)
+    # Same period one year earlier. timedelta(days=365) is close enough for
+    # this comparison; aligning to the calendar-month boundary is overkill
+    # since the QB sheet stores monthly aggregates anyway.
+    prior_start = start_date.replace(year=start_date.year - 1)
+    prior_end = end_date.replace(year=end_date.year - 1)
+
+    aggregate_terms = (
+        "total", "grand total", "subtotal", "sum of",
+        "net income", "gross profit", "n/a",
+    )
+
+    async def _sum_active(period_start: date, period_end: date) -> Dict[str, float]:
+        q = await db.execute(
+            select(
+                GoogleSheetMetric.metric_name,
+                func.sum(GoogleSheetMetric.metric_value).label("revenue"),
+            ).where(and_(
+                GoogleSheetMetric.sheet_name.like("qb_revenue::%::active"),
+                GoogleSheetMetric.date >= period_start,
+                GoogleSheetMetric.date <= period_end,
+            )).group_by(GoogleSheetMetric.metric_name)
+        )
+        out: Dict[str, float] = {}
+        for name, rev in q.all():
+            n = (name or "").strip()
+            if not n or n.lower() in aggregate_terms:
+                continue
+            rev_f = float(rev or 0)
+            if rev_f <= 0:
+                continue
+            out[n] = out.get(n, 0.0) + rev_f
+        return out
+
+    current_map = await _sum_active(start_date, end_date)
+    prior_map = await _sum_active(prior_start, prior_end)
+
+    # Union of contractor names that appeared in either period — so a
+    # contractor with revenue ONLY last year (and zero this year) still
+    # surfaces with a -100% drop, and vice versa.
+    all_names = set(current_map.keys()) | set(prior_map.keys())
+
+    rows: List[Dict[str, Any]] = []
+    for name in all_names:
+        cur = round(current_map.get(name, 0.0), 2)
+        pri = round(prior_map.get(name, 0.0), 2)
+        delta = round(cur - pri, 2)
+        if pri > 0:
+            delta_pct = round((delta / pri) * 100, 1)
+        elif cur > 0:
+            delta_pct = None  # new this year — undefined % vs zero baseline
+        else:
+            delta_pct = 0.0
+        rows.append({
+            "name": name,
+            "current_revenue": cur,
+            "prior_revenue": pri,
+            "delta_amount": delta,
+            "delta_pct": delta_pct,
+        })
+
+    rows.sort(key=lambda r: r["current_revenue"], reverse=True)
+
+    total_current = round(sum(r["current_revenue"] for r in rows), 2)
+    total_prior = round(sum(r["prior_revenue"] for r in rows), 2)
+    total_delta = round(total_current - total_prior, 2)
+    total_delta_pct = (
+        round((total_delta / total_prior) * 100, 1) if total_prior > 0 else None
+    )
+
+    return {
+        "period_current": f"{start_date.isoformat()} to {end_date.isoformat()}",
+        "period_prior": f"{prior_start.isoformat()} to {prior_end.isoformat()}",
+        "total_current": total_current,
+        "total_prior": total_prior,
+        "total_delta_amount": total_delta,
+        "total_delta_pct": total_delta_pct,
+        "active_count": len(rows),
+        "rows": rows,
+    }
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # Retail Breakdown — Google Sheets (Sani-Tred Order Export)
 # ────────────────────────────────────────────────────────────────────────────
